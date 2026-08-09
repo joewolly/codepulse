@@ -190,7 +190,7 @@ private struct PopoverFooter: View {
             .buttonStyle(.link)
 
             Button("Settings") {
-                NSApp.sendAction(#selector(NSApplication.showSettingsWindow(_:)), to: nil, from: nil)
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
             .buttonStyle(.link)
         }
