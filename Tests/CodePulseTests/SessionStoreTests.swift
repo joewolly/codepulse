@@ -92,7 +92,7 @@ final class SessionStoreTests: XCTestCase {
         store.refresh()
 
         XCTAssertEqual(store.elapsedDuration, 60, accuracy: 0.001)
-        XCTAssertEqual(store.activeSession?.pausedDuration(at: clock.now) ?? 0, 12, accuracy: 0.001)
+        XCTAssertEqual(store.activeSession?.accumulatedPausedDuration(at: clock.now) ?? 0, 12, accuracy: 0.001)
     }
 
     func testFinishFreezesAndSavesCorrectActiveDuration() {

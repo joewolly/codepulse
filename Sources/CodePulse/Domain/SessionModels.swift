@@ -65,14 +65,14 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         pauseIntervals.last(where: { $0.endedAt == nil })?.startedAt
     }
 
-    var accumulatedPausedDuration: TimeInterval {
-        pausedDuration(at: endedAt ?? Date())
-    }
-
-    func pausedDuration(at referenceDate: Date) -> TimeInterval {
+    func accumulatedPausedDuration(at referenceDate: Date) -> TimeInterval {
         pauseIntervals.reduce(into: 0) { total, interval in
             total += interval.duration(at: referenceDate)
         }
+    }
+
+    func pausedDuration(at referenceDate: Date) -> TimeInterval {
+        accumulatedPausedDuration(at: referenceDate)
     }
 
     func activeDuration(at referenceDate: Date) -> TimeInterval {
