@@ -32,6 +32,12 @@ enum CodePulseFormatting {
     static func day(_ date: Date, calendar: Calendar) -> String {
         if calendar.isDateInToday(date) { return "Today" }
         if calendar.isDateInYesterday(date) { return "Yesterday" }
-        return date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "EEEE, MMM d"
+        return formatter.string(from: date)
     }
 }

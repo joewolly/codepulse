@@ -19,7 +19,7 @@ struct PauseInterval: Codable, Equatable, Identifiable {
     }
 
     func duration(at referenceDate: Date) -> TimeInterval {
-        let end = endedAt ?? referenceDate
+        let end = min(endedAt ?? referenceDate, referenceDate)
         return max(0, end.timeIntervalSince(startedAt))
     }
 
@@ -97,8 +97,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
 
     @discardableResult
     mutating func pause(at date: Date) -> Bool {
-        guard phase == .running else { return false }
-        let pauseStart = max(startedAt, date)
+        guard phase == .running, endedAt == nil else { return false }
+        let pauseStart = max(startedAt, latestEventDate, date)
         pauseIntervals.append(PauseInterval(startedAt: pauseStart))
         phase = .paused
         return true
@@ -107,11 +107,13 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     @discardableResult
     mutating func resume(at date: Date) -> Bool {
         guard phase == .paused,
+              endedAt == nil,
+              pauseIntervals.filter({ $0.endedAt == nil }).count == 1,
               let index = pauseIntervals.lastIndex(where: { $0.endedAt == nil }) else {
             return false
         }
 
-        let resumeDate = max(pauseIntervals[index].startedAt, date)
+        let resumeDate = max(pauseIntervals[index].startedAt, latestEventDate, date)
         pauseIntervals[index].endedAt = resumeDate
         phase = .running
         return true
@@ -119,10 +121,10 @@ struct ActiveSession: Codable, Equatable, Identifiable {
 
     @discardableResult
     mutating func finish(at date: Date) -> Bool {
-        guard phase == .running || phase == .paused else { return false }
+        guard (phase == .running || phase == .paused), endedAt == nil else { return false }
 
-        let end = max(startedAt, date)
-        if let index = pauseIntervals.lastIndex(where: { $0.endedAt == nil }) {
+        let end = max(startedAt, latestEventDate, date)
+        for index in pauseIntervals.indices where pauseIntervals[index].endedAt == nil {
             pauseIntervals[index].endedAt = end
         }
         endedAt = end
@@ -149,6 +151,12 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         guard let value else { return nil }
         let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private var latestEventDate: Date {
+        pauseIntervals.reduce(startedAt) { latest, interval in
+            max(latest, interval.endedAt ?? interval.startedAt)
+        }
     }
 }
 

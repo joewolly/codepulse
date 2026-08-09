@@ -119,6 +119,81 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(persistence.state.completedSessions[0].activeDuration, 75, accuracy: 0.001)
     }
 
+    func testFinishingPausedSessionClosesPauseAndFreezesDuration() {
+        let clock = TestClock(start)
+        let persistence = InMemoryPersistence()
+        let store = makeStore(clock: clock, persistence: persistence)
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+
+        clock.advance(30)
+        XCTAssertTrue(store.pause())
+        clock.advance(600)
+        XCTAssertTrue(store.finish())
+
+        XCTAssertEqual(store.phase, .finishing)
+        XCTAssertEqual(store.elapsedDuration, 30, accuracy: 0.001)
+        XCTAssertEqual(store.activeSession?.pauseIntervals.last?.endedAt, clock.now)
+
+        clock.advance(300)
+        store.refresh()
+        XCTAssertEqual(store.elapsedDuration, 30, accuracy: 0.001)
+        XCTAssertTrue(store.saveFinishedSession(outcome: "  "))
+        XCTAssertNil(persistence.state.completedSessions[0].outcome)
+    }
+
+    func testLifecycleRejectsDuplicateAndImpossibleActions() {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+        XCTAssertFalse(store.startSession(projectID: nil, goal: nil))
+        XCTAssertFalse(store.resume())
+        XCTAssertFalse(store.discardSession())
+
+        clock.advance(30)
+        XCTAssertTrue(store.pause())
+        XCTAssertFalse(store.pause())
+        XCTAssertFalse(store.discardSession())
+
+        clock.advance(30)
+        XCTAssertTrue(store.finish())
+        XCTAssertFalse(store.pause())
+        XCTAssertFalse(store.resume())
+        XCTAssertFalse(store.finish())
+        XCTAssertTrue(store.discardSession())
+        XCTAssertEqual(store.phase, .idle)
+    }
+
+    func testTransitionDatesRemainMonotonic() {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+
+        let pauseDate = start.addingTimeInterval(100)
+        XCTAssertTrue(store.pause(at: pauseDate))
+        XCTAssertTrue(store.resume(at: start.addingTimeInterval(10)))
+        XCTAssertEqual(store.activeSession?.pauseIntervals[0].endedAt, pauseDate)
+
+        clock.now = pauseDate
+        XCTAssertTrue(store.finish(at: start.addingTimeInterval(20)))
+        XCTAssertEqual(store.activeSession?.endedAt, pauseDate)
+        XCTAssertEqual(store.elapsedDuration, 100, accuracy: 0.001)
+    }
+
+    func testClockMovingBackwardsDoesNotCountFuturePauseTime() {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+
+        let pauseDate = start.addingTimeInterval(100)
+        XCTAssertTrue(store.pause(at: pauseDate))
+        XCTAssertTrue(store.resume(at: pauseDate))
+
+        clock.now = start.addingTimeInterval(50)
+        store.refresh()
+        XCTAssertEqual(store.elapsedDuration, 50, accuracy: 0.001)
+    }
+
     func testRestoredRunningSessionContinuesFromPersistedTimestamp() {
         let clock = TestClock(start)
         let persistence = InMemoryPersistence()
@@ -196,6 +271,76 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.todayTotal(at: today), 10 * 60, accuracy: 0.001)
         XCTAssertEqual(store.historyGroups.count, 1)
         XCTAssertEqual(store.historyGroups[0].totalDuration, 5 * 60, accuracy: 0.001)
+    }
+
+    func testJSONPersistenceRoundTripsProjectsSettingsAndSessions() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseTests-\(UUID().uuidString)")
+            .appendingPathComponent("state.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let persistence = JSONFilePersistence(fileURL: url)
+        let project = ProjectRecord(
+            name: "CodePulse",
+            folderPath: "/tmp/CodePulse",
+            bookmarkData: Data([1, 2, 3]),
+            createdAt: start,
+            lastUsedAt: start.addingTimeInterval(1)
+        )
+        var state = AppState()
+        state.projects = [project]
+        state.settings.defaultProjectBehavior = .specificProject
+        state.settings.specificProjectID = project.id
+        state.settings.menuBarDisplay = .timerOnly
+        state.completedSessions = [CompletedSession(
+            id: UUID(),
+            projectID: project.id,
+            projectName: project.name,
+            goal: "Ship it",
+            outcome: "Done",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60),
+            pauseIntervals: []
+        )]
+
+        persistence.save(state)
+        XCTAssertEqual(persistence.load(), state)
+    }
+
+    func testProjectMetadataAndDefaultSelectionAreOptional() {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-project")
+
+        let projectID = store.addProject(name: "  Demo  ", folderURL: folder, at: start)
+        XCTAssertNotNil(projectID)
+        XCTAssertEqual(store.state.projects.first?.name, "Demo")
+        XCTAssertEqual(store.state.projects.first?.folderPath, folder.path)
+        XCTAssertNil(store.defaultProjectID)
+
+        store.updateSettings {
+            $0.defaultProjectBehavior = .specificProject
+            $0.specificProjectID = projectID
+        }
+        XCTAssertEqual(store.defaultProjectID, projectID)
+
+        XCTAssertTrue(store.startSession(projectID: projectID, goal: "  "))
+        XCTAssertEqual(store.activeSession?.projectID, projectID)
+        XCTAssertEqual(store.activeSession?.projectName, "Demo")
+        XCTAssertNil(store.activeSession?.goal)
+    }
+
+    func testTodayTotalExcludesPausedActiveTime() {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+
+        clock.advance(60)
+        XCTAssertTrue(store.pause())
+        clock.advance(600)
+        store.refresh()
+
+        XCTAssertEqual(store.todayTotal(), 60, accuracy: 0.001)
     }
 
     private func makeStore(

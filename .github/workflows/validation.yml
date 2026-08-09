@@ -1,0 +1,31 @@
+name: macOS validation
+
+on:
+  push:
+    branches:
+      - main
+      - codex/v0.1-session-foundation
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  swiftpm:
+    runs-on: macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Clean build
+        run: swift package clean
+
+      - name: Build package
+        run: swift build --configuration debug
+
+      - name: Run tests
+        run: swift test --configuration debug

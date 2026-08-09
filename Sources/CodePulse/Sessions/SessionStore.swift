@@ -169,7 +169,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func discardSession() -> Bool {
-        guard state.activeSession != nil else { return false }
+        guard state.activeSession?.phase == .finishing else { return false }
         var nextState = state
         nextState.activeSession = nil
         commit(nextState)
