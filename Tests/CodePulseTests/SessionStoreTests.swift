@@ -307,6 +307,75 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(persistence.load(), state)
     }
 
+    func testFinishedSessionPersistsAcrossStoreReloadWithoutActiveRestoration() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseTests-\(UUID().uuidString)")
+            .appendingPathComponent("state.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let clock = TestClock(start)
+        let firstStore = SessionStore(
+            persistence: JSONFilePersistence(fileURL: url),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            automaticallyRefresh: false
+        )
+        XCTAssertTrue(firstStore.startSession(projectID: nil, goal: "Ship it"))
+        clock.advance(90)
+        XCTAssertTrue(firstStore.finish())
+        XCTAssertTrue(firstStore.saveFinishedSession(outcome: "Done"))
+
+        let restoredStore = SessionStore(
+            persistence: JSONFilePersistence(fileURL: url),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            automaticallyRefresh: false
+        )
+        XCTAssertEqual(restoredStore.phase, .idle)
+        XCTAssertNil(restoredStore.activeSession)
+        XCTAssertEqual(restoredStore.state.completedSessions.count, 1)
+        XCTAssertEqual(restoredStore.state.completedSessions[0].goal, "Ship it")
+        XCTAssertEqual(restoredStore.state.completedSessions[0].outcome, "Done")
+        XCTAssertEqual(restoredStore.state.completedSessions[0].activeDuration, 90, accuracy: 0.001)
+    }
+
+    func testProjectAndSettingsMutationsPersistAcrossStoreReload() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseTests-\(UUID().uuidString)")
+            .appendingPathComponent("state.json")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let clock = TestClock(start)
+        let firstStore = SessionStore(
+            persistence: JSONFilePersistence(fileURL: url),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            automaticallyRefresh: false
+        )
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-project")
+        let projectID = firstStore.addProject(name: "Demo", folderURL: folder, at: start)
+        XCTAssertNotNil(projectID)
+        firstStore.updateSettings {
+            $0.menuBarDisplay = .timerOnly
+            $0.idleAppearance = .iconOnly
+            $0.defaultProjectBehavior = .specificProject
+            $0.specificProjectID = projectID
+        }
+
+        let restoredStore = SessionStore(
+            persistence: JSONFilePersistence(fileURL: url),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            automaticallyRefresh: false
+        )
+        XCTAssertEqual(restoredStore.state.projects.first?.id, projectID)
+        XCTAssertEqual(restoredStore.state.projects.first?.name, "Demo")
+        XCTAssertEqual(restoredStore.state.projects.first?.folderPath, folder.path)
+        XCTAssertEqual(restoredStore.state.settings.menuBarDisplay, .timerOnly)
+        XCTAssertEqual(restoredStore.state.settings.idleAppearance, .iconOnly)
+        XCTAssertEqual(restoredStore.defaultProjectID, projectID)
+    }
+
     func testProjectMetadataAndDefaultSelectionAreOptional() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

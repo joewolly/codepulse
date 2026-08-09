@@ -49,7 +49,7 @@ struct HistoryView: View {
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
+                .listStyle(.inset)
             }
         }
         .navigationTitle("History")
