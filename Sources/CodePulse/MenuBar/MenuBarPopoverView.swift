@@ -155,10 +155,14 @@ private struct FinishingSessionView: View {
             Button {
                 _ = store.saveFinishedSession(outcome: outcome)
             } label: {
-                Label("Save Session", systemImage: "square.and.arrow.down")
+                Label(
+                    store.gitCaptureInProgress ? "Collecting Git…" : "Save Session",
+                    systemImage: store.gitCaptureInProgress ? "arrow.triangle.2.circlepath" : "square.and.arrow.down"
+                )
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(store.gitCaptureInProgress)
 
             Button("Discard Session", role: .destructive) {
                 _ = store.discardSession()

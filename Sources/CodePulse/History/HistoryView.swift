@@ -107,6 +107,12 @@ private struct HistoryRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+            if let branch = session.gitContext?.branchDisplay {
+                Label(branch, systemImage: "arrow.triangle.branch")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
@@ -147,6 +153,29 @@ private struct SessionDetailView: View {
                 }
             }
 
+            if let gitContext = session.gitContext {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Git")
+                        .font(.headline)
+
+                    LabeledContent("Repository", value: gitContext.repositoryRoot)
+                        .lineLimit(1)
+
+                    if let branch = gitContext.branchDisplay {
+                        LabeledContent("Branch", value: branch)
+                    }
+                    if let commitCount = gitContext.commitCount, commitCount > 0 {
+                        LabeledContent("Commits", value: "\(commitCount)")
+                    }
+                    if let changes = gitContext.changesDisplay {
+                        LabeledContent("Changes", value: changes)
+                    }
+                    if let head = gitContext.headDisplay {
+                        LabeledContent("HEAD", value: head)
+                    }
+                }
+            }
+
             Spacer()
 
             Button("Delete Session", role: .destructive) {
@@ -154,7 +183,7 @@ private struct SessionDetailView: View {
             }
         }
         .padding(24)
-        .frame(width: 440, height: 360)
+        .frame(minWidth: 460, idealWidth: 460, maxWidth: 460, minHeight: 360, maxHeight: 520)
         .alert("Delete Session?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 store.deleteCompletedSession(id: session.id)
