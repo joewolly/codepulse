@@ -134,6 +134,8 @@ private struct SessionDetailView: View {
                     .lineLimit(2)
                 Spacer()
                 Button("Done") { dismiss() }
+                    .accessibilityLabel("Done")
+                    .accessibilityValue("Done")
             }
 
             LabeledContent("Active Duration", value: CodePulseFormatting.duration(session.activeDuration, includeSeconds: true))
@@ -181,6 +183,8 @@ private struct SessionDetailView: View {
             Button("Delete Session", role: .destructive) {
                 showDeleteConfirmation = true
             }
+            .accessibilityLabel("Delete Session")
+            .accessibilityValue("Delete Session")
         }
         .padding(24)
         .frame(minWidth: 460, idealWidth: 460, maxWidth: 460, minHeight: 360, maxHeight: 520)
