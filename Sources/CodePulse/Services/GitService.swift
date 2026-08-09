@@ -353,10 +353,7 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
         }
         guard startSHA != endSHA else { return 0 }
 
-        guard let ancestry = runner.run(
-            arguments: ["merge-base", "--is-ancestor", startSHA, endSHA],
-            in: repositoryRoot
-        ), ancestry.succeeded else {
+        guard isAncestor(startSHA, endSHA, in: repositoryRoot) else {
             return nil
         }
 
@@ -386,12 +383,14 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
 
         if let endSHA {
             if let startSHA = startSnapshot.headSHA {
-                if let result = runner.run(
-                    arguments: ["diff", "--numstat", "--no-renames", "-z", startSHA, endSHA],
-                    in: repositoryRoot
-                ), result.succeeded {
-                    statistics.merge(GitDiffStatsParser.parse(result.stdout))
-                    capturedAnyStatistics = true
+                if startSHA == endSHA || isAncestor(startSHA, endSHA, in: repositoryRoot) {
+                    if let result = runner.run(
+                        arguments: ["diff", "--numstat", "--no-renames", "-z", startSHA, endSHA],
+                        in: repositoryRoot
+                    ), result.succeeded {
+                        statistics.merge(GitDiffStatsParser.parse(result.stdout))
+                        capturedAnyStatistics = true
+                    }
                 }
             } else if let emptyTreeSHA = emptyTreeSHA(in: repositoryRoot),
                       let result = runner.run(
@@ -429,6 +428,16 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
         }
 
         return capturedAnyStatistics ? statistics : nil
+    }
+
+    private func isAncestor(_ startSHA: String, _ endSHA: String, in repositoryRoot: URL) -> Bool {
+        guard let result = runner.run(
+            arguments: ["merge-base", "--is-ancestor", startSHA, endSHA],
+            in: repositoryRoot
+        ) else {
+            return false
+        }
+        return result.succeeded
     }
 
     private func emptyTreeSHA(in repositoryRoot: URL) -> String? {

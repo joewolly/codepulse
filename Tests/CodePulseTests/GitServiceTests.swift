@@ -154,11 +154,14 @@ final class GitServiceTests: XCTestCase {
         XCTAssertEqual(finish.statistics?.filesChanged, 0)
     }
 
-    func testBranchSwitchIsVisibleInPersistedContextRepresentation() throws {
+    func testValidBranchSwitchRetainsAncestrySafeCommitAndDiffStats() throws {
         let repository = try makeRepository()
         let service = SystemGitService()
         let start = try XCTUnwrap(service.captureStartSnapshot(at: repository))
         try runGit(["checkout", "-b", "feature"], at: repository)
+        try write("feature.swift", contents: "let feature = true\n", in: repository)
+        try runGit(["add", "--", "feature.swift"], at: repository)
+        try runGit(["commit", "-m", "Feature work"], at: repository)
         let finish = try XCTUnwrap(service.captureFinishSnapshot(for: start))
 
         var context = GitSessionContext(
@@ -172,6 +175,56 @@ final class GitServiceTests: XCTestCase {
         context.endWasDetached = finish.isDetached
 
         XCTAssertEqual(context.branchDisplay, "main → feature")
+        try runGit(
+            ["merge-base", "--is-ancestor", try XCTUnwrap(start.headSHA), try XCTUnwrap(finish.headSHA)],
+            at: repository
+        )
+        XCTAssertEqual(finish.commitCount, 1)
+        XCTAssertEqual(finish.statistics?.filesChanged, 1)
+        XCTAssertEqual(finish.statistics?.insertions, 1)
+        XCTAssertEqual(finish.statistics?.deletions, 0)
+    }
+
+    func testDivergentBranchSwitchOmitsUntrustedCommittedStatistics() throws {
+        let repository = try makeRepository()
+        try runGit(["checkout", "-b", "feature-a"], at: repository)
+        try write("feature-a.swift", contents: "let branch = \"a\"\n", in: repository)
+        try runGit(["add", "--", "feature-a.swift"], at: repository)
+        try runGit(["commit", "-m", "Feature A work"], at: repository)
+
+        let service = SystemGitService()
+        let start = try XCTUnwrap(service.captureStartSnapshot(at: repository))
+
+        try runGit(["checkout", "main"], at: repository)
+        try runGit(["checkout", "-b", "feature-b"], at: repository)
+        try write("feature-b.swift", contents: "let branch = \"b\"\n", in: repository)
+        try runGit(["add", "--", "feature-b.swift"], at: repository)
+        try runGit(["commit", "-m", "Feature B work"], at: repository)
+        try write("session.swift", contents: "let sessionWork = true\n", in: repository)
+
+        let finish = try XCTUnwrap(service.captureFinishSnapshot(for: start))
+
+        var context = GitSessionContext(
+            repositoryRoot: start.repositoryRoot.path,
+            branchAtStart: start.branch,
+            startHeadSHA: start.headSHA,
+            startWasDetached: start.isDetached
+        )
+        context.branchAtEnd = finish.branch
+        context.endHeadSHA = finish.headSHA
+        context.endWasDetached = finish.isDetached
+
+        XCTAssertEqual(context.branchDisplay, "feature-a → feature-b")
+        XCTAssertThrowsError(
+            try runGit(
+                ["merge-base", "--is-ancestor", try XCTUnwrap(start.headSHA), try XCTUnwrap(finish.headSHA)],
+                at: repository
+            )
+        )
+        XCTAssertNil(finish.commitCount)
+        XCTAssertEqual(finish.statistics?.filesChanged, 1)
+        XCTAssertEqual(finish.statistics?.insertions, 1)
+        XCTAssertEqual(finish.statistics?.deletions, 0)
     }
 
     func testDiffStatParserHandlesSpacesAndBinaryFiles() {
