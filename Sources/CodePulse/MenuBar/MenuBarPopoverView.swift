@@ -171,6 +171,7 @@ private struct FinishingSessionView: View {
 private struct PopoverFooter: View {
     @EnvironmentObject private var store: SessionStore
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         HStack {
@@ -186,13 +187,70 @@ private struct PopoverFooter: View {
 
             Button("History") {
                 openWindow(id: "history")
+                dismiss()
+                activateApp()
             }
             .buttonStyle(.link)
 
-            Button("Settings") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            }
-            .buttonStyle(.link)
+            SettingsButton(dismiss: dismiss)
+        }
+    }
+
+    private func activateApp() {
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+
+private struct SettingsButton: View {
+    let dismiss: DismissAction
+
+    var body: some View {
+        if #available(macOS 14.0, *) {
+            ModernSettingsButton(dismiss: dismiss)
+        } else {
+            LegacySettingsButton(dismiss: dismiss)
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+private struct ModernSettingsButton: View {
+    let dismiss: DismissAction
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button("Settings") {
+            openSettings()
+            dismiss()
+            activateApp()
+        }
+        .buttonStyle(.link)
+    }
+
+    private func activateApp() {
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+
+private struct LegacySettingsButton: View {
+    let dismiss: DismissAction
+
+    var body: some View {
+        Button("Settings") {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: NSApp, from: nil)
+            dismiss()
+            activateApp()
+        }
+        .buttonStyle(.link)
+    }
+
+    private func activateApp() {
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
         }
     }
 }

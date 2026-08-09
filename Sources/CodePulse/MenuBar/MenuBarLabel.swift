@@ -14,6 +14,7 @@ struct MenuBarLabel: View {
                     .lineLimit(1)
             }
         }
+        .frame(minWidth: 18)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
     }
