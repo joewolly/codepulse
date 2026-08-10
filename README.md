@@ -16,6 +16,10 @@ The script builds the package, stages a real app bundle, and launches it
 through the macOS open command. Use ./script/build_and_run.sh --verify to
 confirm the process starts.
 
+For unsigned native macOS distribution, use `./script/package_release.sh`.
+The versioned DMG and checksum are written under `dist/release/`; see
+[`docs/releasing.md`](docs/releasing.md) for the release and first-launch notes.
+
 ## Architecture
 
 The session lifecycle is owned by SessionStore, which is the single
