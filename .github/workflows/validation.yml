@@ -29,3 +29,6 @@ jobs:
 
       - name: Run tests
         run: swift test --configuration debug
+
+      - name: Validate release packaging
+        run: ./script/package_release.sh
