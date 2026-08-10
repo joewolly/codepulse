@@ -13,6 +13,18 @@ struct DaySessionGroup: Identifiable {
     let id: Date
     let sessions: [CompletedSession]
     let totalDuration: TimeInterval
+
+    var sessionCount: Int { sessions.count }
+
+    var distinctNamedProjectCount: Int {
+        Set(sessions.compactMap(\.projectName)).count
+    }
+}
+
+enum CompletedSessionProjectAssignment: Equatable {
+    case keepSnapshot
+    case noProject
+    case project(UUID)
 }
 
 @MainActor
@@ -96,12 +108,32 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    var projectsSortedByRecentUse: [ProjectRecord] {
+        state.projects.sorted { lhs, rhs in
+            switch (lhs.lastUsedAt, rhs.lastUsedAt) {
+            case let (left?, right?) where left != right:
+                return left > right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+        }
+    }
+
     func refresh() {
         now = clock.now
     }
 
     @discardableResult
-    func startSession(projectID: UUID?, goal: String?, at date: Date? = nil) -> Bool {
+    func startSession(
+        projectID: UUID?,
+        goal: String?,
+        type: SessionType = .coding,
+        at date: Date? = nil
+    ) -> Bool {
         guard state.activeSession == nil else { return false }
 
         let startDate = date ?? clock.now
@@ -110,6 +142,7 @@ final class SessionStore: ObservableObject {
         let session = ActiveSession(
             projectID: project?.id,
             projectName: project?.name,
+            type: type,
             goal: ActiveSession.cleanOptionalText(goal),
             startedAt: startDate
         )
@@ -215,7 +248,18 @@ final class SessionStore: ObservableObject {
     }
 
     var historyGroups: [DaySessionGroup] {
-        let groups = Dictionary(grouping: state.completedSessions) { session in
+        historyGroups(for: HistoryQuery())
+    }
+
+    func historyGroups(
+        for query: HistoryQuery,
+        referenceDate: Date? = nil
+    ) -> [DaySessionGroup] {
+        let referenceDate = referenceDate ?? clock.now
+        let matchingSessions = state.completedSessions.filter { session in
+            query.matches(session, calendar: calendar, referenceDate: referenceDate)
+        }
+        let groups = Dictionary(grouping: matchingSessions) { session in
             calendar.startOfDay(for: session.startedAt)
         }
 
@@ -230,6 +274,28 @@ final class SessionStore: ObservableObject {
             }
             return DaySessionGroup(id: day, sessions: sessions, totalDuration: total)
         }
+    }
+
+    var historyProjectOptions: [HistoryProjectOption] {
+        let currentOptions = projectsSortedByRecentUse.map { project in
+            HistoryProjectOption(
+                id: "project-\(project.id.uuidString)",
+                title: project.name,
+                filter: .projectID(project.id)
+            )
+        }
+        let currentNames = Set(state.projects.map(\.name))
+        let historicalNames = Set(state.completedSessions.compactMap(\.projectName))
+            .subtracting(currentNames)
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { name in
+                HistoryProjectOption(
+                    id: "historical-\(name)",
+                    title: name,
+                    filter: .historicalName(name)
+                )
+            }
+        return currentOptions + historicalNames
     }
 
     @discardableResult
@@ -266,6 +332,27 @@ final class SessionStore: ObservableObject {
         commit(nextState)
     }
 
+    @discardableResult
+    func updateProjectFolder(id: UUID, folderURL: URL) -> Bool {
+        guard let index = state.projects.firstIndex(where: { $0.id == id }) else { return false }
+
+        #if os(macOS)
+        let bookmarkData = try? folderURL.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        #else
+        let bookmarkData: Data? = nil
+        #endif
+
+        var nextState = state
+        nextState.projects[index].folderPath = folderURL.path
+        nextState.projects[index].bookmarkData = bookmarkData
+        commit(nextState)
+        return true
+    }
+
     func deleteProject(id: UUID) {
         var nextState = state
         nextState.projects.removeAll { $0.id == id }
@@ -286,6 +373,63 @@ final class SessionStore: ObservableObject {
         var nextState = state
         nextState.completedSessions.removeAll { $0.id == id }
         commit(nextState)
+    }
+
+    func completedSession(id: UUID) -> CompletedSession? {
+        state.completedSessions.first(where: { $0.id == id })
+    }
+
+    @discardableResult
+    func updateCompletedSession(
+        id: UUID,
+        type: SessionType,
+        goal: String?,
+        outcome: String?,
+        project: CompletedSessionProjectAssignment,
+        startedAt: Date
+    ) -> Bool {
+        guard let index = state.completedSessions.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        let original = state.completedSessions[index]
+        guard let shifted = original.shifted(to: startedAt) else { return false }
+
+        let projectValues: (UUID?, String?)
+        switch project {
+        case .keepSnapshot:
+            projectValues = (original.projectID, original.projectName)
+        case .noProject:
+            projectValues = (nil, nil)
+        case .project(let projectID):
+            guard let projectRecord = state.projects.first(where: { $0.id == projectID }) else {
+                return false
+            }
+            projectValues = (projectRecord.id, projectRecord.name)
+        }
+
+        let updated = CompletedSession(
+            id: original.id,
+            projectID: projectValues.0,
+            projectName: projectValues.1,
+            type: type,
+            goal: ActiveSession.cleanOptionalText(goal),
+            outcome: ActiveSession.cleanOptionalText(outcome),
+            startedAt: shifted.startedAt,
+            endedAt: shifted.endedAt,
+            pauseIntervals: shifted.pauseIntervals,
+            gitContext: original.gitContext
+        )
+
+        var nextState = state
+        nextState.completedSessions[index] = updated
+        nextState.completedSessions.sort { $0.startedAt > $1.startedAt }
+        commit(nextState)
+        return true
+    }
+
+    func exportBackup(to fileURL: URL, at date: Date? = nil) throws {
+        let data = try CodePulseBackupCodec.encode(state: state, exportedAt: date ?? clock.now)
+        try data.write(to: fileURL, options: .atomic)
     }
 
     private func commit(_ nextState: AppState) {
