@@ -95,6 +95,69 @@ jobs:
 
           echo "Verified SHA-256: $ACTUAL_SHA"
 
+      - name: Create Sparkle appcast
+        env:
+          SPARKLE_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ]] || {
+            echo "error: SPARKLE_PRIVATE_KEY_BASE64 repository secret is not configured" >&2
+            exit 1
+          }
+
+          DMG="dist/release/CodePulse-${VERSION}.dmg"
+          APPCAST="dist/release/appcast.xml"
+          SIGN_UPDATE="$(find .build -type f -name sign_update -perm -111 -print -quit 2>/dev/null || true)"
+          [[ -x "$SIGN_UPDATE" ]] || {
+            echo "error: Sparkle sign_update tool was not resolved by SwiftPM" >&2
+            exit 1
+          }
+
+          SIGNATURE_OUTPUT="$(printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D | "$SIGN_UPDATE" --ed-key-file - "$DMG")"
+          SIGNATURE="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+          [[ -n "$SIGNATURE" ]] || {
+            echo "error: Sparkle did not produce an EdDSA signature" >&2
+            exit 1
+          }
+
+          LENGTH="$(stat -f%z "$DMG")"
+          PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
+          TAG="${GITHUB_REF_NAME}"
+          DOWNLOAD_URL="https://github.com/joewolly/codepulse/releases/download/${TAG}/CodePulse-${VERSION}.dmg"
+          RELEASE_URL="https://github.com/joewolly/codepulse/releases/tag/${TAG}"
+
+          cat > "$APPCAST" <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0"
+               xmlns:sparkle="https://sparkle-project.org/xml-namespaces/sparkle">
+            <channel>
+              <title>CodePulse Updates</title>
+              <link>https://github.com/joewolly/codepulse/releases</link>
+              <description>CodePulse macOS updates</description>
+              <language>en</language>
+              <item>
+                <title>CodePulse ${VERSION}</title>
+                <link>${RELEASE_URL}</link>
+                <pubDate>${PUB_DATE}</pubDate>
+                <sparkle:version>${BUILD_NUMBER}</sparkle:version>
+                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+                <enclosure url="${DOWNLOAD_URL}"
+                           sparkle:edSignature="${SIGNATURE}"
+                           length="${LENGTH}"
+                           type="application/octet-stream" />
+              </item>
+            </channel>
+          </rss>
+          EOF
+
+          /usr/bin/xmllint --noout "$APPCAST"
+          grep -F "<sparkle:version>${BUILD_NUMBER}</sparkle:version>" "$APPCAST" >/dev/null
+          grep -F "sparkle:edSignature=\"${SIGNATURE}\"" "$APPCAST" >/dev/null
+          echo "Sparkle appcast prepared for CodePulse ${VERSION} (build ${BUILD_NUMBER})"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,6 +176,7 @@ jobs:
           gh release create "$TAG" \
             "$DMG" \
             dist/release/checksums.txt \
+            dist/release/appcast.xml \
             --verify-tag \
             --fail-on-no-commits \
             --title "CodePulse $TAG" \
@@ -140,7 +204,8 @@ jobs:
           gh release download "$TAG" \
             --dir "$DOWNLOAD_DIR" \
             --pattern "$EXPECTED_DMG" \
-            --pattern checksums.txt
+            --pattern checksums.txt \
+            --pattern appcast.xml
 
           [[ -f "$DOWNLOAD_DIR/$EXPECTED_DMG" ]] || {
             echo "error: published DMG was not downloaded" >&2
@@ -148,6 +213,10 @@ jobs:
           }
           [[ -f "$DOWNLOAD_DIR/checksums.txt" ]] || {
             echo "error: published checksum file was not downloaded" >&2
+            exit 1
+          }
+          [[ -f "$DOWNLOAD_DIR/appcast.xml" ]] || {
+            echo "error: published Sparkle appcast was not downloaded" >&2
             exit 1
           }
 
@@ -158,4 +227,9 @@ jobs:
             exit 1
           }
 
-          echo "Published release $TAG verified: $ACTUAL_SHA"
+          cmp dist/release/appcast.xml "$DOWNLOAD_DIR/appcast.xml"
+          /usr/bin/xmllint --noout "$DOWNLOAD_DIR/appcast.xml"
+          grep -F "releases/download/${TAG}/${EXPECTED_DMG}" "$DOWNLOAD_DIR/appcast.xml" >/dev/null
+          grep -F "<sparkle:version>${BUILD_NUMBER}</sparkle:version>" "$DOWNLOAD_DIR/appcast.xml" >/dev/null
+
+          echo "Published release $TAG and Sparkle appcast verified: $ACTUAL_SHA"
