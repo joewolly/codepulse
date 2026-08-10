@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.1</string>
+	<string>0.4.2</string>
 	<key>CFBundleVersion</key>
-	<string>401</string>
+	<string>402</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>LSUIElement</key>
@@ -26,5 +26,11 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/joewolly/codepulse/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>EX4J6W41dIHFiPsqUhlk6Jp/VsX/2AxoYmCDlsqzuDM=</string>
 </dict>
 </plist>
