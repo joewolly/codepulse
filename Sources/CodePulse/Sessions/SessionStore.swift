@@ -19,23 +19,29 @@ struct DaySessionGroup: Identifiable {
 final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
     @Published private(set) var now: Date
+    @Published private(set) var gitCaptureInProgress = false
 
     let persistence: StatePersisting
     let clock: SessionClock
+    let gitService: GitServicing
     var calendar: Calendar
     private var refreshTimer: Timer?
+    private var gitCaptureSessionID: UUID?
 
     init(
         persistence: StatePersisting,
         clock: SessionClock = SystemSessionClock(),
         calendar: Calendar = .autoupdatingCurrent,
+        gitService: GitServicing = SystemGitService(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
         self.clock = clock
+        self.gitService = gitService
         self.calendar = calendar
         self.state = persistence.load()
         self.now = clock.now
+        self.gitCaptureSessionID = nil
 
         if state.activeSession?.phase == .idle {
             state.activeSession = nil
@@ -47,6 +53,12 @@ final class SessionStore: ObservableObject {
                     self?.refresh()
                 }
             }
+        }
+
+        if let session = state.activeSession,
+           session.phase == .finishing,
+           session.gitContext != nil {
+            scheduleFinalGitCapture(for: session.id)
         }
     }
 
@@ -94,6 +106,7 @@ final class SessionStore: ObservableObject {
 
         let startDate = date ?? clock.now
         let project = projectID.flatMap { id in state.projects.first(where: { $0.id == id }) }
+        let folderURL = project.flatMap { projectFolderURL(for: $0) }
         let session = ActiveSession(
             projectID: project?.id,
             projectName: project?.name,
@@ -109,6 +122,10 @@ final class SessionStore: ObservableObject {
         }
         commit(nextState)
         now = startDate
+        if let folderURL,
+           FileManager.default.fileExists(atPath: folderURL.path) {
+            scheduleStartGitCapture(for: session.id, folderURL: folderURL)
+        }
         return true
     }
 
@@ -148,11 +165,16 @@ final class SessionStore: ObservableObject {
         nextState.activeSession = session
         commit(nextState)
         refresh()
+
+        if session.gitContext != nil {
+            scheduleFinalGitCapture(for: session.id)
+        }
         return true
     }
 
     @discardableResult
     func saveFinishedSession(outcome: String?) -> Bool {
+        guard !gitCaptureInProgress else { return false }
         guard let session = state.activeSession,
               let completed = session.completedSnapshot(outcome: outcome) else {
             return false
@@ -173,6 +195,8 @@ final class SessionStore: ObservableObject {
         var nextState = state
         nextState.activeSession = nil
         commit(nextState)
+        gitCaptureSessionID = nil
+        gitCaptureInProgress = false
         refresh()
         return true
     }
@@ -267,5 +291,127 @@ final class SessionStore: ObservableObject {
     private func commit(_ nextState: AppState) {
         state = nextState
         persistence.save(nextState)
+    }
+
+    private func scheduleStartGitCapture(for sessionID: UUID, folderURL: URL) {
+        gitCaptureSessionID = sessionID
+        gitCaptureInProgress = true
+        let service = gitService
+        DispatchQueue.global(qos: .utility).async {
+            let snapshot = service.captureStartSnapshot(at: folderURL)
+            DispatchQueue.main.async { [weak self] in
+                self?.applyStartGitSnapshot(snapshot, to: sessionID)
+            }
+        }
+    }
+
+    private func applyStartGitSnapshot(_ snapshot: GitStartSnapshot?, to sessionID: UUID) {
+        guard var session = state.activeSession, session.id == sessionID else {
+            clearGitCapture(for: sessionID)
+            return
+        }
+
+        guard let snapshot else {
+            clearGitCapture(for: sessionID)
+            return
+        }
+
+        session.gitContext = GitSessionContext(
+            repositoryRoot: snapshot.repositoryRoot.path,
+            branchAtStart: snapshot.branch,
+            startHeadSHA: snapshot.headSHA,
+            startWasDetached: snapshot.isDetached,
+            preExistingWorkingTreePaths: snapshot.preExistingWorkingTreePaths.map { $0.sorted() }
+        )
+        var nextState = state
+        nextState.activeSession = session
+        commit(nextState)
+
+        if session.phase == .finishing {
+            scheduleFinalGitCapture(for: sessionID)
+        } else {
+            clearGitCapture(for: sessionID)
+        }
+    }
+
+    private func scheduleFinalGitCapture(for sessionID: UUID) {
+        guard let session = state.activeSession,
+              session.id == sessionID,
+              let gitContext = session.gitContext,
+              let startSnapshot = gitStartSnapshot(from: gitContext) else {
+            clearGitCapture(for: sessionID)
+            return
+        }
+
+        gitCaptureSessionID = sessionID
+        gitCaptureInProgress = true
+        let service = gitService
+        DispatchQueue.global(qos: .utility).async {
+            let snapshot = service.captureFinishSnapshot(for: startSnapshot)
+            DispatchQueue.main.async { [weak self] in
+                self?.applyFinishGitSnapshot(snapshot, to: sessionID)
+            }
+        }
+    }
+
+    private func applyFinishGitSnapshot(_ snapshot: GitFinishSnapshot?, to sessionID: UUID) {
+        guard var session = state.activeSession, session.id == sessionID else {
+            clearGitCapture(for: sessionID)
+            return
+        }
+
+        if let snapshot, var gitContext = session.gitContext {
+            gitContext.branchAtEnd = snapshot.branch
+            gitContext.endHeadSHA = snapshot.headSHA
+            gitContext.endWasDetached = snapshot.isDetached
+            gitContext.commitCount = snapshot.commitCount
+            if let statistics = snapshot.statistics {
+                gitContext.filesChanged = statistics.filesChanged
+                gitContext.insertions = statistics.insertions
+                gitContext.deletions = statistics.deletions
+            }
+            session.gitContext = gitContext
+
+            var nextState = state
+            nextState.activeSession = session
+            commit(nextState)
+        }
+        clearGitCapture(for: sessionID)
+    }
+
+    private func clearGitCapture(for sessionID: UUID) {
+        guard gitCaptureSessionID == sessionID else { return }
+        gitCaptureSessionID = nil
+        gitCaptureInProgress = false
+    }
+
+    private func projectFolderURL(for project: ProjectRecord) -> URL? {
+        #if os(macOS)
+        if let bookmarkData = project.bookmarkData {
+            var isStale = false
+            if let bookmarkedURL = try? URL(
+                resolvingBookmarkData: bookmarkData,
+                options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                return bookmarkedURL
+            }
+        }
+        #endif
+
+        guard let folderPath = project.folderPath else { return nil }
+        return URL(fileURLWithPath: folderPath, isDirectory: true)
+    }
+
+    private func gitStartSnapshot(from context: GitSessionContext) -> GitStartSnapshot? {
+        guard !context.repositoryRoot.isEmpty else { return nil }
+        return GitStartSnapshot(
+            repositoryRoot: URL(fileURLWithPath: context.repositoryRoot, isDirectory: true),
+            branch: context.branchAtStart,
+            headSHA: context.startHeadSHA,
+            isDetached: context.startWasDetached,
+            preExistingWorkingTreePaths: context.preExistingWorkingTreePaths.map { Set($0) }
+        )
     }
 }

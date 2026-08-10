@@ -47,6 +47,7 @@ private struct IdleSessionView: View {
                 TextField("What are you working on?", text: $goal, axis: .vertical)
                     .lineLimit(1...3)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Goal")
             }
 
             Button {
@@ -57,6 +58,8 @@ private struct IdleSessionView: View {
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: [.command])
+            .accessibilityLabel("Start Session")
+            .accessibilityValue("Start Session")
             .accessibilityHint("Starts a coding session")
         }
         .onAppear {
@@ -104,6 +107,9 @@ private struct ActiveSessionView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel(store.phase == .paused ? "Resume" : "Pause")
+                .accessibilityValue(store.phase == .paused ? "Resume" : "Pause")
+                .accessibilityHint(store.phase == .paused ? "Resumes the coding session" : "Pauses the coding session")
 
                 Button {
                     _ = store.finish()
@@ -112,6 +118,9 @@ private struct ActiveSessionView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Finish")
+                .accessibilityValue("Finish")
+                .accessibilityHint("Finishes the coding session")
             }
 
             LabeledContent("Started", value: CodePulseFormatting.time(store.activeSession?.startedAt ?? store.now))
@@ -150,20 +159,31 @@ private struct FinishingSessionView: View {
                 TextField("What actually happened?", text: $outcome, axis: .vertical)
                     .lineLimit(2...4)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Outcome")
             }
 
             Button {
                 _ = store.saveFinishedSession(outcome: outcome)
             } label: {
-                Label("Save Session", systemImage: "square.and.arrow.down")
+                Label(
+                    store.gitCaptureInProgress ? "Collecting Git…" : "Save Session",
+                    systemImage: store.gitCaptureInProgress ? "arrow.triangle.2.circlepath" : "square.and.arrow.down"
+                )
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(store.gitCaptureInProgress)
+            .accessibilityLabel(store.gitCaptureInProgress ? "Collecting Git" : "Save Session")
+            .accessibilityValue(store.gitCaptureInProgress ? "Collecting Git" : "Save Session")
+            .accessibilityHint("Saves the completed coding session")
 
             Button("Discard Session", role: .destructive) {
                 _ = store.discardSession()
             }
             .frame(maxWidth: .infinity)
+            .accessibilityLabel("Discard Session")
+            .accessibilityValue("Discard Session")
+            .accessibilityHint("Discards the completed coding session")
         }
     }
 }
@@ -191,6 +211,9 @@ private struct PopoverFooter: View {
                 activateApp()
             }
             .buttonStyle(.link)
+            .accessibilityLabel("History")
+            .accessibilityValue("History")
+            .accessibilityHint("Opens saved sessions")
 
             SettingsButton(dismiss: dismiss)
         }
@@ -227,6 +250,9 @@ private struct ModernSettingsButton: View {
             activateApp()
         }
         .buttonStyle(.link)
+        .accessibilityLabel("Settings")
+        .accessibilityValue("Settings")
+        .accessibilityHint("Opens CodePulse settings")
     }
 
     private func activateApp() {
@@ -246,6 +272,9 @@ private struct LegacySettingsButton: View {
             activateApp()
         }
         .buttonStyle(.link)
+        .accessibilityLabel("Settings")
+        .accessibilityValue("Settings")
+        .accessibilityHint("Opens CodePulse settings")
     }
 
     private func activateApp() {

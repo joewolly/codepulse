@@ -7,6 +7,95 @@ enum SessionPhase: String, Codable, CaseIterable {
     case finishing
 }
 
+struct GitSessionContext: Codable, Equatable {
+    let repositoryRoot: String
+    let branchAtStart: String?
+    let startHeadSHA: String?
+    let startWasDetached: Bool?
+    var preExistingWorkingTreePaths: [String]?
+    var branchAtEnd: String?
+    var endHeadSHA: String?
+    var endWasDetached: Bool?
+    var commitCount: Int?
+    var filesChanged: Int?
+    var insertions: Int?
+    var deletions: Int?
+
+    init(
+        repositoryRoot: String,
+        branchAtStart: String? = nil,
+        startHeadSHA: String? = nil,
+        startWasDetached: Bool? = nil,
+        preExistingWorkingTreePaths: [String]? = nil,
+        branchAtEnd: String? = nil,
+        endHeadSHA: String? = nil,
+        endWasDetached: Bool? = nil,
+        commitCount: Int? = nil,
+        filesChanged: Int? = nil,
+        insertions: Int? = nil,
+        deletions: Int? = nil
+    ) {
+        self.repositoryRoot = repositoryRoot
+        self.branchAtStart = branchAtStart
+        self.startHeadSHA = startHeadSHA
+        self.startWasDetached = startWasDetached
+        self.preExistingWorkingTreePaths = preExistingWorkingTreePaths
+        self.branchAtEnd = branchAtEnd
+        self.endHeadSHA = endHeadSHA
+        self.endWasDetached = endWasDetached
+        self.commitCount = commitCount
+        self.filesChanged = filesChanged
+        self.insertions = insertions
+        self.deletions = deletions
+    }
+
+    var branchDisplay: String? {
+        let start = Self.branchLabel(name: branchAtStart, detached: startWasDetached)
+        guard let endWasDetached else { return start }
+        let end = Self.branchLabel(name: branchAtEnd, detached: endWasDetached)
+
+        guard let start else { return end }
+        guard let end else { return start }
+        return start == end ? start : "\(start) → \(end)"
+    }
+
+    var headDisplay: String? {
+        guard let startHeadSHA else {
+            return endHeadSHA.map(Self.shortSHA)
+        }
+        guard let endHeadSHA, endHeadSHA != startHeadSHA else {
+            return Self.shortSHA(startHeadSHA)
+        }
+        return "\(Self.shortSHA(startHeadSHA)) → \(Self.shortSHA(endHeadSHA))"
+    }
+
+    var changesDisplay: String? {
+        guard let filesChanged, filesChanged > 0 else { return nil }
+
+        let fileLabel = filesChanged == 1 ? "file" : "files"
+        var result = "\(filesChanged) \(fileLabel)"
+        if let insertions, let deletions {
+            result += " · +\(insertions) / -\(deletions)"
+        }
+        return result
+    }
+
+    var historicalSnapshot: GitSessionContext {
+        var snapshot = self
+        snapshot.preExistingWorkingTreePaths = nil
+        return snapshot
+    }
+
+    private static func branchLabel(name: String?, detached: Bool?) -> String? {
+        if detached == true { return "Detached HEAD" }
+        return name
+    }
+
+    private static func shortSHA(_ sha: String) -> String {
+        String(sha.prefix(7))
+    }
+}
+
 struct PauseInterval: Codable, Equatable, Identifiable {
     let id: UUID
     let startedAt: Date
@@ -41,6 +130,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     var phase: SessionPhase
     var pauseIntervals: [PauseInterval]
     var outcome: String?
+    var gitContext: GitSessionContext?
 
     init(
         id: UUID = UUID(),
@@ -59,6 +149,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.phase = phase
         self.pauseIntervals = []
         self.outcome = nil
+        self.gitContext = nil
     }
 
     var pausedAt: Date? {
@@ -143,7 +234,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             outcome: Self.cleanOptionalText(outcome),
             startedAt: startedAt,
             endedAt: endedAt,
-            pauseIntervals: pauseIntervals
+            pauseIntervals: pauseIntervals,
+            gitContext: gitContext?.historicalSnapshot
         )
     }
 
@@ -169,6 +261,29 @@ struct CompletedSession: Codable, Equatable, Identifiable {
     let startedAt: Date
     let endedAt: Date
     let pauseIntervals: [PauseInterval]
+    let gitContext: GitSessionContext?
+
+    init(
+        id: UUID,
+        projectID: UUID?,
+        projectName: String?,
+        goal: String?,
+        outcome: String?,
+        startedAt: Date,
+        endedAt: Date,
+        pauseIntervals: [PauseInterval],
+        gitContext: GitSessionContext? = nil
+    ) {
+        self.id = id
+        self.projectID = projectID
+        self.projectName = projectName
+        self.goal = goal
+        self.outcome = outcome
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.pauseIntervals = pauseIntervals
+        self.gitContext = gitContext
+    }
 
     var activeDuration: TimeInterval {
         activeDuration(in: DateInterval(start: startedAt, end: endedAt))

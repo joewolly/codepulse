@@ -2,8 +2,8 @@
 
 CodePulse is a native macOS menu-bar coding-session timer and local coding
 journal. It is intentionally offline and lightweight: projects and goals are
-optional, and no Git, cloud, account, telemetry, or activity-monitoring
-features are included in this foundation.
+optional, and there are no cloud, account, telemetry, remote-service, or
+activity-monitoring features.
 
 ## Build and run
 
@@ -26,8 +26,17 @@ state lives under the user's Application Support directory.
 
 Completed sessions snapshot the project display name. This keeps history
 meaningful if a project is renamed or removed later, while the optional project
-record retains its folder path and security-scoped bookmark for future Git-aware
-work.
+record retains its folder path and security-scoped bookmark for Git-aware work.
+
+When a project folder is inside a local Git working tree, a session also
+snapshots the repository root, branch, and HEAD at start and finish. History
+stores the captured metadata, so it remains useful if the repository later
+moves or disappears. Git is best-effort: non-Git projects and Git command
+failures do not affect timing or saving. Committed changes are measured from
+the two captured revisions. Uncommitted files are included only when their
+paths were clean at session start; pre-existing dirty paths are intentionally
+excluded to avoid claiming unrelated work. Binary files contribute to the file
+count but not inserted/deleted line totals.
 
 Today's total uses the user's local Calendar and subtracts pause intervals over
 the exact day interval, including sessions that cross midnight. History is
