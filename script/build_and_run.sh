@@ -31,11 +31,12 @@ BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw "$INFO_TEMPLATE")"
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 swift build --package-path "$ROOT_DIR"
-BUILD_BINARY="$(swift build --package-path "$ROOT_DIR" --show-bin-path)/$APP_NAME"
-SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build" -type d -name Sparkle.framework -print -quit 2>/dev/null || true)"
+BUILD_BIN_DIR="$(swift build --package-path "$ROOT_DIR" --show-bin-path)"
+BUILD_BINARY="$BUILD_BIN_DIR/$APP_NAME"
+SPARKLE_FRAMEWORK="$BUILD_BIN_DIR/Sparkle.framework"
 
 if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
-  echo "error: SwiftPM did not resolve Sparkle.framework" >&2
+  echo "error: SwiftPM did not stage Sparkle.framework beside the CodePulse product" >&2
   exit 1
 fi
 
