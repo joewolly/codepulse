@@ -7,6 +7,36 @@ enum SessionPhase: String, Codable, CaseIterable {
     case finishing
 }
 
+enum SessionType: String, Codable, CaseIterable, Identifiable {
+    case coding
+    case debugging
+    case planning
+    case review
+    case research
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .coding: return "Coding"
+        case .debugging: return "Debugging"
+        case .planning: return "Planning"
+        case .review: return "Review"
+        case .research: return "Research"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .coding: return "chevron.left.forwardslash.chevron.right"
+        case .debugging: return "ladybug"
+        case .planning: return "list.bullet.clipboard"
+        case .review: return "checkmark.seal"
+        case .research: return "book"
+        }
+    }
+}
+
 struct GitSessionContext: Codable, Equatable {
     let repositoryRoot: String
     let branchAtStart: String?
@@ -124,6 +154,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     let id: UUID
     let projectID: UUID?
     let projectName: String?
+    var type: SessionType
     let goal: String?
     let startedAt: Date
     var endedAt: Date?
@@ -136,6 +167,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         id: UUID = UUID(),
         projectID: UUID? = nil,
         projectName: String? = nil,
+        type: SessionType = .coding,
         goal: String? = nil,
         startedAt: Date,
         phase: SessionPhase = .running
@@ -143,6 +175,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.id = id
         self.projectID = projectID
         self.projectName = projectName
+        self.type = type
         self.goal = goal
         self.startedAt = startedAt
         self.endedAt = nil
@@ -150,6 +183,26 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.pauseIntervals = []
         self.outcome = nil
         self.gitContext = nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, projectID, projectName, type, goal, startedAt, endedAt, phase
+        case pauseIntervals, outcome, gitContext
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        projectID = try container.decodeIfPresent(UUID.self, forKey: .projectID)
+        projectName = try container.decodeIfPresent(String.self, forKey: .projectName)
+        type = try container.decodeIfPresent(SessionType.self, forKey: .type) ?? .coding
+        goal = try container.decodeIfPresent(String.self, forKey: .goal)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        phase = try container.decodeIfPresent(SessionPhase.self, forKey: .phase) ?? .running
+        pauseIntervals = try container.decodeIfPresent([PauseInterval].self, forKey: .pauseIntervals) ?? []
+        outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
+        gitContext = try container.decodeIfPresent(GitSessionContext.self, forKey: .gitContext)
     }
 
     var pausedAt: Date? {
@@ -230,6 +283,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             id: id,
             projectID: projectID,
             projectName: projectName,
+            type: type,
             goal: goal,
             outcome: Self.cleanOptionalText(outcome),
             startedAt: startedAt,
@@ -256,6 +310,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
     let id: UUID
     let projectID: UUID?
     let projectName: String?
+    let type: SessionType
     let goal: String?
     let outcome: String?
     let startedAt: Date
@@ -267,6 +322,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         id: UUID,
         projectID: UUID?,
         projectName: String?,
+        type: SessionType = .coding,
         goal: String?,
         outcome: String?,
         startedAt: Date,
@@ -277,12 +333,32 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         self.id = id
         self.projectID = projectID
         self.projectName = projectName
+        self.type = type
         self.goal = goal
         self.outcome = outcome
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.pauseIntervals = pauseIntervals
         self.gitContext = gitContext
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, projectID, projectName, type, goal, outcome
+        case startedAt, endedAt, pauseIntervals, gitContext
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        projectID = try container.decodeIfPresent(UUID.self, forKey: .projectID)
+        projectName = try container.decodeIfPresent(String.self, forKey: .projectName)
+        type = try container.decodeIfPresent(SessionType.self, forKey: .type) ?? .coding
+        goal = try container.decodeIfPresent(String.self, forKey: .goal)
+        outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decode(Date.self, forKey: .endedAt)
+        pauseIntervals = try container.decodeIfPresent([PauseInterval].self, forKey: .pauseIntervals) ?? []
+        gitContext = try container.decodeIfPresent(GitSessionContext.self, forKey: .gitContext)
     }
 
     var activeDuration: TimeInterval {
@@ -299,6 +375,43 @@ struct CompletedSession: Codable, Equatable, Identifiable {
             total += interval.overlap(with: effectiveRange, referenceDate: endedAt)
         }
         return max(0, effectiveRange.duration - paused)
+    }
+
+    /// Moves the complete session timeline while preserving the span and the
+    /// relative position of every pause interval.
+    func shifted(to newStart: Date) -> CompletedSession? {
+        let offset = newStart.timeIntervalSince(startedAt)
+        let newEnd = endedAt.addingTimeInterval(offset)
+        guard newEnd > newStart else { return nil }
+
+        let shiftedIntervals = pauseIntervals.map { interval in
+            PauseInterval(
+                id: interval.id,
+                startedAt: interval.startedAt.addingTimeInterval(offset),
+                endedAt: interval.endedAt?.addingTimeInterval(offset)
+            )
+        }
+
+        guard shiftedIntervals.allSatisfy({ interval in
+            interval.startedAt >= newStart && interval.startedAt <= newEnd &&
+            (interval.endedAt == nil ||
+                (interval.endedAt! >= interval.startedAt && interval.endedAt! <= newEnd))
+        }) else {
+            return nil
+        }
+
+        return CompletedSession(
+            id: id,
+            projectID: projectID,
+            projectName: projectName,
+            type: type,
+            goal: goal,
+            outcome: outcome,
+            startedAt: newStart,
+            endedAt: newEnd,
+            pauseIntervals: shiftedIntervals,
+            gitContext: gitContext
+        )
     }
 }
 
@@ -359,11 +472,43 @@ enum IdleAppearance: String, Codable, CaseIterable, Identifiable {
 }
 
 struct CodePulseSettings: Codable, Equatable {
-    var launchAtLogin = false
-    var menuBarDisplay: MenuBarDisplay = .projectAndTimer
-    var idleAppearance: IdleAppearance = .code
-    var defaultProjectBehavior: DefaultProjectBehavior = .lastUsed
-    var specificProjectID: UUID? = nil
+    var launchAtLogin: Bool
+    var menuBarDisplay: MenuBarDisplay
+    var idleAppearance: IdleAppearance
+    var defaultProjectBehavior: DefaultProjectBehavior
+    var specificProjectID: UUID?
+    var globalShortcutEnabled: Bool
+
+    init(
+        launchAtLogin: Bool = false,
+        menuBarDisplay: MenuBarDisplay = .projectAndTimer,
+        idleAppearance: IdleAppearance = .code,
+        defaultProjectBehavior: DefaultProjectBehavior = .lastUsed,
+        specificProjectID: UUID? = nil,
+        globalShortcutEnabled: Bool = true
+    ) {
+        self.launchAtLogin = launchAtLogin
+        self.menuBarDisplay = menuBarDisplay
+        self.idleAppearance = idleAppearance
+        self.defaultProjectBehavior = defaultProjectBehavior
+        self.specificProjectID = specificProjectID
+        self.globalShortcutEnabled = globalShortcutEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case launchAtLogin, menuBarDisplay, idleAppearance
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+        menuBarDisplay = try container.decodeIfPresent(MenuBarDisplay.self, forKey: .menuBarDisplay) ?? .projectAndTimer
+        idleAppearance = try container.decodeIfPresent(IdleAppearance.self, forKey: .idleAppearance) ?? .code
+        defaultProjectBehavior = try container.decodeIfPresent(DefaultProjectBehavior.self, forKey: .defaultProjectBehavior) ?? .lastUsed
+        specificProjectID = try container.decodeIfPresent(UUID.self, forKey: .specificProjectID)
+        globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
+    }
 }
 
 struct AppState: Codable, Equatable {

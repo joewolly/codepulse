@@ -28,6 +28,7 @@ struct MenuBarPopoverView: View {
 private struct IdleSessionView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var selectedProjectID: UUID?
+    @State private var selectedType: SessionType = .coding
     @State private var goal = ""
 
     var body: some View {
@@ -40,6 +41,8 @@ private struct IdleSessionView: View {
 
             ProjectSelectionRow(selectedProjectID: $selectedProjectID)
 
+            SessionTypeSelectionRow(selectedType: $selectedType)
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Goal")
                     .font(.caption)
@@ -51,7 +54,7 @@ private struct IdleSessionView: View {
             }
 
             Button {
-                _ = store.startSession(projectID: selectedProjectID, goal: goal)
+                _ = store.startSession(projectID: selectedProjectID, goal: goal, type: selectedType)
             } label: {
                 Label("Start Session", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -68,6 +71,30 @@ private struct IdleSessionView: View {
     }
 }
 
+private struct SessionTypeSelectionRow: View {
+    @Binding var selectedType: SessionType
+
+    var body: some View {
+        HStack {
+            Text("Type")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+
+            Picker("Session type", selection: $selectedType) {
+                ForEach(SessionType.allCases) { sessionType in
+                    Label(sessionType.title, systemImage: sessionType.systemImage)
+                        .tag(sessionType)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .accessibilityLabel("Session type")
+            .accessibilityValue(selectedType.title)
+        }
+    }
+}
+
 private struct ActiveSessionView: View {
     @EnvironmentObject private var store: SessionStore
 
@@ -76,6 +103,10 @@ private struct ActiveSessionView: View {
             Text(store.activeSession?.projectName ?? "Coding Session")
                 .font(.title3.weight(.semibold))
                 .lineLimit(2)
+
+            Label(store.activeSession?.type.title ?? SessionType.coding.title, systemImage: store.activeSession?.type.systemImage ?? SessionType.coding.systemImage)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
             Text(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
                 .font(.system(size: 34, weight: .medium, design: .monospaced))
@@ -107,6 +138,7 @@ private struct ActiveSessionView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .keyboardShortcut(.space, modifiers: [])
                 .accessibilityLabel(store.phase == .paused ? "Resume" : "Pause")
                 .accessibilityValue(store.phase == .paused ? "Resume" : "Pause")
                 .accessibilityHint(store.phase == .paused ? "Resumes the coding session" : "Pauses the coding session")
@@ -118,6 +150,7 @@ private struct ActiveSessionView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut("f", modifiers: [.command])
                 .accessibilityLabel("Finish")
                 .accessibilityValue("Finish")
                 .accessibilityHint("Finishes the coding session")
@@ -172,6 +205,7 @@ private struct FinishingSessionView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.return, modifiers: [.command])
             .disabled(store.gitCaptureInProgress)
             .accessibilityLabel(store.gitCaptureInProgress ? "Collecting Git" : "Save Session")
             .accessibilityValue(store.gitCaptureInProgress ? "Collecting Git" : "Save Session")
@@ -190,6 +224,7 @@ private struct FinishingSessionView: View {
 
 private struct PopoverFooter: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
 
@@ -206,7 +241,7 @@ private struct PopoverFooter: View {
             Spacer()
 
             Button("History") {
-                openWindow(id: "history")
+                windowCoordinator.showHistory()
                 dismiss()
                 activateApp()
             }
@@ -214,6 +249,16 @@ private struct PopoverFooter: View {
             .accessibilityLabel("History")
             .accessibilityValue("History")
             .accessibilityHint("Opens saved sessions")
+
+            Button("Insights") {
+                openWindow(id: "insights")
+                dismiss()
+                activateApp()
+            }
+            .buttonStyle(.link)
+            .accessibilityLabel("Insights")
+            .accessibilityValue("Insights")
+            .accessibilityHint("Opens local coding insights")
 
             SettingsButton(dismiss: dismiss)
         }
@@ -230,57 +275,22 @@ private struct SettingsButton: View {
     let dismiss: DismissAction
 
     var body: some View {
-        if #available(macOS 14.0, *) {
-            ModernSettingsButton(dismiss: dismiss)
-        } else {
-            LegacySettingsButton(dismiss: dismiss)
-        }
-    }
-}
-
-@available(macOS 14.0, *)
-private struct ModernSettingsButton: View {
-    let dismiss: DismissAction
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
         Button("Settings") {
-            openSettings()
+            NSApp.activate(ignoringOtherApps: true)
+            if let settingsItem = NSApp.mainMenu?
+                .item(withTitle: "CodePulse")?
+                .submenu?
+                .item(withTitle: "Settings…") {
+                if let action = settingsItem.action {
+                    NSApp.sendAction(action, to: settingsItem.target, from: settingsItem)
+                }
+            }
             dismiss()
-            activateApp()
         }
         .buttonStyle(.link)
         .accessibilityLabel("Settings")
         .accessibilityValue("Settings")
         .accessibilityHint("Opens CodePulse settings")
-    }
-
-    private func activateApp() {
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-    }
-}
-
-private struct LegacySettingsButton: View {
-    let dismiss: DismissAction
-
-    var body: some View {
-        Button("Settings") {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: NSApp, from: nil)
-            dismiss()
-            activateApp()
-        }
-        .buttonStyle(.link)
-        .accessibilityLabel("Settings")
-        .accessibilityValue("Settings")
-        .accessibilityHint("Opens CodePulse settings")
-    }
-
-    private func activateApp() {
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-        }
     }
 }
 
@@ -304,7 +314,7 @@ private struct ProjectSelectionRow: View {
 
                 if !store.state.projects.isEmpty {
                     Divider()
-                    ForEach(store.state.projects) { project in
+                    ForEach(store.projectsSortedByRecentUse) { project in
                         Button {
                             selectedProjectID = project.id
                         } label: {
