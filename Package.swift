@@ -10,9 +10,15 @@ let package = Package(
     products: [
         .executable(name: "CodePulse", targets: ["CodePulse"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2")
+    ],
     targets: [
         .executableTarget(
             name: "CodePulse",
+            dependencies: [
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             path: "Sources/CodePulse"
         ),
         .testTarget(
