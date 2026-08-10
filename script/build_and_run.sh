@@ -10,6 +10,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
+APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 INFO_TEMPLATE="$ROOT_DIR/Resources/Info.plist"
@@ -31,14 +32,35 @@ pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
 swift build --package-path "$ROOT_DIR"
 BUILD_BINARY="$(swift build --package-path "$ROOT_DIR" --show-bin-path)/$APP_NAME"
+SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build" -type d -name Sparkle.framework -print -quit 2>/dev/null || true)"
+
+if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
+  echo "error: SwiftPM did not resolve Sparkle.framework" >&2
+  exit 1
+fi
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS" "$APP_RESOURCES"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_FRAMEWORKS"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 cp "$INFO_TEMPLATE" "$INFO_PLIST"
 cp "$ICON_SOURCE" "$APP_RESOURCES/CodePulse.icns"
+/usr/bin/ditto "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
 /usr/bin/plutil -lint "$INFO_PLIST" >/dev/null
+
+if ! /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -Fq '@executable_path/../Frameworks'; then
+  /usr/bin/install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_BINARY"
+fi
+
+/usr/bin/otool -L "$APP_BINARY" | /usr/bin/grep -F '@rpath/Sparkle.framework/' >/dev/null || {
+  echo "error: CodePulse executable is not linked to Sparkle.framework" >&2
+  exit 1
+}
+
+[[ -L "$APP_FRAMEWORKS/Sparkle.framework/Versions/Current" ]] || {
+  echo "error: staged Sparkle.framework did not preserve framework symlinks" >&2
+  exit 1
+}
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
