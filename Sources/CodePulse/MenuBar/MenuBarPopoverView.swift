@@ -275,57 +275,22 @@ private struct SettingsButton: View {
     let dismiss: DismissAction
 
     var body: some View {
-        if #available(macOS 14.0, *) {
-            ModernSettingsButton(dismiss: dismiss)
-        } else {
-            LegacySettingsButton(dismiss: dismiss)
-        }
-    }
-}
-
-@available(macOS 14.0, *)
-private struct ModernSettingsButton: View {
-    let dismiss: DismissAction
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
         Button("Settings") {
-            openSettings()
+            NSApp.activate(ignoringOtherApps: true)
+            if let settingsItem = NSApp.mainMenu?
+                .item(withTitle: "CodePulse")?
+                .submenu?
+                .item(withTitle: "Settings…") {
+                if let action = settingsItem.action {
+                    NSApp.sendAction(action, to: settingsItem.target, from: settingsItem)
+                }
+            }
             dismiss()
-            activateApp()
         }
         .buttonStyle(.link)
         .accessibilityLabel("Settings")
         .accessibilityValue("Settings")
         .accessibilityHint("Opens CodePulse settings")
-    }
-
-    private func activateApp() {
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-    }
-}
-
-private struct LegacySettingsButton: View {
-    let dismiss: DismissAction
-
-    var body: some View {
-        Button("Settings") {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: NSApp, from: nil)
-            dismiss()
-            activateApp()
-        }
-        .buttonStyle(.link)
-        .accessibilityLabel("Settings")
-        .accessibilityValue("Settings")
-        .accessibilityHint("Opens CodePulse settings")
-    }
-
-    private func activateApp() {
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-        }
     }
 }
 
