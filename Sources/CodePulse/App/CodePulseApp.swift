@@ -11,7 +11,7 @@ struct CodePulseApp: App {
         let store = SessionStore.live()
         let windowCoordinator = AppWindowCoordinator(store: store)
         let shortcutController = GlobalShortcutController()
-        shortcutController.start { [weak windowCoordinator] in
+        shortcutController.start(store: store) { [weak windowCoordinator] in
             windowCoordinator?.showHistoryIfEnabled()
         }
         _store = StateObject(wrappedValue: store)
