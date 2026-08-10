@@ -1,3 +1,15 @@
+# SwiftPM build state and generated local app bundles/releases
 .build/
 dist/
+
+# macOS Finder metadata
 .DS_Store
+
+# Local signing credentials; these never belong in source control
+*.cer
+*.key
+*.mobileprovision
+*.p12
+*.p8
+*.pem
+*.provisionprofile
