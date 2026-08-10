@@ -3,8 +3,18 @@ import SwiftUI
 
 struct MenuBarPopoverView: View {
     @EnvironmentObject private var store: SessionStore
+    @Environment(\.dismiss) private var dismiss
+    private let onDismiss: (() -> Void)?
+    private let onOpenInsights: (() -> Void)?
+
+    init(onDismiss: (() -> Void)? = nil, onOpenInsights: (() -> Void)? = nil) {
+        self.onDismiss = onDismiss
+        self.onOpenInsights = onOpenInsights
+    }
 
     var body: some View {
+        let dismissPopover = onDismiss ?? { dismiss() }
+
         VStack(alignment: .leading, spacing: 0) {
             switch store.phase {
             case .idle:
@@ -18,7 +28,7 @@ struct MenuBarPopoverView: View {
             Divider()
                 .padding(.top, 16)
 
-            PopoverFooter()
+            PopoverFooter(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
         }
         .padding(18)
         .frame(width: 350)
@@ -226,7 +236,8 @@ private struct PopoverFooter: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismiss) private var dismiss
+    let onDismiss: () -> Void
+    let onOpenInsights: (() -> Void)?
 
     var body: some View {
         HStack {
@@ -242,7 +253,7 @@ private struct PopoverFooter: View {
 
             Button("History") {
                 windowCoordinator.showHistory()
-                dismiss()
+                onDismiss()
                 activateApp()
             }
             .buttonStyle(.link)
@@ -251,8 +262,12 @@ private struct PopoverFooter: View {
             .accessibilityHint("Opens saved sessions")
 
             Button("Insights") {
-                openWindow(id: "insights")
-                dismiss()
+                if let onOpenInsights {
+                    onOpenInsights()
+                } else {
+                    openWindow(id: "insights")
+                }
+                onDismiss()
                 activateApp()
             }
             .buttonStyle(.link)
@@ -260,7 +275,7 @@ private struct PopoverFooter: View {
             .accessibilityValue("Insights")
             .accessibilityHint("Opens local coding insights")
 
-            SettingsButton(dismiss: dismiss)
+            SettingsButton(onDismiss: onDismiss)
         }
     }
 
@@ -272,7 +287,7 @@ private struct PopoverFooter: View {
 }
 
 private struct SettingsButton: View {
-    let dismiss: DismissAction
+    let onDismiss: () -> Void
 
     var body: some View {
         Button("Settings") {
@@ -285,7 +300,7 @@ private struct SettingsButton: View {
                     NSApp.sendAction(action, to: settingsItem.target, from: settingsItem)
                 }
             }
-            dismiss()
+            onDismiss()
         }
         .buttonStyle(.link)
         .accessibilityLabel("Settings")
