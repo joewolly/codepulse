@@ -9,7 +9,7 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
     private let shouldBeInserted: Bool
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
-    private var stateCancellable: AnyCancellable?
+    private var displayCancellable: AnyCancellable?
 
     init(store: SessionStore, windowCoordinator: AppWindowCoordinator, isInserted: Bool) {
         self.store = store
@@ -17,9 +17,10 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
         shouldBeInserted = isInserted
         super.init()
 
-        stateCancellable = store.$state.sink { [weak self] _ in
-            self?.updateButton()
-        }
+        displayCancellable = Publishers.CombineLatest(store.$state, store.$now)
+            .sink { [weak self] _, _ in
+                self?.updateButton()
+            }
 
         // Create the AppKit status item after the application has entered its run loop.
         // Creating it during SwiftUI App initialization can register the scene without
