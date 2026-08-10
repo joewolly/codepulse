@@ -3,11 +3,15 @@ import SwiftUI
 
 @main
 struct CodePulseApp: App {
+    @AppStorage(MenuBarInsertionState.preferenceKey)
+    private var menuBarExtraInserted = MenuBarInsertionState.defaultInserted
     @StateObject private var store: SessionStore
     @StateObject private var windowCoordinator: AppWindowCoordinator
     @StateObject private var shortcutController: GlobalShortcutController
 
     init() {
+        MenuBarInsertionState.restoreOnLaunch()
+
         let store = SessionStore.live()
         let windowCoordinator = AppWindowCoordinator(store: store)
         let shortcutController = GlobalShortcutController()
@@ -20,7 +24,7 @@ struct CodePulseApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $menuBarExtraInserted) {
             MenuBarPopoverView()
                 .environmentObject(store)
                 .environmentObject(windowCoordinator)
