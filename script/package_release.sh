@@ -102,7 +102,7 @@ parse_options() {
 validate_environment() {
   [[ "$(uname -s)" == "Darwin" ]] || die "release packaging requires macOS"
 
-  for command in swift lipo hdiutil plutil file shasum xattr open diskutil ditto install_name_tool otool find; do
+  for command in swift lipo hdiutil plutil file shasum xattr open diskutil ditto install_name_tool otool; do
     require_command "$command"
   done
 
@@ -156,10 +156,9 @@ build_release() {
     --triple arm64-apple-macosx13.0 \
     --show-bin-path)"
   ARM64_BINARY="$arm64_bin_path/$APP_NAME"
+  SPARKLE_FRAMEWORK="$arm64_bin_path/Sparkle.framework"
   [[ -x "$ARM64_BINARY" ]] || die "SwiftPM did not produce the arm64 release executable: $ARM64_BINARY"
-
-  SPARKLE_FRAMEWORK="$(/usr/bin/find "$arm64_scratch" -type d -name Sparkle.framework -print -quit 2>/dev/null || true)"
-  [[ -d "$SPARKLE_FRAMEWORK" ]] || die "SwiftPM did not resolve Sparkle.framework in the arm64 release workspace"
+  [[ -d "$SPARKLE_FRAMEWORK" ]] || die "SwiftPM did not stage Sparkle.framework beside the arm64 release product"
 
   echo "Building optimized x86_64 release binary"
   swift build \
@@ -176,6 +175,7 @@ build_release() {
     --show-bin-path)"
   X86_64_BINARY="$x86_64_bin_path/$APP_NAME"
   [[ -x "$X86_64_BINARY" ]] || die "SwiftPM did not produce the x86_64 release executable: $X86_64_BINARY"
+  [[ -d "$x86_64_bin_path/Sparkle.framework" ]] || die "SwiftPM did not stage Sparkle.framework beside the x86_64 release product"
 
   UNIVERSAL_BINARY="$TEMP_DIR/$APP_NAME-universal"
   /usr/bin/lipo -create -output "$UNIVERSAL_BINARY" "$ARM64_BINARY" "$X86_64_BINARY"
