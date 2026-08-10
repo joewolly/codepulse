@@ -10,6 +10,7 @@ APP_BUNDLE="$RELEASE_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
+APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 VOLUME_NAME="CodePulse"
@@ -27,6 +28,7 @@ CHECKSUMS_PATH="$RELEASE_DIR/checksums.txt"
 ARM64_BINARY=""
 X86_64_BINARY=""
 UNIVERSAL_BINARY=""
+SPARKLE_FRAMEWORK=""
 
 usage() {
   cat <<'USAGE'
@@ -41,7 +43,7 @@ Options:
   --help         Show this help text.
 
 Version overrides:
-  CODEPULSE_VERSION=0.4.0 CODEPULSE_BUILD=400 ./script/package_release.sh
+  CODEPULSE_VERSION=0.4.2 CODEPULSE_BUILD=402 ./script/package_release.sh
 USAGE
 }
 
@@ -100,7 +102,7 @@ parse_options() {
 validate_environment() {
   [[ "$(uname -s)" == "Darwin" ]] || die "release packaging requires macOS"
 
-  for command in swift lipo hdiutil plutil file shasum xattr open diskutil ditto; do
+  for command in swift lipo hdiutil plutil file shasum xattr open diskutil ditto install_name_tool otool find; do
     require_command "$command"
   done
 
@@ -156,6 +158,9 @@ build_release() {
   ARM64_BINARY="$arm64_bin_path/$APP_NAME"
   [[ -x "$ARM64_BINARY" ]] || die "SwiftPM did not produce the arm64 release executable: $ARM64_BINARY"
 
+  SPARKLE_FRAMEWORK="$(/usr/bin/find "$arm64_scratch" -type d -name Sparkle.framework -print -quit 2>/dev/null || true)"
+  [[ -d "$SPARKLE_FRAMEWORK" ]] || die "SwiftPM did not resolve Sparkle.framework in the arm64 release workspace"
+
   echo "Building optimized x86_64 release binary"
   swift build \
     --package-path "$ROOT_DIR" \
@@ -189,14 +194,19 @@ stage_app_bundle() {
     /bin/rm -rf "$APP_BUNDLE"
   fi
 
-  mkdir -p "$APP_MACOS" "$APP_RESOURCES"
+  mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_FRAMEWORKS"
   cp "$UNIVERSAL_BINARY" "$APP_BINARY"
   cp "$INFO_TEMPLATE" "$INFO_PLIST"
   cp "$ICON_SOURCE" "$APP_RESOURCES/CodePulse.icns"
+  /usr/bin/ditto "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
   chmod 755 "$APP_BINARY"
 
   /usr/bin/plutil -replace CFBundleShortVersionString -string "$VERSION" "$INFO_PLIST"
   /usr/bin/plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$INFO_PLIST"
+
+  if ! /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -Fq '@executable_path/../Frameworks'; then
+    /usr/bin/install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_BINARY"
+  fi
 
   # Finder metadata and resource forks are not part of the release bundle and
   # can make strict codesign verification fail on otherwise valid apps.
@@ -214,12 +224,14 @@ optionally_adhoc_sign() {
 }
 
 verify_bundle() {
-  local bundle_id bundle_executable display_name package_type short_version bundle_version minimum_system ls_ui_element icon_file architecture_info
+  local bundle_id bundle_executable display_name package_type short_version bundle_version minimum_system ls_ui_element icon_file architecture_info feed_url public_ed_key
 
   [[ -d "$APP_BUNDLE/Contents" ]] || die "missing app bundle Contents directory"
   [[ -f "$INFO_PLIST" ]] || die "missing app Info.plist"
   [[ -x "$APP_BINARY" ]] || die "missing executable: $APP_BINARY"
   [[ -f "$APP_RESOURCES/CodePulse.icns" ]] || die "missing app icon resource"
+  [[ -d "$APP_FRAMEWORKS/Sparkle.framework" ]] || die "missing embedded Sparkle.framework"
+  [[ -L "$APP_FRAMEWORKS/Sparkle.framework/Versions/Current" ]] || die "Sparkle.framework symlinks were not preserved"
   /usr/bin/plutil -lint "$INFO_PLIST" >/dev/null || die "staged Info.plist is invalid"
 
   bundle_id="$(/usr/bin/plutil -extract CFBundleIdentifier raw "$INFO_PLIST")"
@@ -231,6 +243,8 @@ verify_bundle() {
   minimum_system="$(/usr/bin/plutil -extract LSMinimumSystemVersion raw "$INFO_PLIST")"
   ls_ui_element="$(/usr/bin/plutil -extract LSUIElement raw "$INFO_PLIST")"
   icon_file="$(/usr/bin/plutil -extract CFBundleIconFile raw "$INFO_PLIST")"
+  feed_url="$(/usr/bin/plutil -extract SUFeedURL raw "$INFO_PLIST")"
+  public_ed_key="$(/usr/bin/plutil -extract SUPublicEDKey raw "$INFO_PLIST")"
 
   [[ "$bundle_id" == "$BUNDLE_ID" ]] || die "bundle identifier mismatch: $bundle_id"
   [[ "$bundle_executable" == "$APP_NAME" ]] || die "executable metadata mismatch: $bundle_executable"
@@ -241,10 +255,15 @@ verify_bundle() {
   [[ "$minimum_system" == "13.0" ]] || die "minimum system mismatch: $minimum_system"
   [[ "$ls_ui_element" == "true" ]] || die "LSUIElement must remain enabled: $ls_ui_element"
   [[ "$icon_file" == "CodePulse" ]] || die "unexpected icon declaration: $icon_file"
+  [[ "$feed_url" == "https://github.com/joewolly/codepulse/releases/latest/download/appcast.xml" ]] || die "unexpected Sparkle feed URL: $feed_url"
+  [[ "$public_ed_key" == "EX4J6W41dIHFiPsqUhlk6Jp/VsX/2AxoYmCDlsqzuDM=" ]] || die "unexpected Sparkle public EdDSA key"
 
   architecture_info="$(/usr/bin/lipo -info "$APP_BINARY")"
   [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "final executable is not Universal 2: $architecture_info"
   /usr/bin/file "$APP_BINARY"
+
+  /usr/bin/otool -L "$APP_BINARY" | /usr/bin/grep -F '@rpath/Sparkle.framework/' >/dev/null || die "final executable is not linked to Sparkle.framework"
+  /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -F '@executable_path/../Frameworks' >/dev/null || die "final executable is missing the Sparkle framework rpath"
 
   if [[ "$ADHOC_SIGN" == "1" || "$ADHOC_SIGN" == "true" ]]; then
     /usr/bin/codesign --verify --strict --verbose=2 "$APP_BUNDLE"
@@ -310,6 +329,7 @@ smoke_validate_artifact() {
   mounted_volume_name="$(/usr/sbin/diskutil info "$MOUNT_POINT" | /usr/bin/awk -F': ' '/Volume Name/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')"
   [[ "$mounted_volume_name" == "$VOLUME_NAME" ]] || die "unexpected DMG volume name: $mounted_volume_name"
   [[ -d "$MOUNT_POINT/$APP_NAME.app" ]] || die "DMG does not contain $APP_NAME.app"
+  [[ -d "$MOUNT_POINT/$APP_NAME.app/Contents/Frameworks/Sparkle.framework" ]] || die "DMG app does not contain Sparkle.framework"
   [[ -L "$MOUNT_POINT/Applications" ]] || die "DMG does not contain an Applications symlink"
   [[ "$(readlink "$MOUNT_POINT/Applications")" == "/Applications" ]] || die "Applications symlink does not point to /Applications"
 
