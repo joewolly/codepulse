@@ -8,8 +8,6 @@
 	<string>CodePulse</string>
 	<key>CFBundleIconFile</key>
 	<string>CodePulse</string>
-	<key>CFBundleIconName</key>
-	<string>CodePulse</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.joewolly.CodePulse</string>
 	<key>CFBundleName</key>
