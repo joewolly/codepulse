@@ -111,8 +111,10 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
                     return "\(compactProjectName(projectName)) · \(duration)"
                 }
                 return duration
-            case .timerOnly, .iconOnly:
+            case .timerOnly:
                 return duration
+            case .iconOnly:
+                return ""
             }
         }
     }
