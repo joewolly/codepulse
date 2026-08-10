@@ -131,9 +131,11 @@ jobs:
           DOWNLOAD_DIR="$(mktemp -d)"
           trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 
-          gh release view "$TAG" --json tagName,isDraft,isPrerelease --jq \
-            'select(.tagName == env.GITHUB_REF_NAME and .isDraft == false and .isPrerelease == false) | .tagName' \
-            | grep -Fx "$TAG" >/dev/null
+          RELEASE_STATE="$(gh release view "$TAG" --json tagName,isDraft,isPrerelease --jq '.tagName + " " + (.isDraft | tostring) + " " + (.isPrerelease | tostring)')"
+          [[ "$RELEASE_STATE" == "$TAG false false" ]] || {
+            echo "error: unexpected published release state: $RELEASE_STATE" >&2
+            exit 1
+          }
 
           gh release download "$TAG" \
             --dir "$DOWNLOAD_DIR" \
