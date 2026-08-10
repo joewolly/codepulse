@@ -1,6 +1,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var store: SessionStore
@@ -8,6 +9,7 @@ struct SettingsView: View {
     @State private var renameText = ""
     @State private var projectToDelete: ProjectRecord?
     @State private var loginItemError: String?
+    @State private var backupError: String?
 
     var body: some View {
         Form {
@@ -21,6 +23,28 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Workflow") {
+                Toggle("Open History with ⌥⌘T", isOn: Binding(
+                    get: { store.state.settings.globalShortcutEnabled },
+                    set: { value in store.updateSettings { $0.globalShortcutEnabled = value } }
+                ))
+                .accessibilityLabel("Global History shortcut")
+                .accessibilityHint("Opens the CodePulse History window without starting or stopping a session")
+
+                Button {
+                    exportBackup()
+                } label: {
+                    Label("Export Backup…", systemImage: "arrow.down.doc")
+                }
+                .accessibilityLabel("Export CodePulse Backup")
+                .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
+
+                Text("Backups include local projects, settings, saved sessions, and any active session. No secrets or external data are included.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Menu Bar") {
@@ -58,7 +82,7 @@ struct SettingsView: View {
                         set: { value in store.updateSettings { $0.specificProjectID = value } }
                     )) {
                         Text("No project").tag(UUID?.none)
-                        ForEach(store.state.projects) { project in
+                        ForEach(store.projectsSortedByRecentUse) { project in
                             Text(project.name).tag(Optional(project.id))
                         }
                     }
@@ -71,7 +95,7 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(store.state.projects) { project in
+                    ForEach(store.projectsSortedByRecentUse) { project in
                         HStack {
                             Image(systemName: "folder")
                                 .foregroundStyle(.secondary)
@@ -82,9 +106,24 @@ struct SettingsView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
                             }
                             Spacer()
+                            if let path = project.folderPath {
+                                Button {
+                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                                } label: {
+                                    Image(systemName: "arrow.up.forward.app")
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Reveal \(project.name) in Finder")
+                            }
+                            Button("Relink") {
+                                relinkProject(project)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Relink \(project.name) folder")
                             Button("Rename") {
                                 projectToRename = project
                                 renameText = project.name
@@ -145,6 +184,14 @@ struct SettingsView: View {
         } message: {
             Text("Saved sessions keep their project name, but this project will no longer be available for new sessions.")
         }
+        .alert("Backup Export Failed", isPresented: Binding(
+            get: { backupError != nil },
+            set: { if !$0 { backupError = nil } }
+        )) {
+            Button("OK", role: .cancel) { backupError = nil }
+        } message: {
+            Text(backupError ?? "CodePulse could not create the backup.")
+        }
     }
 
     private func addProject() {
@@ -168,6 +215,31 @@ struct SettingsView: View {
             store.updateSettings { $0.launchAtLogin = enabled }
         } catch {
             loginItemError = error.localizedDescription
+        }
+    }
+
+    private func relinkProject(_ project: ProjectRecord) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Relink Project"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        _ = store.updateProjectFolder(id: project.id, folderURL: url)
+    }
+
+    private func exportBackup() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "CodePulse Backup \(CodePulseFormatting.exportDate(store.now)).json"
+        panel.prompt = "Export Backup"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try store.exportBackup(to: url)
+        } catch {
+            backupError = error.localizedDescription
         }
     }
 }

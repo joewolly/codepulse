@@ -40,4 +40,25 @@ enum CodePulseFormatting {
         formatter.dateFormat = "EEEE, MMM d"
         return formatter.string(from: date)
     }
+
+    static func fullDay(_ date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "EEEE, MMMM d"
+        return formatter.string(from: date)
+    }
+
+    static func signedDuration(_ duration: TimeInterval) -> String {
+        let sign = duration < 0 ? "−" : "+"
+        return "\(sign)\(self.duration(abs(duration)))"
+    }
+
+    static func exportDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 }
