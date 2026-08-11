@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var updateController: SparkleUpdateController
     @State private var projectToRename: ProjectRecord?
     @State private var renameText = ""
     @State private var projectToDelete: ProjectRecord?
@@ -23,6 +24,20 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section("Updates") {
+                Button {
+                    updateController.checkForUpdates()
+                } label: {
+                    Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityHint("Checks GitHub Releases for a newer CodePulse version")
+
+                Text("CodePulse checks for updates automatically and verifies downloaded updates with Sparkle before installation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Workflow") {
