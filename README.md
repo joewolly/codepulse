@@ -9,7 +9,9 @@ tool for developers. It is lightweight and local-first: there are no accounts,
 cloud sync, telemetry, product analytics, or activity monitoring. CodePulse
 contacts GitHub only to check for and download authenticated app updates.
 
-![CodePulse Insights showing a local daily activity chart](docs/images/insights.jpg)
+<p align="center">
+  <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
+</p>
 
 ## What it does
 
@@ -49,6 +51,16 @@ or allow the automatic update check.
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
 
+## Screenshots
+
+### History
+
+![CodePulse History showing privacy-safe sample coding sessions](docs/images/history.png)
+
+### Insights
+
+![CodePulse Insights showing a weekly activity chart and project totals](docs/images/insights.png)
+
 ## Local data and privacy
 
 CodePulse stores its state as JSON under the user's Application Support
@@ -78,6 +90,13 @@ the macOS `open` command. To verify that the process starts:
 
 For release packaging, use `./script/package_release.sh` and follow
 [`docs/releasing.md`](docs/releasing.md).
+
+README screenshots are rendered from the real SwiftUI views with deterministic,
+privacy-safe sample data. Regenerate them with:
+
+```sh
+./script/generate_readme_screenshots.sh
+```
 
 ## Design notes
 
