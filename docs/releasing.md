@@ -52,7 +52,7 @@ Developer ID signing.
 The version and build number can be overridden without editing source files:
 
 ```sh
-CODEPULSE_VERSION=0.4.2 CODEPULSE_BUILD=402 ./script/package_release.sh
+CODEPULSE_VERSION=0.4.3 CODEPULSE_BUILD=403 ./script/package_release.sh
 ```
 
 ## Output
@@ -62,7 +62,7 @@ The default release writes:
 ```text
 dist/release/
 ├── CodePulse.app
-├── CodePulse-0.4.2.dmg
+├── CodePulse-0.4.3.dmg
 └── checksums.txt
 ```
 
@@ -116,8 +116,8 @@ A release is initiated only after its version/build change has been merged to
 ```sh
 git checkout main
 git pull --ff-only
-git tag v0.4.2
-git push origin v0.4.2
+git tag v0.4.3
+git push origin v0.4.3
 ```
 
 The `GitHub Release` workflow then:
@@ -159,7 +159,7 @@ flow is also an appropriate way to make the explicit first-launch decision.
 The checksum file uses the release filename:
 
 ```text
-SHA256 (CodePulse-0.4.2.dmg) = <64 hexadecimal characters>
+SHA256 (CodePulse-0.4.3.dmg) = <64 hexadecimal characters>
 ```
 
 Useful local checks include:
@@ -169,7 +169,7 @@ plutil -p dist/release/CodePulse.app/Contents/Info.plist
 file dist/release/CodePulse.app/Contents/MacOS/CodePulse
 lipo -info dist/release/CodePulse.app/Contents/MacOS/CodePulse
 otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
-shasum -a 256 dist/release/CodePulse-0.4.2.dmg
+shasum -a 256 dist/release/CodePulse-0.4.3.dmg
 ```
 
 The default package is intentionally unsigned, so `codesign --verify` is
