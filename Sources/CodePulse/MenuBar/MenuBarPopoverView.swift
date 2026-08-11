@@ -280,6 +280,14 @@ private struct PopoverFooter: View {
             .accessibilityHint("Opens local coding insights")
 
             SettingsButton(onDismiss: onDismiss)
+
+            Button("Quit") {
+                NSApp.terminate(nil)
+            }
+            .buttonStyle(.link)
+            .accessibilityLabel("Quit CodePulse")
+            .accessibilityValue("Quit CodePulse")
+            .accessibilityHint("Quits CodePulse")
         }
     }
 
