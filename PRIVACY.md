@@ -16,6 +16,9 @@ that state can include:
   outcomes.
 - Best-effort Git snapshots such as repository paths, branches, commit IDs, and
   aggregate diff statistics.
+- Optional GitHub snapshots such as the normalized repository identity and
+  lightweight pull request metadata (number, title, state, draft status, URL,
+  and branch names).
 - App settings and any active session needed for relaunch recovery.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
@@ -23,10 +26,14 @@ the local `/usr/bin/git` executable and does not modify repositories.
 
 ## Network access
 
-CodePulse does not send session, project, Git, or usage data to a CodePulse
-service. Sparkle is the only built-in network client: it checks the CodePulse
-appcast and downloads update archives from GitHub Releases. Downloaded updates
-are authenticated with an Ed25519 signature before installation.
+CodePulse does not send session, project, Git, GitHub context, or usage data to
+a CodePulse service. Sparkle checks the CodePulse appcast and downloads update
+archives from GitHub Releases. When the optional GitHub Context feature is
+available, CodePulse invokes the user's local `gh` executable with only the
+repository and branch needed to read repository and pull request metadata.
+CodePulse does not store GitHub credentials, ask for a Personal Access Token, or
+perform GitHub mutations. Downloaded updates are authenticated with an Ed25519
+signature before installation.
 
 ## Backups
 

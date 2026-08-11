@@ -107,6 +107,23 @@ struct GitStartSnapshot: Equatable {
     let headSHA: String?
     let isDetached: Bool?
     let preExistingWorkingTreePaths: Set<String>?
+    let remotes: [GitRemote]
+
+    init(
+        repositoryRoot: URL,
+        branch: String?,
+        headSHA: String?,
+        isDetached: Bool?,
+        preExistingWorkingTreePaths: Set<String>?,
+        remotes: [GitRemote] = []
+    ) {
+        self.repositoryRoot = repositoryRoot
+        self.branch = branch
+        self.headSHA = headSHA
+        self.isDetached = isDetached
+        self.preExistingWorkingTreePaths = preExistingWorkingTreePaths
+        self.remotes = remotes
+    }
 }
 
 struct GitFinishSnapshot: Equatable {
@@ -115,6 +132,11 @@ struct GitFinishSnapshot: Equatable {
     let isDetached: Bool?
     let commitCount: Int?
     let statistics: GitDiffStatistics?
+}
+
+struct GitRemote: Equatable, Sendable {
+    let name: String
+    let url: String
 }
 
 protocol GitServicing: AnyObject, Sendable {
@@ -243,7 +265,8 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
             branch: reference.branch,
             headSHA: reference.headSHA,
             isDetached: reference.isDetached,
-            preExistingWorkingTreePaths: preExistingPaths
+            preExistingWorkingTreePaths: preExistingPaths,
+            remotes: readRemotes(in: repositoryRoot)
         )
     }
 
@@ -329,6 +352,40 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
             }
         }
         return paths
+    }
+
+    private func readRemotes(in repositoryRoot: URL) -> [GitRemote] {
+        guard let result = runner.run(arguments: ["remote"], in: repositoryRoot),
+              result.succeeded,
+              let output = String(data: result.stdout, encoding: .utf8) else {
+            return []
+        }
+
+        let names = output
+            .split(whereSeparator: { $0.isNewline })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { lhs, rhs in
+                if lhs == "origin" { return rhs != "origin" }
+                if rhs == "origin" { return false }
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+
+        return names.compactMap { name in
+            guard let urlResult = runner.run(
+                arguments: ["remote", "get-url", "--all", "--", name],
+                in: repositoryRoot
+            ),
+            urlResult.succeeded,
+            let output = String(data: urlResult.stdout, encoding: .utf8),
+            let url = output
+                .split(whereSeparator: { $0.isNewline })
+                .map({ String($0).trimmingCharacters(in: .whitespacesAndNewlines) })
+                .first(where: { !$0.isEmpty }) else {
+                return nil
+            }
+            return GitRemote(name: name, url: url)
+        }
     }
 
     private func readUntrackedPaths(in repositoryRoot: URL) -> Set<String>? {
