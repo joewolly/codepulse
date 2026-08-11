@@ -1,5 +1,9 @@
 # CodePulse
 
+[![macOS validation](https://github.com/joewolly/codepulse/actions/workflows/validation.yml/badge.svg?branch=main)](https://github.com/joewolly/codepulse/actions/workflows/validation.yml)
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
+[![Sparkle 2.9.2](https://img.shields.io/badge/Sparkle-2.9.2-blue)](https://github.com/sparkle-project/Sparkle)
+
 CodePulse is a native macOS menu-bar timer, coding journal, and local insights
 tool for developers. It is lightweight and local-first: there are no accounts,
 cloud sync, telemetry, product analytics, or activity monitoring. CodePulse
