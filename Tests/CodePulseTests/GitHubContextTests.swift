@@ -59,17 +59,16 @@ private final class DeferredGitHubService: GitHubContextServicing, @unchecked Se
         repository: GitHubRepositoryIdentity,
         branch: String?
     ) async -> GitHubSessionContext? {
-        nextRequestExpectation()?.fulfill()
-        return await withCheckedContinuation { continuation in
+        await withCheckedContinuation { continuation in
             lock.lock()
             continuations.append(continuation)
+            let expectation = nextExpectationLocked()
             lock.unlock()
+            expectation?.fulfill()
         }
     }
 
-    private func nextRequestExpectation() -> XCTestExpectation? {
-        lock.lock()
-        defer { lock.unlock() }
+    private func nextExpectationLocked() -> XCTestExpectation? {
         let expectation = requestIndex < requestExpectations.count ? requestExpectations[requestIndex] : nil
         requestIndex += 1
         return expectation
@@ -126,6 +125,22 @@ final class GitHubContextTests: XCTestCase {
         )
         XCTAssertNil(GitHubRepositoryIdentity(nameWithOwner: "owner"))
         XCTAssertNil(GitHubRepositoryIdentity(nameWithOwner: "owner/repo/extra"))
+    }
+
+    func testGitHubRepositoryIdentityAcceptsASCIIComponentsAndRejectsUnicode() {
+        for value in [
+            "joewolly/codepulse",
+            "owner/repo-name",
+            "owner/repo_name",
+            "owner/repo.name",
+            "OWNER/Repo123"
+        ] {
+            XCTAssertNotNil(GitHubRepositoryIdentity(nameWithOwner: value), value)
+        }
+
+        for value in ["日本/repo", "owner/répo", "öwner/repo"] {
+            XCTAssertNil(GitHubRepositoryIdentity(nameWithOwner: value), value)
+        }
     }
 
     func testSystemGitHubServiceParsesRepositoryAndOpenDraftPullRequest() async throws {

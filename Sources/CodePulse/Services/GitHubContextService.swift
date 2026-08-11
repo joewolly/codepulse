@@ -120,15 +120,14 @@ final class ProcessGitHubCommandRunner: GitHubCommandRunning, @unchecked Sendabl
                 _ = Darwin.kill(process.processIdentifier, SIGKILL)
                 _ = terminationSemaphore.wait(timeout: .now() + 0.25)
             }
-            stdoutPipe.fileHandleForReading.closeFile()
-            stderrPipe.fileHandleForReading.closeFile()
-            _ = outputGroup.wait(timeout: .now() + 0.25)
+            if outputGroup.wait(timeout: .now() + 0.25) == .success {
+                stdoutPipe.fileHandleForReading.closeFile()
+                stderrPipe.fileHandleForReading.closeFile()
+            }
             return nil
         }
 
         guard outputGroup.wait(timeout: .now() + 1) == .success else {
-            stdoutPipe.fileHandleForReading.closeFile()
-            stderrPipe.fileHandleForReading.closeFile()
             return nil
         }
 

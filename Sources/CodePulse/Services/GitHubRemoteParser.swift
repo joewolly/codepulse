@@ -30,8 +30,14 @@ struct GitHubRepositoryIdentity: Equatable, Sendable {
 
     private static func isValidRepositoryComponent(_ value: String) -> Bool {
         guard !value.isEmpty else { return false }
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
-        return value.unicodeScalars.allSatisfy(allowed.contains)
+        return value.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 48...57, 65...90, 97...122, 45, 46, 95:
+                return true
+            default:
+                return false
+            }
+        }
     }
 }
 
