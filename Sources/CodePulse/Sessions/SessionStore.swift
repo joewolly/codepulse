@@ -36,6 +36,7 @@ final class SessionStore: ObservableObject {
     let persistence: StatePersisting
     let clock: SessionClock
     let gitService: GitServicing
+    let githubContextService: GitHubContextServicing
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -45,11 +46,13 @@ final class SessionStore: ObservableObject {
         clock: SessionClock = SystemSessionClock(),
         calendar: Calendar = .autoupdatingCurrent,
         gitService: GitServicing = SystemGitService(),
+        githubContextService: GitHubContextServicing = SystemGitHubContextService(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
         self.clock = clock
         self.gitService = gitService
+        self.githubContextService = githubContextService
         self.calendar = calendar
         self.state = persistence.load()
         self.now = clock.now
@@ -417,7 +420,8 @@ final class SessionStore: ObservableObject {
             startedAt: shifted.startedAt,
             endedAt: shifted.endedAt,
             pauseIntervals: shifted.pauseIntervals,
-            gitContext: original.gitContext
+            gitContext: original.gitContext,
+            githubContext: original.githubContext
         )
 
         var nextState = state
@@ -475,6 +479,73 @@ final class SessionStore: ObservableObject {
             scheduleFinalGitCapture(for: sessionID)
         } else {
             clearGitCapture(for: sessionID)
+        }
+
+        scheduleGitHubCapture(for: sessionID, snapshot: snapshot)
+    }
+
+    private func scheduleGitHubCapture(for sessionID: UUID, snapshot: GitStartSnapshot) {
+        let service = githubContextService
+        let repositoryRoot = snapshot.repositoryRoot
+        let branch = snapshot.branch
+        let remotes = snapshot.remotes
+        Task.detached(priority: .utility) { [service, repositoryRoot, branch, remotes, sessionID] in
+            guard let repository = remotes
+                .sorted(by: { lhs, rhs in
+                    if lhs.name == "origin" { return rhs.name != "origin" }
+                    if rhs.name == "origin" { return false }
+                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                })
+                .compactMap({ GitHubRemoteParser.parse($0.url) })
+                .first else {
+                return
+            }
+
+            let context = await service.captureContext(
+                repositoryRoot: repositoryRoot,
+                repository: repository,
+                branch: branch
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.applyGitHubContext(context, to: sessionID)
+            }
+        }
+    }
+
+    private func applyGitHubContext(_ context: GitHubSessionContext?, to sessionID: UUID) {
+        guard let context else { return }
+
+        if var session = state.activeSession, session.id == sessionID {
+            guard session.githubContext != context else { return }
+            session.githubContext = context
+            var nextState = state
+            nextState.activeSession = session
+            commit(nextState)
+            return
+        }
+
+        guard let completed = state.completedSessions.first(where: { $0.id == sessionID }),
+              completed.githubContext != context else {
+            return
+        }
+
+        let updated = CompletedSession(
+            id: completed.id,
+            projectID: completed.projectID,
+            projectName: completed.projectName,
+            type: completed.type,
+            goal: completed.goal,
+            outcome: completed.outcome,
+            startedAt: completed.startedAt,
+            endedAt: completed.endedAt,
+            pauseIntervals: completed.pauseIntervals,
+            gitContext: completed.gitContext,
+            githubContext: context
+        )
+        var nextState = state
+        if let index = nextState.completedSessions.firstIndex(where: { $0.id == sessionID }) {
+            nextState.completedSessions[index] = updated
+            commit(nextState)
         }
     }
 

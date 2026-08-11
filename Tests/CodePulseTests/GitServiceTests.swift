@@ -60,6 +60,22 @@ final class GitServiceTests: XCTestCase {
         XCTAssertNotNil(snapshot?.headSHA)
     }
 
+    func testConfiguredRemotesAreCapturedWithOriginFirst() throws {
+        let repository = try makeRepository()
+        try runGit(["remote", "add", "upstream", "https://example.com/upstream/repo.git"], at: repository)
+        try runGit(["remote", "add", "origin", "git@github.com:owner/repo.git"], at: repository)
+
+        let snapshot = SystemGitService().captureStartSnapshot(at: repository)
+
+        XCTAssertEqual(
+            snapshot?.remotes,
+            [
+                GitRemote(name: "origin", url: "git@github.com:owner/repo.git"),
+                GitRemote(name: "upstream", url: "https://example.com/upstream/repo.git")
+            ]
+        )
+    }
+
     func testDetachedHeadIsRepresentedWithoutManufacturingBranchName() throws {
         let repository = try makeRepository()
         try runGit(["checkout", "--detach", "HEAD"], at: repository)

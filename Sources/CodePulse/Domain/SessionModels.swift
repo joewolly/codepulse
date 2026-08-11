@@ -126,6 +126,96 @@ struct GitSessionContext: Codable, Equatable {
     }
 }
 
+enum GitHubPullRequestState: String, Codable, Equatable, Sendable {
+    case open
+    case closed
+    case merged
+    case unknown
+
+    init(gitHubValue: String) {
+        switch gitHubValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "OPEN": self = .open
+        case "CLOSED": self = .closed
+        case "MERGED": self = .merged
+        default: self = .unknown
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .open: return "Open"
+        case .closed: return "Closed"
+        case .merged: return "Merged"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
+struct GitHubPullRequestSnapshot: Codable, Equatable, Sendable {
+    let number: Int
+    let title: String
+    let state: GitHubPullRequestState
+    let isDraft: Bool
+    let url: String
+    let baseBranch: String?
+    let headBranch: String?
+
+    init(
+        number: Int,
+        title: String,
+        state: GitHubPullRequestState,
+        isDraft: Bool,
+        url: String,
+        baseBranch: String? = nil,
+        headBranch: String? = nil
+    ) {
+        self.number = number
+        self.title = title
+        self.state = state
+        self.isDraft = isDraft
+        self.url = url
+        self.baseBranch = baseBranch
+        self.headBranch = headBranch
+    }
+
+    var statusDisplay: String {
+        isDraft ? "Draft · \(state.displayName)" : state.displayName
+    }
+
+    var branchDisplay: String? {
+        guard let headBranch, !headBranch.isEmpty else { return nil }
+        guard let baseBranch, !baseBranch.isEmpty else { return headBranch }
+        return "\(headBranch) → \(baseBranch)"
+    }
+
+    var webURL: URL? {
+        GitHubURLValidator.trustedHTTPSURL(url)
+    }
+}
+
+struct GitHubSessionContext: Codable, Equatable, Sendable {
+    let repositoryNameWithOwner: String
+    let repositoryURL: String
+    let repositoryIsPrivate: Bool?
+    let pullRequest: GitHubPullRequestSnapshot?
+
+    init(
+        repositoryNameWithOwner: String,
+        repositoryURL: String,
+        repositoryIsPrivate: Bool? = nil,
+        pullRequest: GitHubPullRequestSnapshot? = nil
+    ) {
+        self.repositoryNameWithOwner = repositoryNameWithOwner
+        self.repositoryURL = repositoryURL
+        self.repositoryIsPrivate = repositoryIsPrivate
+        self.pullRequest = pullRequest
+    }
+
+    var repositoryWebURL: URL? {
+        GitHubURLValidator.trustedHTTPSURL(repositoryURL)
+    }
+}
+
 struct PauseInterval: Codable, Equatable, Identifiable {
     let id: UUID
     let startedAt: Date
@@ -162,6 +252,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     var pauseIntervals: [PauseInterval]
     var outcome: String?
     var gitContext: GitSessionContext?
+    var githubContext: GitHubSessionContext?
 
     init(
         id: UUID = UUID(),
@@ -170,7 +261,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         type: SessionType = .coding,
         goal: String? = nil,
         startedAt: Date,
-        phase: SessionPhase = .running
+        phase: SessionPhase = .running,
+        githubContext: GitHubSessionContext? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -183,11 +275,12 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.pauseIntervals = []
         self.outcome = nil
         self.gitContext = nil
+        self.githubContext = githubContext
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, projectName, type, goal, startedAt, endedAt, phase
-        case pauseIntervals, outcome, gitContext
+        case pauseIntervals, outcome, gitContext, githubContext
     }
 
     init(from decoder: Decoder) throws {
@@ -203,6 +296,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         pauseIntervals = try container.decodeIfPresent([PauseInterval].self, forKey: .pauseIntervals) ?? []
         outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
         gitContext = try container.decodeIfPresent(GitSessionContext.self, forKey: .gitContext)
+        githubContext = try container.decodeIfPresent(GitHubSessionContext.self, forKey: .githubContext)
     }
 
     var pausedAt: Date? {
@@ -289,7 +383,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             startedAt: startedAt,
             endedAt: endedAt,
             pauseIntervals: pauseIntervals,
-            gitContext: gitContext?.historicalSnapshot
+            gitContext: gitContext?.historicalSnapshot,
+            githubContext: githubContext
         )
     }
 
@@ -317,6 +412,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
     let endedAt: Date
     let pauseIntervals: [PauseInterval]
     let gitContext: GitSessionContext?
+    let githubContext: GitHubSessionContext?
 
     init(
         id: UUID,
@@ -328,7 +424,8 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         startedAt: Date,
         endedAt: Date,
         pauseIntervals: [PauseInterval],
-        gitContext: GitSessionContext? = nil
+        gitContext: GitSessionContext? = nil,
+        githubContext: GitHubSessionContext? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -340,11 +437,12 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         self.endedAt = endedAt
         self.pauseIntervals = pauseIntervals
         self.gitContext = gitContext
+        self.githubContext = githubContext
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, projectName, type, goal, outcome
-        case startedAt, endedAt, pauseIntervals, gitContext
+        case startedAt, endedAt, pauseIntervals, gitContext, githubContext
     }
 
     init(from decoder: Decoder) throws {
@@ -359,6 +457,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         endedAt = try container.decode(Date.self, forKey: .endedAt)
         pauseIntervals = try container.decodeIfPresent([PauseInterval].self, forKey: .pauseIntervals) ?? []
         gitContext = try container.decodeIfPresent(GitSessionContext.self, forKey: .gitContext)
+        githubContext = try container.decodeIfPresent(GitHubSessionContext.self, forKey: .githubContext)
     }
 
     var activeDuration: TimeInterval {
@@ -410,7 +509,8 @@ struct CompletedSession: Codable, Equatable, Identifiable {
             startedAt: newStart,
             endedAt: newEnd,
             pauseIntervals: shiftedIntervals,
-            gitContext: gitContext
+            gitContext: gitContext,
+            githubContext: githubContext
         )
     }
 }

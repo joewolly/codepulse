@@ -195,6 +195,10 @@ private struct FinishingSessionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let githubContext = store.activeSession?.githubContext {
+                GitHubContextView(context: githubContext, compact: true)
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Outcome")
                     .font(.caption)

@@ -418,6 +418,10 @@ private struct SessionDetailView: View {
                 }
             }
 
+            if let githubContext = session.githubContext {
+                GitHubContextView(context: githubContext)
+            }
+
             Spacer()
 
             Button("Delete Session", role: .destructive) {

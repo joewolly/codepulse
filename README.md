@@ -7,7 +7,9 @@
 CodePulse is a native macOS menu-bar timer, coding journal, and local insights
 tool for developers. It is lightweight and local-first: there are no accounts,
 cloud sync, telemetry, product analytics, or activity monitoring. CodePulse
-contacts GitHub only to check for and download authenticated app updates.
+contacts GitHub only to check for and download authenticated app updates or to
+optionally enrich a local session with read-only repository and pull request
+metadata.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -19,6 +21,8 @@ contacts GitHub only to check for and download authenticated app updates.
 - Records optional projects, work types, goals, and outcomes in a searchable
   coding journal.
 - Captures best-effort local Git context without changing the repository.
+- GitHub context — associates local sessions with their GitHub repository and
+  optionally their current pull request when the repository has a GitHub remote.
 - Summarizes active time by day, project, and work type with native Swift Charts.
 - Exports a versioned JSON backup of local CodePulse state.
 
@@ -64,13 +68,16 @@ folder you select, allowing it to read local Git metadata for that project.
 ## Local data and privacy
 
 CodePulse stores its state as JSON under the user's Application Support
-directory. Session notes, project paths, settings, Git snapshots, and active
-session state stay on the Mac unless the user exports or shares a backup.
+directory. Session notes, project paths, settings, Git snapshots, GitHub context
+snapshots, and active session state stay on the Mac unless the user exports or
+shares a backup.
 
-The only built-in network activity is Sparkle's update check against CodePulse
-release assets on GitHub. See [`PRIVACY.md`](PRIVACY.md) for the data-handling
-summary and [`SECURITY.md`](SECURITY.md) for vulnerability reporting and the
-security model.
+Sparkle checks CodePulse release assets on GitHub. When `gh` is installed, the
+optional GitHub Context feature uses the user's existing GitHub CLI setup for
+read-only repository and pull request metadata. CodePulse does not store GitHub
+credentials, and sessions still work without `gh`. See [`PRIVACY.md`](PRIVACY.md)
+for the data-handling summary and [`SECURITY.md`](SECURITY.md) for vulnerability
+reporting and the security model.
 
 ## Build from source
 
@@ -110,6 +117,20 @@ repository root, branch, HEAD, and diff statistics at session boundaries. Git
 capture is best-effort and read-only: failures never interrupt timing or saving.
 Historical Git metadata is preserved when a completed session is edited.
 
+CodePulse 0.5 adds GitHub Context for GitHub-hosted repositories: it can record the normalized
+`owner/repository` identity and the pull request associated with the session's
+branch. This enrichment is read-only, asynchronous, and failure-tolerant. It
+uses the locally installed GitHub CLI (`gh`) when available; an authenticated
+`gh` enables private repository and pull request metadata. CodePulse never asks
+for or stores GitHub credentials and never sends session notes, timing, file
+contents, or working-tree data to GitHub.
+
+To inspect the optional CLI status yourself, use:
+
+```sh
+gh auth status
+```
+
 History filters before grouping sessions by day. Insights uses the user's local
 calendar and apportions active time across day and week boundaries while
 excluding pauses.
@@ -123,7 +144,7 @@ swift test --configuration debug
 ```
 
 Tests use injected clocks and calendars, so timer, relaunch, history, Git,
-Insights, and backup behavior can be verified without sleeping.
+GitHub, Insights, and backup behavior can be verified without sleeping.
 
 ## License
 

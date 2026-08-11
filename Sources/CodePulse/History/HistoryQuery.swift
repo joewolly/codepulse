@@ -152,7 +152,12 @@ struct HistoryQuery: Equatable {
             session.gitContext?.branchAtStart,
             session.gitContext?.branchAtEnd,
             session.gitContext?.branchDisplay,
-            session.gitContext?.repositoryRoot
+            session.gitContext?.repositoryRoot,
+            session.githubContext?.repositoryNameWithOwner,
+            session.githubContext?.pullRequest.map { "#\($0.number)" },
+            session.githubContext?.pullRequest?.title,
+            session.githubContext?.pullRequest?.state.displayName,
+            session.githubContext?.pullRequest?.branchDisplay
         ].compactMap { $0 }
 
         return searchableValues.contains { value in
