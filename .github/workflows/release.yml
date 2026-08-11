@@ -110,17 +110,44 @@ jobs:
           DMG="dist/release/CodePulse-${VERSION}.dmg"
           APPCAST="dist/release/appcast.xml"
           SIGN_UPDATE="$(find .build -type f -name sign_update -perm -111 -print -quit 2>/dev/null || true)"
+          GENERATE_KEYS="$(find .build -type f -name generate_keys -perm -111 -print -quit 2>/dev/null || true)"
           [[ -x "$SIGN_UPDATE" ]] || {
             echo "error: Sparkle sign_update tool was not resolved by SwiftPM" >&2
             exit 1
           }
+          [[ -x "$GENERATE_KEYS" ]] || {
+            echo "error: Sparkle generate_keys tool was not resolved by SwiftPM" >&2
+            exit 1
+          }
 
-          SIGNATURE_OUTPUT="$(printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D | "$SIGN_UPDATE" --ed-key-file - "$DMG")"
+          PRIVATE_KEY_FILE="$(mktemp)"
+          KEY_ACCOUNT="codepulse-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup_key() {
+            rm -f "$PRIVATE_KEY_FILE"
+            /usr/bin/security delete-generic-password \
+              -s "https://sparkle-project.org" \
+              -a "$KEY_ACCOUNT" >/dev/null 2>&1 || true
+          }
+          trap cleanup_key EXIT
+
+          printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D > "$PRIVATE_KEY_FILE"
+          chmod 600 "$PRIVATE_KEY_FILE"
+
+          "$GENERATE_KEYS" --account "$KEY_ACCOUNT" -f "$PRIVATE_KEY_FILE" >/dev/null
+          DERIVED_PUBLIC_KEY="$("$GENERATE_KEYS" --account "$KEY_ACCOUNT" -p)"
+          EMBEDDED_PUBLIC_KEY="$(/usr/bin/plutil -extract SUPublicEDKey raw Resources/Info.plist)"
+          [[ "$DERIVED_PUBLIC_KEY" == "$EMBEDDED_PUBLIC_KEY" ]] || {
+            echo "error: Sparkle private key does not match Info.plist SUPublicEDKey" >&2
+            exit 1
+          }
+
+          SIGNATURE_OUTPUT="$("$SIGN_UPDATE" --ed-key-file "$PRIVATE_KEY_FILE" "$DMG")"
           SIGNATURE="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
           [[ -n "$SIGNATURE" ]] || {
             echo "error: Sparkle did not produce an EdDSA signature" >&2
             exit 1
           }
+          "$SIGN_UPDATE" --verify --ed-key-file "$PRIVATE_KEY_FILE" "$DMG" "$SIGNATURE"
 
           LENGTH="$(stat -f%z "$DMG")"
           PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
