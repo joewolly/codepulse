@@ -63,6 +63,10 @@ fi
   exit 1
 }
 
+/usr/bin/xattr -cr "$APP_BUNDLE"
+/usr/bin/codesign --force --sign - "$APP_BUNDLE"
+/usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }
