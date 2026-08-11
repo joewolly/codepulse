@@ -172,8 +172,8 @@ otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
 shasum -a 256 dist/release/CodePulse-0.4.2.dmg
 ```
 
-The default package is intentionally unsigned, so `codesign --verify` is not
-expected to report a Developer ID identity for CodePulse itself. Sparkle's
+The default package is intentionally unsigned, so `codesign --verify` is
+expected to fail because CodePulse has no Apple code signature. Sparkle's
 EdDSA signature authenticates the update archive independently of Apple code
 signing.
 
