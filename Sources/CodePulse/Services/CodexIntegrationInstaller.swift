@@ -85,6 +85,10 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
         }
 
         var root = try readHooksConfiguration()
+        guard containsManagedHook(in: root) else {
+            try removeManagedHooksFeatureLine()
+            return
+        }
         var hooks = try hooksTable(from: root)
         removeManagedHookGroups(from: &hooks)
         root["hooks"] = hooks

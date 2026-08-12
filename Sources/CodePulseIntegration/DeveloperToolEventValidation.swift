@@ -6,6 +6,7 @@ public enum DeveloperToolIntegrationLimits {
     public static let maximumExternalSessionIDLength = 512
     public static let maximumPathLength = 4 * 1024
     public static let maximumMetadataLength = 256
+    public static let maximumPendingEventsPerScan = 256
     public static let maximumEventAge: TimeInterval = 7 * 24 * 60 * 60
     public static let maximumFutureSkew: TimeInterval = 5 * 60
     public static let maximumContextsPerSession = 64

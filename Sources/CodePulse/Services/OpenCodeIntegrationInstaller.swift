@@ -37,7 +37,7 @@ struct OpenCodeIntegrationInstaller: DeveloperToolIntegrationInstalling {
               let source = String(data: data, encoding: .utf8) else {
             throw DeveloperToolIntegrationError.configurationUnreadable(pluginURL.path)
         }
-        return source.contains(Self.managedMarker)
+        return source.hasPrefix(Self.managedMarker)
     }
 
     func enable(helperURL: URL) throws {

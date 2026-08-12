@@ -94,6 +94,8 @@ public final class DeveloperToolInbox {
                 return values?.isRegularFile == true && values?.isSymbolicLink != true
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .prefix(DeveloperToolIntegrationLimits.maximumPendingEventsPerScan)
+            .map { $0 }
     }
 
     public func readEvent(from url: URL, now: Date = Date()) throws -> DeveloperToolEvent {
