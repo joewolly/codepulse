@@ -30,15 +30,51 @@ struct CodePulseIntegrationCLI {
     private static func readStandardInput() -> Data? {
         var data = Data()
         let input = FileHandle.standardInput
-        while true {
-            let chunk = input.readData(ofLength: 8 * 1024)
-            if chunk.isEmpty { break }
-            guard data.count + chunk.count <= DeveloperToolIntegrationLimits.maximumEventBytes else {
-                return nil
+        let lock = NSLock()
+        let finished = DispatchSemaphore(value: 0)
+        var didFinish = false
+        var oversized = false
+
+        func finish() {
+            lock.lock()
+            guard !didFinish else {
+                lock.unlock()
+                return
             }
-            data.append(chunk)
+            didFinish = true
+            lock.unlock()
+            finished.signal()
         }
-        return data.isEmpty ? nil : data
+
+        input.readabilityHandler = { handle in
+            do {
+                let chunk = try handle.read(upToCount: 8 * 1024) ?? Data()
+                if chunk.isEmpty {
+                    finish()
+                    return
+                }
+                lock.lock()
+                if data.count + chunk.count > DeveloperToolIntegrationLimits.maximumEventBytes {
+                    oversized = true
+                } else if !oversized {
+                    data.append(chunk)
+                }
+                let shouldFinish = oversized
+                lock.unlock()
+                if shouldFinish { finish() }
+            } catch {
+                finish()
+            }
+        }
+
+        guard finished.wait(timeout: .now() + 1) == .success else {
+            input.readabilityHandler = nil
+            return nil
+        }
+        input.readabilityHandler = nil
+        lock.lock()
+        defer { lock.unlock() }
+        return data.isEmpty || oversized ? nil : data
     }
 
     private static func makeCodexEvent(from data: Data) -> DeveloperToolEvent? {

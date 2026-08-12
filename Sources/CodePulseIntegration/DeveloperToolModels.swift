@@ -125,6 +125,23 @@ public struct DeveloperToolSessionContext: Codable, Equatable, Identifiable, Sen
 }
 
 public enum DeveloperToolEventCodec {
+    public enum Error: Swift.Error, Equatable {
+        case invalidEnvelope
+        case unexpectedField(String)
+    }
+
+    private static let allowedFields: Set<String> = [
+        "schemaVersion",
+        "id",
+        "tool",
+        "externalSessionID",
+        "eventType",
+        "timestamp",
+        "workingDirectory",
+        "model",
+        "profile"
+    ]
+
     public static func encode(_ event: DeveloperToolEvent) throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -133,6 +150,13 @@ public enum DeveloperToolEventCodec {
     }
 
     public static func decode(_ data: Data) throws -> DeveloperToolEvent {
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            throw Error.invalidEnvelope
+        }
+        if let unexpectedField = dictionary.keys.first(where: { !allowedFields.contains($0) }) {
+            throw Error.unexpectedField(unexpectedField)
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(DeveloperToolEvent.self, from: data)

@@ -88,6 +88,43 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertNil(decoded.developerToolContexts[0].profile)
     }
 
+    func testBackupsContainDeveloperMetadataWithoutConversationContent() throws {
+        let project = ProjectRecord(name: "CodePulse", folderPath: "/tmp/codepulse", createdAt: now)
+        let context = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "thread-privacy",
+            workingDirectory: "/tmp/codepulse/Sources",
+            firstActivityAt: now,
+            lastActivityAt: now.addingTimeInterval(5),
+            model: "GPT-5.6",
+            profile: "default",
+            eventCount: 2
+        )
+        var state = AppState()
+        state.projects = [project]
+        state.completedSessions = [CompletedSession(
+            id: UUID(),
+            projectID: project.id,
+            projectName: project.name,
+            goal: "Review local integration",
+            outcome: "Saved",
+            startedAt: now,
+            endedAt: now.addingTimeInterval(60),
+            pauseIntervals: [],
+            developerToolContexts: [context]
+        )]
+
+        let data = try CodePulseBackupCodec.encode(state: state, exportedAt: now)
+        let backupText = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(backupText.contains("developerToolContexts"))
+        XCTAssertTrue(backupText.contains("thread-privacy"))
+        XCTAssertTrue(backupText.contains("GPT-5.6"))
+        for forbidden in ["transcript", "assistant message", "tool-call arguments", "command output", "api key"] {
+            XCTAssertFalse(backupText.localizedCaseInsensitiveContains(forbidden), "Found (forbidden) in backup")
+        }
+        XCTAssertEqual(try CodePulseBackupCodec.decode(data).state, state)
+    }
+
     func testEventCodecAndOptionalMetadata() throws {
         let event = DeveloperToolEvent(
             id: UUID(),
@@ -105,6 +142,14 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertEqual(sanitized.model, "GPT-5.6")
         XCTAssertNil(sanitized.profile)
         XCTAssertEqual(try DeveloperToolEventCodec.decode(DeveloperToolEventCodec.encode(sanitized)), sanitized)
+    }
+
+    func testEventDecoderRejectsInvalidToolAndMissingRequiredFields() throws {
+        let invalidTool = Data(#"{"schemaVersion":1,"id":"00000000-0000-0000-0000-000000000001","tool":"cursor","externalSessionID":"x","eventType":"activity","timestamp":"2026-08-11T00:00:00Z","workingDirectory":"/tmp/codepulse"}"#.utf8)
+        XCTAssertThrowsError(try DeveloperToolEventCodec.decode(invalidTool))
+
+        let missingDirectory = Data(#"{"schemaVersion":1,"id":"00000000-0000-0000-0000-000000000001","tool":"codex","externalSessionID":"x","eventType":"activity","timestamp":"2026-08-11T00:00:00Z"}"#.utf8)
+        XCTAssertThrowsError(try DeveloperToolEventCodec.decode(missingDirectory))
     }
 
     func testProjectMatchingNormalizesChildrenAndRejectsUnrelatedDirectories() throws {
@@ -304,6 +349,32 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.rootURL.appendingPathComponent("Quarantine").path))
     }
 
+    func testInboxRejectsSymlinkedDirectoriesAndEventTargets() throws {
+        let root = try temporaryDirectory()
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: paths.inboxURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: paths.inboxURL, withDestinationURL: outside)
+
+        let event = event(id: UUID(), tool: .codex, sessionID: "symlinked", type: .activity, path: "/tmp/codepulse")
+        XCTAssertThrowsError(try DeveloperToolInbox(paths: paths).write(event)) { error in
+            XCTAssertEqual(error as? DeveloperToolInboxError, .unsafePath)
+        }
+
+        let safeRoot = try temporaryDirectory()
+        let safePaths = DeveloperToolIntegrationPaths(applicationSupportDirectory: safeRoot)
+        let safeInbox = DeveloperToolInbox(paths: safePaths)
+        try safeInbox.write(event)
+        let eventURL = safePaths.inboxURL.appendingPathComponent("\(event.id.uuidString.lowercased()).json")
+        let target = outside.appendingPathComponent("target.json")
+        try FileManager.default.removeItem(at: eventURL)
+        try FileManager.default.createSymbolicLink(at: eventURL, withDestinationURL: target)
+        XCTAssertThrowsError(try safeInbox.write(event)) { error in
+            XCTAssertEqual(error as? DeveloperToolInboxError, .unsafePath)
+        }
+    }
+
     @MainActor
     func testMalformedIntegrationCannotBreakSessionLifecycle() throws {
         let root = try temporaryDirectory()
@@ -327,6 +398,105 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertTrue(store.finish(at: now.addingTimeInterval(30)))
         XCTAssertTrue(store.saveFinishedSession(outcome: "Saved"))
         XCTAssertEqual(store.state.completedSessions.count, 1)
+    }
+
+    func testCodexInstallerPreservesUserHooksAndIsIdempotent() throws {
+        let root = try temporaryDirectory()
+        let codexDirectory = root.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        let hooksURL = codexDirectory.appendingPathComponent("hooks.json")
+        let configURL = codexDirectory.appendingPathComponent("config.toml")
+        let userConfiguration: [String: Any] = [
+            "hooks": [
+                "Stop": [[
+                    "hooks": [[
+                        "type": "command",
+                        "command": "/usr/local/bin/user-hook",
+                        "statusMessage": "User-owned hook"
+                    ]]
+                ]]
+            ],
+            "other": "preserve me"
+        ]
+        try JSONSerialization.data(withJSONObject: userConfiguration, options: [.prettyPrinted])
+            .write(to: hooksURL, options: .atomic)
+        try Data("[features]\nother = true\n".utf8).write(to: configURL, options: .atomic)
+
+        let installer = CodexIntegrationInstaller(hooksURL: hooksURL, configURL: configURL)
+        let helperURL = root.appendingPathComponent("CodePulse.app/Contents/Helpers/codepulse integration")
+        try installer.enable(helperURL: helperURL)
+        try installer.enable(helperURL: helperURL)
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: hooksURL)) as? [String: Any]
+        )
+        let hooks = try XCTUnwrap(object["hooks"] as? [String: Any])
+        let stopGroups = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
+        XCTAssertEqual(stopGroups.count, 2)
+        XCTAssertEqual(object["other"] as? String, "preserve me")
+        XCTAssertTrue(hooks["SessionStart"] != nil)
+        XCTAssertTrue(hooks["SessionEnd"] != nil)
+        XCTAssertTrue(String(data: try Data(contentsOf: configURL), encoding: .utf8)?.contains("CodePulse managed") == true)
+
+        try installer.disable()
+        let disabledObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: hooksURL)) as? [String: Any]
+        )
+        let disabledHooks = try XCTUnwrap(disabledObject["hooks"] as? [String: Any])
+        let remainingStopGroups = try XCTUnwrap(disabledHooks["Stop"] as? [[String: Any]])
+        XCTAssertEqual(remainingStopGroups.count, 1)
+        XCTAssertNil(disabledHooks["SessionStart"])
+        XCTAssertNil(disabledHooks["SessionEnd"])
+        XCTAssertFalse(String(data: try Data(contentsOf: configURL), encoding: .utf8)?.contains("CodePulse managed") == true)
+    }
+
+    func testCodexInstallerRespectsExplicitlyDisabledHooks() throws {
+        let root = try temporaryDirectory()
+        let codexDirectory = root.appendingPathComponent(".codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codexDirectory, withIntermediateDirectories: true)
+        let hooksURL = codexDirectory.appendingPathComponent("hooks.json")
+        let configURL = codexDirectory.appendingPathComponent("config.toml")
+        try Data("[features]\nhooks = false\n".utf8).write(to: configURL, options: .atomic)
+
+        let installer = CodexIntegrationInstaller(hooksURL: hooksURL, configURL: configURL)
+        XCTAssertThrowsError(try installer.enable(helperURL: root.appendingPathComponent("helper"))) { error in
+            XCTAssertEqual(error as? DeveloperToolIntegrationError, .hooksDisabledByUser)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: hooksURL.path))
+        XCTAssertEqual(String(data: try Data(contentsOf: configURL), encoding: .utf8), "[features]\nhooks = false\n")
+    }
+
+    func testOpenCodeInstallerUsesIndependentManagedPlugin() throws {
+        let root = try temporaryDirectory()
+        let pluginURL = root
+            .appendingPathComponent(".config/opencode/plugins", isDirectory: true)
+            .appendingPathComponent("codepulse-integration.js")
+        let installer = OpenCodeIntegrationInstaller(pluginURL: pluginURL)
+        let helperURL = root.appendingPathComponent("CodePulse.app/Contents/Helpers/codepulse-integration")
+
+        try installer.enable(helperURL: helperURL)
+        let source = try String(contentsOf: pluginURL, encoding: .utf8)
+        XCTAssertTrue(source.hasPrefix(OpenCodeIntegrationInstaller.managedMarker))
+        XCTAssertTrue(source.contains("Bun.spawn([CODEPULSE_HELPER, \"--event\"]"))
+        XCTAssertTrue(source.contains("session.created"))
+        XCTAssertTrue(source.contains("session.status"))
+        XCTAssertFalse(source.contains("message"))
+        XCTAssertFalse(source.contains("prompt"))
+        XCTAssertFalse(source.contains("transcript"))
+        XCTAssertFalse(source.contains("command"))
+
+        try installer.disable()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pluginURL.path))
+
+        try FileManager.default.createDirectory(at: pluginURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("export const UserPlugin = async () => ({})\n".utf8).write(to: pluginURL, options: .atomic)
+        XCTAssertThrowsError(try installer.enable(helperURL: helperURL)) { error in
+            XCTAssertEqual(
+                error as? DeveloperToolIntegrationError,
+                .configurationPathInUse(pluginURL.path)
+            )
+        }
+        XCTAssertEqual(String(data: try Data(contentsOf: pluginURL), encoding: .utf8), "export const UserPlugin = async () => ({})\n")
     }
 
     private func event(

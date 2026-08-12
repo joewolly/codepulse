@@ -50,6 +50,9 @@ public final class DeveloperToolInbox {
         try ensureInboxDirectory()
         let filename = "\(event.id.uuidString.lowercased()).json"
         let target = paths.inboxURL.appendingPathComponent(filename, isDirectory: false)
+        guard !isSymbolicLink(target) else {
+            throw DeveloperToolInboxError.unsafePath
+        }
         if fileManager.fileExists(atPath: target.path) {
             return
         }
@@ -75,6 +78,7 @@ public final class DeveloperToolInbox {
     }
 
     public func pendingEventURLs() -> [URL] {
+        guard !isSymbolicLink(paths.inboxURL) else { return [] }
         guard let urls = try? fileManager.contentsOfDirectory(
             at: paths.inboxURL,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -93,7 +97,9 @@ public final class DeveloperToolInbox {
     }
 
     public func readEvent(from url: URL, now: Date = Date()) throws -> DeveloperToolEvent {
-        guard isInboxFile(url) else { throw DeveloperToolInboxError.unsafePath }
+        guard !isSymbolicLink(paths.inboxURL), isInboxFile(url) else {
+            throw DeveloperToolInboxError.unsafePath
+        }
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber,
               size.intValue <= DeveloperToolIntegrationLimits.maximumEventBytes else {
@@ -106,12 +112,20 @@ public final class DeveloperToolInbox {
     }
 
     public func remove(_ url: URL) {
-        guard isInboxFile(url) else { return }
+        guard !isSymbolicLink(paths.inboxURL), isInboxFile(url) else { return }
         try? fileManager.removeItem(at: url)
     }
 
     private func ensureInboxDirectory() throws {
+        guard !isSymbolicLink(paths.inboxURL) else {
+            throw DeveloperToolInboxError.unsafePath
+        }
         try fileManager.createDirectory(at: paths.inboxURL, withIntermediateDirectories: true)
+    }
+
+    private func isSymbolicLink(_ url: URL) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
+        return values?.isSymbolicLink == true
     }
 
     private func isInboxFile(_ url: URL) -> Bool {
