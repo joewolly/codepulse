@@ -191,7 +191,7 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
         defer { try? fileManager.removeItem(at: temporary) }
 
         if fileManager.fileExists(atPath: url.path) {
-                _ = try fileManager.replaceItemAt(url, withItemAt: temporary)
+            _ = try fileManager.replaceItemAt(url, withItemAt: temporary)
         } else {
             try fileManager.moveItem(at: temporary, to: url)
         }

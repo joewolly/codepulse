@@ -134,19 +134,19 @@ enum OpenCodePluginSource {
         async function emit(eventType, id, record, fallbackDirectory, discriminator) {
           const cwd = workingDirectory(record, fallbackDirectory);
           if (!id || !cwd) return;
-          const eventID = await stableID([id, eventType, discriminator].join("\\u001f"));
-          const event = {
-            schemaVersion: CODEPULSE_SCHEMA_VERSION,
-            id: eventID,
-            tool: "opencode",
-            externalSessionID: id,
-            eventType,
-            timestamp: new Date().toISOString(),
-            workingDirectory: cwd,
-            model: text(record && record.model),
-            profile: text(record && record.profile)
-          };
           try {
+            const eventID = await stableID([id, eventType, discriminator].join("\\u001f"));
+            const event = {
+              schemaVersion: CODEPULSE_SCHEMA_VERSION,
+              id: eventID,
+              tool: "opencode",
+              externalSessionID: id,
+              eventType,
+              timestamp: new Date().toISOString(),
+              workingDirectory: cwd,
+              model: text(record && record.model),
+              profile: text(record && record.profile)
+            };
             const child = Bun.spawn([CODEPULSE_HELPER, "--event"], {
               stdin: "pipe",
               stdout: "ignore",

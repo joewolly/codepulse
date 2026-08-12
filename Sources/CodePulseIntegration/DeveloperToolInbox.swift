@@ -129,7 +129,8 @@ public final class DeveloperToolInbox {
     }
 
     private func isInboxFile(_ url: URL) -> Bool {
-        url.deletingLastPathComponent()
+        guard !isSymbolicLink(url) else { return false }
+        return url.deletingLastPathComponent()
             .standardizedFileURL
             .resolvingSymlinksInPath()
             .standardizedFileURL == paths.inboxURL
