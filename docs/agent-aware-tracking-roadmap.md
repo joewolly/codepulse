@@ -130,6 +130,35 @@ xcodebuild -scheme CodePulse -configuration Debug test
 | 17 | Usage Insights and exports | 16 |
 | 18 | Privacy, resilience, release hardening, and deferred-budget preparation | 17 |
 
+## Execution status
+
+Update this table as each feature moves. A feature is **Merged** only after its
+PR has actually merged into the fork's `main`; use **In review** while the PR is
+open, and leave the merged date empty until then. `—` marks a value that does
+not exist yet.
+
+| Feature | Owner | Branch | PR | Status | Merged |
+|---|---|---|---|---|---|
+| 00 | @ZacharyRW | `feature/00-roadmap` | — | In progress | — |
+| 01 | — | `feature/01-persistence-migrations` | — | Not started | — |
+| 02 | — | `feature/02-activity-domain-model` | — | Not started | — |
+| 03 | — | `feature/03-developer-event-v2` | — | Not started | — |
+| 04 | — | `feature/04-agent-aware-timing` | — | Not started | — |
+| 05 | — | `feature/05-codex-lifecycle` | — | Not started | — |
+| 06 | — | `feature/06-claude-lifecycle` | — | Not started | — |
+| 07 | — | `feature/07-opencode-lifecycle` | — | Not started | — |
+| 08 | — | `feature/08-git-workspace-discovery` | — | Not started | — |
+| 09 | — | `feature/09-local-task-discovery` | — | Not started | — |
+| 10 | — | `feature/10-concurrent-activity-ui` | — | Not started | — |
+| 11 | — | `feature/11-activity-classification` | — | Not started | — |
+| 12 | — | `feature/12-pricing-catalog` | — | Not started | — |
+| 13 | — | `feature/13-codex-usage` | — | Not started | — |
+| 14 | — | `feature/14-claude-usage` | — | Not started | — |
+| 15 | — | `feature/15-opencode-usage` | — | Not started | — |
+| 16 | — | `feature/16-usage-attribution` | — | Not started | — |
+| 17 | — | `feature/17-usage-insights` | — | Not started | — |
+| 18 | — | `feature/18-release-hardening` | — | Not started | — |
+
 ---
 
 ## Feature 00 — Commit the governing roadmap
