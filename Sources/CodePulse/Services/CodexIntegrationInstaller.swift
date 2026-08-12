@@ -104,7 +104,7 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
     }
 
     private func readHooksConfiguration() throws -> [String: Any] {
-        guard !isSymbolicLink(hooksURL) else {
+        guard !managedPathContainsSymbolicLink(hooksURL) else {
             throw DeveloperToolIntegrationError.configurationUnreadable(hooksURL.path)
         }
         guard let data = try? Data(contentsOf: hooksURL), data.count <= 1024 * 1024,
@@ -162,15 +162,13 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
               let handlers = group["hooks"] as? [Any] else { return false }
         return handlers.contains { value in
             guard let handler = value as? [String: Any],
-                  handler["type"] as? String == "command",
-                  handler["statusMessage"] as? String == Self.managedMarker,
-                  let command = handler["command"] as? String else { return false }
-            return command.hasSuffix(" --codepulse-managed")
+                  handler["statusMessage"] as? String == Self.managedMarker else { return false }
+            return true
         }
     }
 
     private func writeHooksConfiguration(_ root: [String: Any]) throws {
-        guard !isSymbolicLink(hooksURL) else {
+        guard !managedPathContainsSymbolicLink(hooksURL) else {
             throw DeveloperToolIntegrationError.configurationPathInUse(hooksURL.path)
         }
         guard JSONSerialization.isValidJSONObject(root) else {
@@ -206,6 +204,25 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
         return values?.isSymbolicLink == true
     }
 
+    private func managedPathContainsSymbolicLink(_ url: URL) -> Bool {
+        let managedDirectory = url.deletingLastPathComponent().standardizedFileURL
+        var current = url.standardizedFileURL
+
+        while true {
+            if isSymbolicLink(current) {
+                return true
+            }
+            if current == managedDirectory {
+                return false
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent == current {
+                return false
+            }
+            current = parent
+        }
+    }
+
     private func shellQuote(_ path: String) -> String {
         "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
@@ -217,8 +234,11 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
     }
 
     private func featureState() throws -> FeatureState {
+        guard !managedPathContainsSymbolicLink(configURL) else {
+            throw DeveloperToolIntegrationError.configurationPathInUse(configURL.path)
+        }
         guard fileManager.fileExists(atPath: configURL.path) else { return .missing }
-        guard !isSymbolicLink(configURL), let text = try? String(contentsOf: configURL, encoding: .utf8) else {
+        guard let text = try? String(contentsOf: configURL, encoding: .utf8) else {
             throw DeveloperToolIntegrationError.configurationUnreadable(configURL.path)
         }
 
@@ -280,8 +300,11 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
     }
 
     private func removeManagedHooksFeatureLine() throws {
+        guard !managedPathContainsSymbolicLink(configURL) else {
+            throw DeveloperToolIntegrationError.configurationPathInUse(configURL.path)
+        }
         guard fileManager.fileExists(atPath: configURL.path) else { return }
-        guard !isSymbolicLink(configURL), let text = try? String(contentsOf: configURL, encoding: .utf8) else {
+        guard let text = try? String(contentsOf: configURL, encoding: .utf8) else {
             throw DeveloperToolIntegrationError.configurationUnreadable(configURL.path)
         }
         let updated = text.components(separatedBy: .newlines).filter { line in
@@ -294,7 +317,7 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
     }
 
     private func writeConfigText(_ text: String) throws {
-        guard !isSymbolicLink(configURL) else {
+        guard !managedPathContainsSymbolicLink(configURL) else {
             throw DeveloperToolIntegrationError.configurationPathInUse(configURL.path)
         }
         do {

@@ -49,6 +49,7 @@ struct SystemDeveloperToolExecutableDetector: DeveloperToolExecutableDetecting {
         let commonLocations = [
             URL(fileURLWithPath: "/opt/homebrew/bin").appendingPathComponent(executableName),
             URL(fileURLWithPath: "/usr/local/bin").appendingPathComponent(executableName),
+            homeDirectory.appendingPathComponent(".opencode/bin").appendingPathComponent(executableName),
             homeDirectory.appendingPathComponent(".local/bin").appendingPathComponent(executableName),
             homeDirectory.appendingPathComponent(".bun/bin").appendingPathComponent(executableName),
             homeDirectory.appendingPathComponent(".npm-global/bin").appendingPathComponent(executableName),

@@ -26,6 +26,7 @@ public struct DeveloperToolIntegrationPaths: Equatable, Sendable {
 public enum DeveloperToolInboxError: Error, Equatable {
     case unsafePath
     case eventTooLarge
+    case inboxFull
     case cannotReadEvent
 }
 
@@ -56,6 +57,7 @@ public final class DeveloperToolInbox {
         if fileManager.fileExists(atPath: target.path) {
             return
         }
+        try ensureInboxCapacity(incomingBytes: data.count)
 
         let temporary = paths.inboxURL.appendingPathComponent(
             ".\(event.id.uuidString.lowercased()).\(UUID().uuidString).tmp",
@@ -78,7 +80,7 @@ public final class DeveloperToolInbox {
     }
 
     public func pendingEventURLs() -> [URL] {
-        guard !isSymbolicLink(paths.inboxURL) else { return [] }
+        guard !managedPathContainsSymbolicLink() else { return [] }
         guard let urls = try? fileManager.contentsOfDirectory(
             at: paths.inboxURL,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
@@ -99,7 +101,7 @@ public final class DeveloperToolInbox {
     }
 
     public func readEvent(from url: URL, now: Date = Date()) throws -> DeveloperToolEvent {
-        guard !isSymbolicLink(paths.inboxURL), isInboxFile(url) else {
+        guard !managedPathContainsSymbolicLink(), isInboxFile(url) else {
             throw DeveloperToolInboxError.unsafePath
         }
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
@@ -114,20 +116,84 @@ public final class DeveloperToolInbox {
     }
 
     public func remove(_ url: URL) {
-        guard !isSymbolicLink(paths.inboxURL), isInboxFile(url) else { return }
+        guard !managedPathContainsSymbolicLink(), isInboxFile(url) else { return }
         try? fileManager.removeItem(at: url)
     }
 
     private func ensureInboxDirectory() throws {
-        guard !isSymbolicLink(paths.inboxURL) else {
+        guard !managedPathContainsSymbolicLink() else {
             throw DeveloperToolInboxError.unsafePath
         }
         try fileManager.createDirectory(at: paths.inboxURL, withIntermediateDirectories: true)
     }
 
+    private func ensureInboxCapacity(incomingBytes: Int) throws {
+        guard !managedPathContainsSymbolicLink() else {
+            throw DeveloperToolInboxError.unsafePath
+        }
+
+        let urls: [URL]
+        do {
+            urls = try fileManager.contentsOfDirectory(
+                at: paths.inboxURL,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+                options: []
+            )
+        } catch {
+            throw DeveloperToolInboxError.inboxFull
+        }
+
+        guard urls.count < DeveloperToolIntegrationLimits.maximumInboxFiles else {
+            throw DeveloperToolInboxError.inboxFull
+        }
+
+        var totalBytes = 0
+        for url in urls {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isSymbolicLink != true else {
+                throw DeveloperToolInboxError.unsafePath
+            }
+            if values.isRegularFile == true {
+                guard let fileSize = values.fileSize, fileSize <= DeveloperToolIntegrationLimits.maximumInboxBytes else {
+                    throw DeveloperToolInboxError.inboxFull
+                }
+                totalBytes += fileSize
+                guard totalBytes <= DeveloperToolIntegrationLimits.maximumInboxBytes else {
+                    throw DeveloperToolInboxError.inboxFull
+                }
+            }
+        }
+
+        guard incomingBytes <= DeveloperToolIntegrationLimits.maximumInboxBytes - totalBytes else {
+            throw DeveloperToolInboxError.inboxFull
+        }
+    }
+
     private func isSymbolicLink(_ url: URL) -> Bool {
         let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
         return values?.isSymbolicLink == true
+    }
+
+    private func managedPathContainsSymbolicLink() -> Bool {
+        let managedBase = paths.rootURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .standardizedFileURL
+        var current = paths.inboxURL.standardizedFileURL
+
+        while true {
+            if isSymbolicLink(current) {
+                return true
+            }
+            if current == managedBase {
+                return false
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent == current {
+                return false
+            }
+            current = parent
+        }
     }
 
     private func isInboxFile(_ url: URL) -> Bool {

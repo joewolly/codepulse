@@ -29,10 +29,10 @@ struct OpenCodeIntegrationInstaller: DeveloperToolIntegrationInstalling {
     }
 
     func isEnabled() throws -> Bool {
-        guard fileManager.fileExists(atPath: pluginURL.path) else { return false }
-        guard !isSymbolicLink(pluginURL) else {
-            throw DeveloperToolIntegrationError.configurationUnreadable(pluginURL.path)
+        guard !managedPathContainsSymbolicLink() else {
+            throw DeveloperToolIntegrationError.configurationPathInUse(pluginURL.path)
         }
+        guard fileManager.fileExists(atPath: pluginURL.path) else { return false }
         guard let data = try? Data(contentsOf: pluginURL), data.count <= 256 * 1024,
               let source = String(data: data, encoding: .utf8) else {
             throw DeveloperToolIntegrationError.configurationUnreadable(pluginURL.path)
@@ -44,13 +44,13 @@ struct OpenCodeIntegrationInstaller: DeveloperToolIntegrationInstalling {
         guard helperURL.path.hasPrefix("/") else {
             throw DeveloperToolIntegrationError.configurationWriteFailed("The helper path must be absolute.")
         }
+        guard !managedPathContainsSymbolicLink() else {
+            throw DeveloperToolIntegrationError.configurationPathInUse(pluginURL.path)
+        }
         if fileManager.fileExists(atPath: pluginURL.path) {
             guard try isEnabled() else {
                 throw DeveloperToolIntegrationError.configurationPathInUse(pluginURL.path)
             }
-        }
-        guard !isSymbolicLink(pluginURL) else {
-            throw DeveloperToolIntegrationError.configurationPathInUse(pluginURL.path)
         }
 
         let source = OpenCodePluginSource.make(helperURL: helperURL)
@@ -66,6 +66,9 @@ struct OpenCodeIntegrationInstaller: DeveloperToolIntegrationInstalling {
     }
 
     func disable() throws {
+        guard !managedPathContainsSymbolicLink() else {
+            throw DeveloperToolIntegrationError.configurationPathInUse(pluginURL.path)
+        }
         guard fileManager.fileExists(atPath: pluginURL.path) else { return }
         guard try isEnabled() else {
             throw DeveloperToolIntegrationError.configurationPathInUse(pluginURL.path)
@@ -89,6 +92,25 @@ struct OpenCodeIntegrationInstaller: DeveloperToolIntegrationInstalling {
     private func isSymbolicLink(_ url: URL) -> Bool {
         let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
         return values?.isSymbolicLink == true
+    }
+
+    private func managedPathContainsSymbolicLink() -> Bool {
+        let managedDirectory = pluginURL.deletingLastPathComponent().standardizedFileURL
+        var current = pluginURL.standardizedFileURL
+
+        while true {
+            if isSymbolicLink(current) {
+                return true
+            }
+            if current == managedDirectory {
+                return false
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent == current {
+                return false
+            }
+            current = parent
+        }
     }
 }
 
