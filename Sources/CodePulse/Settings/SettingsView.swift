@@ -1,4 +1,5 @@
 import AppKit
+import CodePulseIntegration
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
@@ -6,6 +7,7 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var updateController: SparkleUpdateController
+    @EnvironmentObject private var integrationManager: DeveloperToolIntegrationManager
     @State private var projectToRename: ProjectRecord?
     @State private var renameText = ""
     @State private var projectToDelete: ProjectRecord?
@@ -38,6 +40,22 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Integrations") {
+                Text("Optional local context enrichment for Codex and OpenCode. CodePulse records only tool/session metadata, timestamps, project directory, and optional model/profile details.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(DeveloperTool.allCases) { tool in
+                    DeveloperToolIntegrationRow(
+                        tool: tool,
+                        status: integrationManager.status(for: tool),
+                        enable: { _ = integrationManager.enable(tool) },
+                        disable: { _ = integrationManager.disable(tool) }
+                    )
+                }
             }
 
             Section("Workflow") {
@@ -166,6 +184,9 @@ struct SettingsView: View {
         .frame(width: 480)
         .padding(20)
         .navigationTitle("Settings")
+        .onAppear {
+            integrationManager.refresh()
+        }
         .alert("Rename Project", isPresented: Binding(
             get: { projectToRename != nil },
             set: { if !$0 { projectToRename = nil } }
@@ -256,5 +277,53 @@ struct SettingsView: View {
         } catch {
             backupError = error.localizedDescription
         }
+    }
+}
+
+private struct DeveloperToolIntegrationRow: View {
+    let tool: DeveloperTool
+    let status: DeveloperToolIntegrationStatus
+    let enable: () -> Void
+    let disable: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(tool.title, systemImage: tool.systemImage)
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(statusLabel)
+                    .font(.caption)
+                    .foregroundStyle(status.isEnabled ? .green : .secondary)
+            }
+
+            Text(status.detail)
+                .font(.caption)
+                .foregroundStyle(status.errorMessage == nil ? Color.secondary : Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Managed at \(status.installationDescription)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            Button(status.isEnabled ? "Disable integration" : "Enable integration") {
+                if status.isEnabled {
+                    disable()
+                } else {
+                    enable()
+                }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("\(status.isEnabled ? "Disable" : "Enable") \(tool.title) integration")
+            .disabled(!status.isDetected && !status.isEnabled)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var statusLabel: String {
+        if !status.isDetected { return "Not detected" }
+        return status.isEnabled ? "Enabled" : "Disabled"
     }
 }

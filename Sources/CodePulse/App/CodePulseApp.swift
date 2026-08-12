@@ -12,6 +12,7 @@ struct CodePulseApp: App {
     @StateObject private var shortcutController: GlobalShortcutController
     @StateObject private var menuBarStatusItem: MenuBarStatusItemController
     @StateObject private var updateController: SparkleUpdateController
+    @StateObject private var integrationManager: DeveloperToolIntegrationManager
 
     init() {
         MenuBarInsertionState.restoreOnLaunch()
@@ -25,6 +26,7 @@ struct CodePulseApp: App {
             isInserted: MenuBarInsertionState.isInserted()
         )
         let updateController = SparkleUpdateController()
+        let integrationManager = DeveloperToolIntegrationManager.live()
         shortcutController.start(store: store) { [weak windowCoordinator] in
             windowCoordinator?.showHistoryIfEnabled()
         }
@@ -33,6 +35,7 @@ struct CodePulseApp: App {
         _shortcutController = StateObject(wrappedValue: shortcutController)
         _menuBarStatusItem = StateObject(wrappedValue: menuBarStatusItem)
         _updateController = StateObject(wrappedValue: updateController)
+        _integrationManager = StateObject(wrappedValue: integrationManager)
         menuBarItemInserted = true
     }
 
@@ -49,6 +52,7 @@ struct CodePulseApp: App {
                 .environmentObject(store)
                 .environmentObject(menuBarStatusItem)
                 .environmentObject(updateController)
+                .environmentObject(integrationManager)
         }
     }
 }

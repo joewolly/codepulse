@@ -1,4 +1,5 @@
 import Combine
+import CodePulseIntegration
 import Foundation
 
 protocol SessionClock {
@@ -37,9 +38,11 @@ final class SessionStore: ObservableObject {
     let clock: SessionClock
     let gitService: GitServicing
     let githubContextService: GitHubContextServicing
+    let developerToolEventConsumer: DeveloperToolEventConsuming
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
+    private var lastIntegrationScanAt: Date?
 
     init(
         persistence: StatePersisting,
@@ -47,20 +50,25 @@ final class SessionStore: ObservableObject {
         calendar: Calendar = .autoupdatingCurrent,
         gitService: GitServicing = SystemGitService(),
         githubContextService: GitHubContextServicing = SystemGitHubContextService(),
+        developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
         self.clock = clock
         self.gitService = gitService
         self.githubContextService = githubContextService
+        self.developerToolEventConsumer = developerToolEventConsumer
         self.calendar = calendar
         self.state = persistence.load()
         self.now = clock.now
         self.gitCaptureSessionID = nil
+        self.lastIntegrationScanAt = nil
 
         if state.activeSession?.phase == .idle {
             state.activeSession = nil
         }
+
+        processPendingIntegrationEvents(force: true)
 
         if automaticallyRefresh {
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -82,7 +90,12 @@ final class SessionStore: ObservableObject {
     }
 
     static func live() -> SessionStore {
-        SessionStore(persistence: JSONFilePersistence())
+        SessionStore(
+            persistence: JSONFilePersistence(),
+            developerToolEventConsumer: DeveloperToolEventConsumer(
+                inbox: DeveloperToolInbox()
+            )
+        )
     }
 
     var activeSession: ActiveSession? { state.activeSession }
@@ -128,6 +141,7 @@ final class SessionStore: ObservableObject {
 
     func refresh() {
         now = clock.now
+        processPendingIntegrationEvents()
     }
 
     @discardableResult
@@ -158,6 +172,7 @@ final class SessionStore: ObservableObject {
         }
         commit(nextState)
         now = startDate
+        processPendingIntegrationEvents(force: true)
         if let folderURL,
            FileManager.default.fileExists(atPath: folderURL.path) {
             scheduleStartGitCapture(for: session.id, folderURL: folderURL)
@@ -210,6 +225,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func saveFinishedSession(outcome: String?) -> Bool {
+        processPendingIntegrationEvents(force: true)
         guard !gitCaptureInProgress else { return false }
         guard let session = state.activeSession,
               let completed = session.completedSnapshot(outcome: outcome) else {
@@ -421,7 +437,8 @@ final class SessionStore: ObservableObject {
             endedAt: shifted.endedAt,
             pauseIntervals: shifted.pauseIntervals,
             gitContext: original.gitContext,
-            githubContext: original.githubContext
+            githubContext: original.githubContext,
+            developerToolContexts: original.developerToolContexts
         )
 
         var nextState = state
@@ -439,6 +456,22 @@ final class SessionStore: ObservableObject {
     private func commit(_ nextState: AppState) {
         state = nextState
         persistence.save(nextState)
+    }
+
+    private func processPendingIntegrationEvents(force: Bool = false) {
+        let scanDate = clock.now
+        if !force,
+           let lastIntegrationScanAt,
+           scanDate.timeIntervalSince(lastIntegrationScanAt) < 5 {
+            return
+        }
+        lastIntegrationScanAt = scanDate
+
+        var nextState = state
+        guard developerToolEventConsumer.processPending(state: &nextState, now: scanDate) else {
+            return
+        }
+        commit(nextState)
     }
 
     private func scheduleStartGitCapture(for sessionID: UUID, folderURL: URL) {
@@ -540,7 +573,8 @@ final class SessionStore: ObservableObject {
             endedAt: completed.endedAt,
             pauseIntervals: completed.pauseIntervals,
             gitContext: completed.gitContext,
-            githubContext: context
+            githubContext: context,
+            developerToolContexts: completed.developerToolContexts
         )
         var nextState = state
         if let index = nextState.completedSessions.firstIndex(where: { $0.id == sessionID }) {

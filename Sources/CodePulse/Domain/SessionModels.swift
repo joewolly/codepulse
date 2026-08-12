@@ -1,4 +1,5 @@
 import Foundation
+import CodePulseIntegration
 
 enum SessionPhase: String, Codable, CaseIterable {
     case idle
@@ -253,6 +254,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     var outcome: String?
     var gitContext: GitSessionContext?
     var githubContext: GitHubSessionContext?
+    var developerToolContexts: [DeveloperToolSessionContext]
 
     init(
         id: UUID = UUID(),
@@ -262,7 +264,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         goal: String? = nil,
         startedAt: Date,
         phase: SessionPhase = .running,
-        githubContext: GitHubSessionContext? = nil
+        githubContext: GitHubSessionContext? = nil,
+        developerToolContexts: [DeveloperToolSessionContext] = []
     ) {
         self.id = id
         self.projectID = projectID
@@ -276,11 +279,12 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.outcome = nil
         self.gitContext = nil
         self.githubContext = githubContext
+        self.developerToolContexts = developerToolContexts
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, projectName, type, goal, startedAt, endedAt, phase
-        case pauseIntervals, outcome, gitContext, githubContext
+        case pauseIntervals, outcome, gitContext, githubContext, developerToolContexts
     }
 
     init(from decoder: Decoder) throws {
@@ -297,6 +301,10 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
         gitContext = try container.decodeIfPresent(GitSessionContext.self, forKey: .gitContext)
         githubContext = try container.decodeIfPresent(GitHubSessionContext.self, forKey: .githubContext)
+        developerToolContexts = try container.decodeIfPresent(
+            [DeveloperToolSessionContext].self,
+            forKey: .developerToolContexts
+        ) ?? []
     }
 
     var pausedAt: Date? {
@@ -384,7 +392,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             endedAt: endedAt,
             pauseIntervals: pauseIntervals,
             gitContext: gitContext?.historicalSnapshot,
-            githubContext: githubContext
+            githubContext: githubContext,
+            developerToolContexts: developerToolContexts
         )
     }
 
@@ -413,6 +422,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
     let pauseIntervals: [PauseInterval]
     let gitContext: GitSessionContext?
     let githubContext: GitHubSessionContext?
+    let developerToolContexts: [DeveloperToolSessionContext]
 
     init(
         id: UUID,
@@ -425,7 +435,8 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         endedAt: Date,
         pauseIntervals: [PauseInterval],
         gitContext: GitSessionContext? = nil,
-        githubContext: GitHubSessionContext? = nil
+        githubContext: GitHubSessionContext? = nil,
+        developerToolContexts: [DeveloperToolSessionContext] = []
     ) {
         self.id = id
         self.projectID = projectID
@@ -438,11 +449,12 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         self.pauseIntervals = pauseIntervals
         self.gitContext = gitContext
         self.githubContext = githubContext
+        self.developerToolContexts = developerToolContexts
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, projectName, type, goal, outcome
-        case startedAt, endedAt, pauseIntervals, gitContext, githubContext
+        case startedAt, endedAt, pauseIntervals, gitContext, githubContext, developerToolContexts
     }
 
     init(from decoder: Decoder) throws {
@@ -458,6 +470,10 @@ struct CompletedSession: Codable, Equatable, Identifiable {
         pauseIntervals = try container.decodeIfPresent([PauseInterval].self, forKey: .pauseIntervals) ?? []
         gitContext = try container.decodeIfPresent(GitSessionContext.self, forKey: .gitContext)
         githubContext = try container.decodeIfPresent(GitHubSessionContext.self, forKey: .githubContext)
+        developerToolContexts = try container.decodeIfPresent(
+            [DeveloperToolSessionContext].self,
+            forKey: .developerToolContexts
+        ) ?? []
     }
 
     var activeDuration: TimeInterval {
@@ -510,7 +526,8 @@ struct CompletedSession: Codable, Equatable, Identifiable {
             endedAt: newEnd,
             pauseIntervals: shiftedIntervals,
             gitContext: gitContext,
-            githubContext: githubContext
+            githubContext: githubContext,
+            developerToolContexts: developerToolContexts
         )
     }
 }
@@ -616,4 +633,19 @@ struct AppState: Codable, Equatable {
     var completedSessions: [CompletedSession] = []
     var activeSession: ActiveSession? = nil
     var settings = CodePulseSettings()
+    var developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil
+}
+
+struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
+    let id: UUID
+    let processedAt: Date
+
+    init(id: UUID, processedAt: Date) {
+        self.id = id
+        self.processedAt = processedAt
+    }
+}
+
+struct DeveloperToolIntegrationProcessingState: Codable, Equatable {
+    var processedEvents: [DeveloperToolProcessedEvent] = []
 }

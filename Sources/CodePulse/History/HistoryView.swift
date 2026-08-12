@@ -395,6 +395,17 @@ private struct SessionDetailView: View {
                 DetailTextBlock(title: "Outcome", text: outcome)
             }
 
+            if !session.developerToolContexts.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Developer Tools")
+                        .font(.headline)
+                    DeveloperToolContextList(
+                        contexts: session.developerToolContexts,
+                        showsEventCounts: true
+                    )
+                }
+            }
+
             if let gitContext = session.gitContext {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Git")
