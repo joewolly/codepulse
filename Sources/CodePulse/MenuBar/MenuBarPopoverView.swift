@@ -136,6 +136,11 @@ private struct ActiveSessionView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let contexts = store.activeSession?.developerToolContexts,
+               !contexts.isEmpty {
+                DeveloperToolContextList(contexts: contexts, showsEventCounts: false)
+            }
+
             HStack(spacing: 10) {
                 Button {
                     if store.phase == .paused {
@@ -197,6 +202,11 @@ private struct FinishingSessionView: View {
 
             if let githubContext = store.activeSession?.githubContext {
                 GitHubContextView(context: githubContext, compact: true)
+            }
+
+            if let contexts = store.activeSession?.developerToolContexts,
+               !contexts.isEmpty {
+                DeveloperToolContextList(contexts: contexts, showsEventCounts: false)
             }
 
             VStack(alignment: .leading, spacing: 6) {

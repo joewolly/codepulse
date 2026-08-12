@@ -32,8 +32,33 @@ CodePulse is a local-first macOS application:
   repository metadata and diff statistics. CodePulse does not modify the
   selected repository.
 - Exported backups are user-controlled JSON files. They can contain project
-  names and paths, settings, session goals and outcomes, Git metadata, and an
-  active session. Treat backup files as potentially sensitive.
+  names and paths, settings, session goals and outcomes, Git metadata,
+  developer-tool lifecycle metadata, and an active session. Treat backup files
+  as potentially sensitive.
+
+### Developer integration boundary
+
+Integration events are untrusted external input. The foundation enforces a
+versioned schema, UUID identifiers, bounded event and string sizes, timestamp
+sanity limits, canonical absolute paths, known tool/event values, and a bounded
+deduplication ledger. Inbox writes use temporary files and atomic moves; files
+outside the CodePulse-owned inbox, symbolic links, malformed JSON, unsupported
+schemas, and invalid events are rejected or removed without execution.
+
+The helper never executes event content and does not use shell interpolation.
+The OpenCode plugin invokes the absolute helper path directly and passes only
+the validated structured envelope. Neither adapter reads conversation stores or
+content-bearing events. CodePulse only associates an event with an active
+session whose selected project's canonical folder contains the event working
+directory; timestamps alone are never sufficient, and No Project sessions are
+excluded.
+
+Codex configuration changes are marked and merged with existing hook entries.
+An explicit user `hooks = false` setting is respected. OpenCode installation
+uses one marked CodePulse-owned file in the global plugin directory and refuses
+to overwrite an unrelated file. Disable removes only the marked CodePulse
+configuration. Integration errors are fail-soft and cannot control the timer
+or prevent session persistence.
 
 ## Updates and distribution
 
