@@ -22,7 +22,7 @@ that state can include:
 - App settings and any active session needed for relaunch recovery.
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
-  prunes entries older than 30 days.
+  prunes entries older than 30 days during event processing.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -80,10 +80,10 @@ Backup export creates a versioned JSON file at a location chosen by the user.
 The backup can contain the same local state described above, including freeform
 session text, filesystem paths, optional developer-tool metadata, and the
 processed-event ledger containing event identifiers and processing timestamps
-(up to 2,048 entries, with entries older than 30 days pruned). CodePulse does
-not intentionally add credentials, conversation content, or file contents, but
-user-entered text may itself be sensitive. Protect backup files and review them
-before sharing.
+(up to 2,048 entries; event processing prunes entries older than 30 days).
+CodePulse does not intentionally add credentials, conversation content, or file
+contents, but user-entered text may itself be sensitive. Protect backup files
+and review them before sharing.
 
 CodePulse currently exports backups but does not restore them automatically.
 

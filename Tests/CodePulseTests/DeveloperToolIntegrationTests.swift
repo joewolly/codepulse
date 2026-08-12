@@ -665,7 +665,7 @@ final class DeveloperToolIntegrationTests: XCTestCase {
             )
         }
         for forbiddenEventPrefix in [
-            #"event.type === \"message."#, #"event.type === \"tool."#, #"event.type === \"command."#
+            #"event.type === "message."#, #"event.type === "tool."#, #"event.type === "command."#
         ] {
             XCTAssertFalse(
                 source.contains(forbiddenEventPrefix),
