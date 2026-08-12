@@ -21,8 +21,8 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
         for url in inbox.pendingEventURLs() {
             guard let event = try? inbox.readEvent(from: url, now: now) else {
                 // Do not quarantine malformed input: it may contain data that
-                // is outside CodePulse's privacy boundary. Delete the raw file
-                // so it cannot be replayed forever or be retained locally.
+                // is outside CodePulse's privacy boundary. Best-effort cleanup
+                // keeps it out of CodePulse state without interrupting timing.
                 inbox.remove(url)
                 continue
             }

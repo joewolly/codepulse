@@ -115,9 +115,15 @@ public final class DeveloperToolInbox {
         return try DeveloperToolEventValidator.validateEncodedData(data, now: now)
     }
 
-    public func remove(_ url: URL) {
-        guard !managedPathContainsSymbolicLink(), isInboxFile(url) else { return }
-        try? fileManager.removeItem(at: url)
+    @discardableResult
+    public func remove(_ url: URL) -> Bool {
+        guard !managedPathContainsSymbolicLink(), isInboxFile(url) else { return false }
+        do {
+            try fileManager.removeItem(at: url)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func ensureInboxDirectory() throws {
@@ -149,7 +155,11 @@ public final class DeveloperToolInbox {
 
         var totalBytes = 0
         for url in urls {
-            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard let values = try? url.resourceValues(
+                forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+            ) else {
+                throw DeveloperToolInboxError.inboxFull
+            }
             guard values.isSymbolicLink != true else {
                 throw DeveloperToolInboxError.unsafePath
             }

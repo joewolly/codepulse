@@ -15,6 +15,15 @@ public enum DeveloperTool: String, Codable, CaseIterable, Equatable, Hashable, I
         }
     }
 
+    public var executableName: String {
+        switch self {
+        case .codex:
+            return "codex"
+        case .opencode:
+            return "opencode"
+        }
+    }
+
     public var systemImage: String {
         switch self {
         case .codex:

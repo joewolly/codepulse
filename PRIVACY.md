@@ -20,6 +20,9 @@ that state can include:
   lightweight pull request metadata (number, title, state, draft status, URL,
   and branch names).
 - App settings and any active session needed for relaunch recovery.
+- Processed developer-integration event identifiers and processing timestamps for
+  local deduplication; this bounded ledger retains at most 2,048 entries and
+  prunes entries older than 30 days.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -43,7 +46,9 @@ writes it to the local inbox at
 `~/Library/Application Support/CodePulse/Integrations/Inbox/`. CodePulse does
 not need to be running for an event to wait there. Events are validated,
 matched to a selected project by canonical folder hierarchy, deduplicated, and
-removed after processing. No Project sessions and wrong-project events are not
+removed on a best-effort basis after processing. A filesystem failure may leave
+an inbox file locally; valid events remain in the bounded ledger to prevent
+duplicate attachment. No Project sessions and wrong-project events are not
 attached.
 
 CodePulse does **not** persist or inspect prompts, user messages, assistant
@@ -53,9 +58,10 @@ decisions, reasoning, conversation summaries, credentials, or API keys. The
 Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
-Developer-tool metadata remains local as part of CodePulse state and normal
-JSON backups. Disabling an integration removes only the CodePulse-owned hook or
-plugin configuration; it does not delete user-owned tool configuration.
+Developer-tool metadata and the processed-event ledger remain local as part of
+CodePulse state and normal JSON backups. Disabling an integration removes only
+the CodePulse-owned hook or plugin configuration; it does not delete user-owned
+tool configuration.
 
 ## Network access
 
@@ -72,10 +78,12 @@ signature before installation.
 
 Backup export creates a versioned JSON file at a location chosen by the user.
 The backup can contain the same local state described above, including freeform
-session text, filesystem paths, and optional developer-tool metadata. CodePulse
-does not intentionally add credentials, conversation content, or file contents,
-but user-entered text may itself be sensitive. Protect backup files and review
-them before sharing.
+session text, filesystem paths, optional developer-tool metadata, and the
+processed-event ledger containing event identifiers and processing timestamps
+(up to 2,048 entries, with entries older than 30 days pruned). CodePulse does
+not intentionally add credentials, conversation content, or file contents, but
+user-entered text may itself be sensitive. Protect backup files and review them
+before sharing.
 
 CodePulse currently exports backups but does not restore them automatically.
 

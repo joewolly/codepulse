@@ -120,7 +120,7 @@ enum OpenCodePluginSource {
         return """
         // CodePulse developer integration (managed)
         const CODEPULSE_HELPER = \(helperLiteral);
-        const CODEPULSE_SCHEMA_VERSION = 1;
+        const CODEPULSE_SCHEMA_VERSION = \(DeveloperToolEvent.currentSchemaVersion);
         const sessions = new Map();
 
         function text(value) {
@@ -175,7 +175,8 @@ enum OpenCodePluginSource {
               stderr: "ignore"
             });
             child.stdin.write(JSON.stringify(event));
-            child.stdin.end();
+            await child.stdin.end();
+            await child.exited;
           } catch (_) {
             // Integration delivery is optional and must not affect OpenCode.
           }

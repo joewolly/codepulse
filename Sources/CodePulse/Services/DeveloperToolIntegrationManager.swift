@@ -121,7 +121,7 @@ final class DeveloperToolIntegrationManager: ObservableObject {
         var nextStatuses: [DeveloperTool: DeveloperToolIntegrationStatus] = [:]
         for tool in DeveloperTool.allCases {
             guard let installer = installers[tool] else { continue }
-            let detected = detector.isAvailable(named: tool == .codex ? "codex" : "opencode")
+            let detected = detector.isAvailable(named: tool.executableName)
             let enabled: Bool
             let installerError: String?
             do {
@@ -158,7 +158,7 @@ final class DeveloperToolIntegrationManager: ObservableObject {
     @discardableResult
     func enable(_ tool: DeveloperTool) -> Bool {
         guard let installer = installers[tool] else { return false }
-        guard detector.isAvailable(named: tool == .codex ? "codex" : "opencode") else {
+        guard detector.isAvailable(named: tool.executableName) else {
             errors[tool] = DeveloperToolIntegrationError.toolNotDetected(tool).localizedDescription
             refresh()
             return false

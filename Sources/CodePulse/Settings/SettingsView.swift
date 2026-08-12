@@ -230,53 +230,6 @@ struct SettingsView: View {
         }
     }
 
-private struct DeveloperToolIntegrationRow: View {
-    let tool: DeveloperTool
-    let status: DeveloperToolIntegrationStatus
-    let enable: () -> Void
-    let disable: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(tool.title, systemImage: tool.systemImage)
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(statusLabel)
-                    .font(.caption)
-                    .foregroundStyle(status.isEnabled ? .green : .secondary)
-            }
-
-            Text(status.detail)
-                .font(.caption)
-                .foregroundStyle(status.errorMessage == nil ? Color.secondary : Color.red)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text("Managed at \(status.installationDescription)")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .truncationMode(.middle)
-
-            Button(status.isEnabled ? "Disable integration" : "Enable integration") {
-                if status.isEnabled {
-                    disable()
-                } else {
-                    enable()
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(!status.isDetected && !status.isEnabled)
-        }
-        .padding(.vertical, 3)
-    }
-
-    private var statusLabel: String {
-        if !status.isDetected { return "Not detected" }
-        return status.isEnabled ? "Enabled" : "Disabled"
-    }
-}
-
     private func addProject() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -324,5 +277,53 @@ private struct DeveloperToolIntegrationRow: View {
         } catch {
             backupError = error.localizedDescription
         }
+    }
+}
+
+private struct DeveloperToolIntegrationRow: View {
+    let tool: DeveloperTool
+    let status: DeveloperToolIntegrationStatus
+    let enable: () -> Void
+    let disable: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(tool.title, systemImage: tool.systemImage)
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(statusLabel)
+                    .font(.caption)
+                    .foregroundStyle(status.isEnabled ? .green : .secondary)
+            }
+
+            Text(status.detail)
+                .font(.caption)
+                .foregroundStyle(status.errorMessage == nil ? Color.secondary : Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Managed at \(status.installationDescription)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            Button(status.isEnabled ? "Disable integration" : "Enable integration") {
+                if status.isEnabled {
+                    disable()
+                } else {
+                    enable()
+                }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("\(status.isEnabled ? "Disable" : "Enable") \(tool.title) integration")
+            .disabled(!status.isDetected && !status.isEnabled)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var statusLabel: String {
+        if !status.isDetected { return "Not detected" }
+        return status.isEnabled ? "Enabled" : "Disabled"
     }
 }

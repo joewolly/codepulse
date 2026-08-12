@@ -113,14 +113,20 @@ final class DeveloperToolIntegrationTests: XCTestCase {
             pauseIntervals: [],
             developerToolContexts: [context]
         )]
+        let processedEventID = UUID()
+        state.developerToolIntegration = DeveloperToolIntegrationProcessingState(
+            processedEvents: [DeveloperToolProcessedEvent(id: processedEventID, processedAt: now)]
+        )
 
         let data = try CodePulseBackupCodec.encode(state: state, exportedAt: now)
         let backupText = try XCTUnwrap(String(data: data, encoding: .utf8))
         XCTAssertTrue(backupText.contains("developerToolContexts"))
         XCTAssertTrue(backupText.contains("thread-privacy"))
         XCTAssertTrue(backupText.contains("GPT-5.6"))
+        XCTAssertTrue(backupText.contains(processedEventID.uuidString))
+        XCTAssertTrue(backupText.contains("processedAt"))
         for forbidden in ["transcript", "assistant message", "tool-call arguments", "command output", "api key"] {
-            XCTAssertFalse(backupText.localizedCaseInsensitiveContains(forbidden), "Found (forbidden) in backup")
+            XCTAssertFalse(backupText.localizedCaseInsensitiveContains(forbidden), "Found \(forbidden) in backup")
         }
         XCTAssertEqual(try CodePulseBackupCodec.decode(data).state, state)
     }
@@ -310,6 +316,37 @@ final class DeveloperToolIntegrationTests: XCTestCase {
 
         XCTAssertEqual(state.activeSession?.developerToolContexts.first?.eventCount, 1)
         XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+    }
+
+    func testCleanupFailureDoesNotReattachProcessedEvent() throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("codepulse", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let project = ProjectRecord(name: "CodePulse", folderPath: projectURL.path, createdAt: now)
+        var state = AppState()
+        state.projects = [project]
+        state.activeSession = ActiveSession(
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: now.addingTimeInterval(-60)
+        )
+        let event = event(id: UUID(), tool: .codex, sessionID: "cleanup-failure", type: .activity, path: projectURL.path)
+        try DeveloperToolInbox(paths: paths).write(event)
+
+        let failingInbox = DeveloperToolInbox(
+            paths: paths,
+            fileManager: FailingRemoveFileManager()
+        )
+        let consumer = DeveloperToolEventConsumer(inbox: failingInbox)
+        XCTAssertTrue(consumer.processPending(state: &state, now: now))
+        XCTAssertEqual(state.activeSession?.developerToolContexts.first?.eventCount, 1)
+        let retainedURL = try XCTUnwrap(failingInbox.pendingEventURLs().first)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: retainedURL.path))
+        XCTAssertFalse(failingInbox.remove(retainedURL))
+
+        _ = consumer.processPending(state: &state, now: now.addingTimeInterval(1))
+        XCTAssertEqual(state.activeSession?.developerToolContexts.first?.eventCount, 1)
     }
 
     func testMalformedUnsupportedAndStaleEventsAreRemovedWithoutAttachment() throws {
@@ -613,12 +650,28 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         let source = try String(contentsOf: pluginURL, encoding: .utf8)
         XCTAssertTrue(source.hasPrefix(OpenCodeIntegrationInstaller.managedMarker))
         XCTAssertTrue(source.contains("Bun.spawn([CODEPULSE_HELPER, \"--event\"]"))
+        XCTAssertTrue(source.contains("const CODEPULSE_SCHEMA_VERSION = \(DeveloperToolEvent.currentSchemaVersion);"))
+        XCTAssertTrue(source.contains("await child.stdin.end();"))
+        XCTAssertTrue(source.contains("await child.exited;"))
         XCTAssertTrue(source.contains("session.created"))
         XCTAssertTrue(source.contains("session.status"))
-        XCTAssertFalse(source.contains("message"))
-        XCTAssertFalse(source.contains("prompt"))
-        XCTAssertFalse(source.contains("transcript"))
-        XCTAssertFalse(source.contains("command"))
+        for forbiddenKey in [
+            "prompt", "message", "content", "part", "parts", "tool",
+            "command", "arguments", "input", "output", "transcript"
+        ] {
+            XCTAssertFalse(
+                source.contains("properties.\(forbiddenKey)"),
+                "Found forwarded OpenCode payload key properties.\(forbiddenKey)"
+            )
+        }
+        for forbiddenEventPrefix in [
+            #"event.type === \"message."#, #"event.type === \"tool."#, #"event.type === \"command."#
+        ] {
+            XCTAssertFalse(
+                source.contains(forbiddenEventPrefix),
+                "Found content-bearing OpenCode event subscription \(forbiddenEventPrefix)"
+            )
+        }
 
         try installer.disable()
         XCTAssertFalse(FileManager.default.fileExists(atPath: pluginURL.path))
@@ -713,4 +766,10 @@ private final class TestPersistence: StatePersisting {
 private final class NoOpGitService: GitServicing, @unchecked Sendable {
     func captureStartSnapshot(at folderURL: URL) -> GitStartSnapshot? { nil }
     func captureFinishSnapshot(for startSnapshot: GitStartSnapshot) -> GitFinishSnapshot? { nil }
+}
+
+private final class FailingRemoveFileManager: FileManager {
+    override func removeItem(at url: URL) throws {
+        throw NSError(domain: "DeveloperToolIntegrationTests", code: 1)
+    }
 }

@@ -77,9 +77,13 @@ snapshots, developer-tool session metadata, and active session state stay on the
 Mac unless the user exports or shares a backup. Developer-tool metadata is
 limited to the tool name, external session identifier, working directory,
 timestamps, lifecycle event count, and optional model/profile labels. CodePulse
-does not collect prompts, responses, transcripts, source code, terminal command
-contents, command output, tool-call arguments or results, permission decisions,
-reasoning, conversation summaries, or credentials.
+also keeps a local deduplication ledger of processed event identifiers and
+timestamps (up to 2,048 entries; entries older than 30 days are pruned), which
+may appear in exported backups. Inbox cleanup after processing is best effort,
+so a filesystem failure may leave a local event file. CodePulse does not collect
+prompts, responses, transcripts, source code, terminal command contents, command
+output, tool-call arguments or results, permission decisions, reasoning,
+conversation summaries, or credentials.
 
 Sparkle checks CodePulse release assets on GitHub. When `gh` is installed, the
 optional GitHub Context feature uses the user's existing GitHub CLI setup for

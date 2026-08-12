@@ -138,7 +138,10 @@ private struct ActiveSessionView: View {
 
             if let contexts = store.activeSession?.developerToolContexts,
                !contexts.isEmpty {
-                DeveloperToolContextList(contexts: contexts, showsEventCounts: false)
+                ScrollView(.vertical) {
+                    DeveloperToolContextList(contexts: contexts, showsEventCounts: false)
+                }
+                .frame(maxHeight: 120)
             }
 
             HStack(spacing: 10) {
@@ -206,7 +209,10 @@ private struct FinishingSessionView: View {
 
             if let contexts = store.activeSession?.developerToolContexts,
                !contexts.isEmpty {
-                DeveloperToolContextList(contexts: contexts, showsEventCounts: false)
+                ScrollView(.vertical) {
+                    DeveloperToolContextList(contexts: contexts, showsEventCounts: false)
+                }
+                .frame(maxHeight: 120)
             }
 
             VStack(alignment: .leading, spacing: 6) {
