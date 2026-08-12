@@ -4,56 +4,62 @@ import SwiftUI
 struct InsightsView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var timeframe: InsightsTimeframe = .thisWeek
+    @State private var project: InsightsProjectFilter = .allProjects
+
+    private var projectOptions: [InsightsProjectOption] {
+        store.insightsProjectOptions
+    }
 
     private var summary: InsightsSummary {
         InsightsCalculator.summary(
             state: store.state,
             calendar: store.calendar,
             referenceDate: store.now,
-            timeframe: timeframe
+            timeframe: timeframe,
+            project: project
         )
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(timeframe.title)
-                            .font(.title2.weight(.semibold))
-                        Text("Active time from saved and current local sessions")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Picker("Timeframe", selection: $timeframe) {
-                        ForEach(InsightsTimeframe.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .accessibilityLabel("Insights timeframe")
-                    .accessibilityValue(timeframe.title)
-                }
+            VStack(alignment: .leading, spacing: 24) {
+                InsightsFilterBar(
+                    timeframe: $timeframe,
+                    project: $project,
+                    projectOptions: projectOptions
+                )
 
                 if summary.hasActivity {
-                    SummaryHeader(summary: summary)
-                    DailyActivityChart(activity: summary.dailyActivity, calendar: store.calendar)
+                    InsightSummarySection(summary: summary)
+                    ActivityChart(
+                        activity: summary.dailyActivity,
+                        timeframe: timeframe,
+                        calendar: store.calendar
+                    )
 
-                    HStack(alignment: .top, spacing: 24) {
-                        BreakdownSection(
-                            title: "Projects",
-                            systemImage: "folder",
-                            values: summary.projectBreakdown
-                        )
-                        BreakdownSection(
-                            title: "Work Type",
-                            systemImage: "square.grid.2x2",
-                            values: summary.typeBreakdown
-                        )
+                    InsightSection(title: "Work Type", systemImage: "square.grid.2x2") {
+                        InsightBreakdownBars(values: summary.typeBreakdown)
+                    }
+
+                    InsightSection(title: "Projects", systemImage: "folder") {
+                        InsightBreakdownBars(values: summary.projectBreakdown)
+                    }
+
+                    DeveloperToolInsightSection(insights: summary.developerToolInsights)
+
+                    if summary.gitInsights.sessionsWithGitContext > 0 {
+                        GitInsightSection(insights: summary.gitInsights)
+                    }
+
+                    if summary.githubInsights.sessionsWithGitHubContext > 0 {
+                        GitHubInsightSection(insights: summary.githubInsights)
                     }
                 } else {
-                    InsightsEmptyState(timeframe: timeframe)
+                    InsightsEmptyState(
+                        timeframe: timeframe,
+                        projectTitle: projectTitle,
+                        hasAnySessions: hasAnySessions
+                    )
                 }
             }
             .padding(24)
@@ -62,139 +68,489 @@ struct InsightsView: View {
         .navigationTitle("Insights")
         .frame(minWidth: 700, idealWidth: 760, minHeight: 560, idealHeight: 620)
     }
+
+    private var hasAnySessions: Bool {
+        !store.state.completedSessions.isEmpty || store.state.activeSession != nil
+    }
+
+    private var projectTitle: String {
+        switch project {
+        case .allProjects:
+            return "All Projects"
+        case .noProject:
+            return "No Project"
+        case .projectID(let projectID):
+            return projectOptions.first(where: { $0.filter == .projectID(projectID) })?.title ?? "Project"
+        case .historicalName(let name):
+            return name
+        }
+    }
 }
 
-private struct SummaryHeader: View {
+private struct InsightsFilterBar: View {
+    @Binding var timeframe: InsightsTimeframe
+    @Binding var project: InsightsProjectFilter
+    let projectOptions: [InsightsProjectOption]
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(timeframe.title)
+                    .font(.title2.weight(.semibold))
+                Text("Local active time from saved and current sessions")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 16)
+
+            Picker("Timeframe", selection: $timeframe) {
+                ForEach(InsightsTimeframe.allCases) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityLabel("Insights timeframe")
+            .accessibilityValue(timeframe.title)
+
+            Picker("Project", selection: $project) {
+                Text("All Projects").tag(InsightsProjectFilter.allProjects)
+                Text("No Project").tag(InsightsProjectFilter.noProject)
+                if !projectOptions.isEmpty {
+                    Divider()
+                    ForEach(projectOptions) { option in
+                        Text(option.title).tag(option.filter)
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityLabel("Insights project")
+            .accessibilityValue(projectTitle)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var projectTitle: String {
+        switch project {
+        case .allProjects: return "All Projects"
+        case .noProject: return "No Project"
+        case .projectID(let projectID):
+            return projectOptions.first(where: { $0.filter == .projectID(projectID) })?.title ?? "Project"
+        case .historicalName(let name): return name
+        }
+    }
+}
+
+private struct InsightSummarySection: View {
     let summary: InsightsSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(CodePulseFormatting.duration(summary.totalDuration))
-                .font(.system(size: 36, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .accessibilityLabel("\(summary.timeframe.title) active time")
-                .accessibilityValue(CodePulseFormatting.duration(summary.totalDuration, includeSeconds: true))
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Summary")
+                .font(.headline)
 
-            Text(comparisonText)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Compared with the previous period")
-                .accessibilityValue(comparisonText)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 135), alignment: .leading)],
+                alignment: .leading,
+                spacing: 16
+            ) {
+                InsightMetric(
+                    title: "Active Time",
+                    value: CodePulseFormatting.duration(summary.totalDuration),
+                    detail: summary.durationDifference.map {
+                        "\(CodePulseFormatting.signedDuration($0)) \(comparisonLabel)"
+                    }
+                )
+                InsightMetric(
+                    title: "Sessions",
+                    value: "\(summary.sessionCount)",
+                    detail: sessionDifference
+                )
+                InsightMetric(
+                    title: "Average Session",
+                    value: summary.sessionCount == 0
+                        ? "—"
+                        : CodePulseFormatting.duration(summary.averageSessionDuration),
+                    detail: nil
+                )
+                InsightMetric(
+                    title: "Longest Session",
+                    value: summary.sessionCount == 0
+                        ? "—"
+                        : CodePulseFormatting.duration(summary.longestSessionDuration),
+                    detail: nil
+                )
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
         }
-    }
-
-    private var comparisonText: String {
-        if summary.comparisonDuration == 0, summary.totalDuration == 0 {
-            return "No activity in the comparison period"
-        }
-        return "\(CodePulseFormatting.signedDuration(summary.difference)) \(comparisonLabel)"
     }
 
     private var comparisonLabel: String {
         switch summary.timeframe {
-        case .thisWeek:
-            return "vs last week"
-        case .lastWeek:
-            return "vs the week before"
-        case .last30Days:
-            return "vs the previous 30 days"
+        case .thisWeek: return "vs last week"
+        case .lastWeek: return "vs the week before"
+        case .thisMonth: return "vs last month"
+        case .last30Days: return "vs the previous 30 days"
+        case .last90Days: return "vs the previous 90 days"
+        case .allTime: return ""
         }
+    }
+
+    private var sessionDifference: String? {
+        guard let comparisonSessionCount = summary.comparisonSessionCount else { return nil }
+        let difference = summary.sessionCount - comparisonSessionCount
+        let sign = difference < 0 ? "−" : "+"
+        return "\(sign)\(abs(difference)) \(comparisonLabel)"
     }
 }
 
-private struct DailyActivityChart: View {
-    let activity: [DailyActivity]
-    let calendar: Calendar
+private struct InsightMetric: View {
+    let title: String
+    let value: String
+    let detail: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Daily Activity")
-                .font(.headline)
-
-            Chart(activity) { day in
-                BarMark(
-                    x: .value("Day", day.date, unit: .day),
-                    y: .value("Hours", day.duration / 3_600)
-                )
-                .foregroundStyle(Color.accentColor)
-                .accessibilityLabel(Text(CodePulseFormatting.fullDay(day.date, calendar: calendar)))
-                .accessibilityValue(Text(CodePulseFormatting.duration(day.duration)))
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if let detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-            .chartYAxisLabel("Hours")
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .day)) { value in
-                    AxisGridLine()
-                    AxisTick()
-                    AxisValueLabel(format: .dateTime.weekday(.narrow))
-                }
-            }
-            .frame(height: 190)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Daily active time chart")
-            .accessibilityValue(accessibilitySummary)
         }
-        .padding(.vertical, 2)
-    }
-
-    private var accessibilitySummary: String {
-        activity.map { day in
-            "\(CodePulseFormatting.fullDay(day.date, calendar: calendar)): \(CodePulseFormatting.duration(day.duration))"
-        }.joined(separator: "; ")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(detail.map { "\(value), \($0)" } ?? value)
     }
 }
 
-private struct BreakdownSection: View {
+private struct InsightSection<Content: View>: View {
     let title: String
     let systemImage: String
-    let values: [InsightsBreakdown]
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
+            content()
+        }
+    }
+}
 
+private struct InsightBreakdownBars: View {
+    let values: [InsightsBreakdown]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
             if values.isEmpty {
                 Text("No activity")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(spacing: 8) {
-                    ForEach(values) { value in
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(value.label)
-                                .lineLimit(1)
-                            Spacer(minLength: 12)
-                            Text(CodePulseFormatting.duration(value.duration))
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(value.label)
-                        .accessibilityValue(CodePulseFormatting.duration(value.duration))
-                    }
+                ForEach(values) { value in
+                    DistributionBar(
+                        label: value.label,
+                        value: value.duration,
+                        maximum: values.first?.duration ?? value.duration,
+                        valueLabel: CodePulseFormatting.duration(value.duration)
+                    )
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DistributionBar: View {
+    let label: String
+    let value: TimeInterval
+    let maximum: TimeInterval
+    let valueLabel: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(label)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 8)
+                Text(valueLabel)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+
+            GeometryReader { geometry in
+                let fraction = maximum > 0 ? value / maximum : 0
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.78))
+                    .frame(width: max(3, geometry.size.width * fraction), height: 7)
+            }
+            .frame(height: 7)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(valueLabel)
+    }
+}
+
+private struct ActivityBucket: Identifiable {
+    let date: Date
+    let duration: TimeInterval
+    let label: String
+
+    var id: Date { date }
+}
+
+private struct ActivityChart: View {
+    let activity: [DailyActivity]
+    let timeframe: InsightsTimeframe
+    let calendar: Calendar
+
+    private var usesWeeklyBuckets: Bool {
+        timeframe == .last90Days || timeframe == .allTime && activity.count > 45
+    }
+
+    private var buckets: [ActivityBucket] {
+        guard usesWeeklyBuckets else {
+            return activity.map {
+                ActivityBucket(
+                    date: $0.date,
+                    duration: $0.duration,
+                    label: CodePulseFormatting.fullDay($0.date, calendar: calendar)
+                )
+            }
+        }
+
+        var grouped: [Date: TimeInterval] = [:]
+        for day in activity {
+            let weekStart = calendar.dateInterval(of: .weekOfYear, for: day.date)?.start ?? day.date
+            grouped[weekStart, default: 0] += day.duration
+        }
+        return grouped.map { date, duration in
+            ActivityBucket(
+                date: date,
+                duration: duration,
+                label: CodePulseFormatting.fullDay(date, calendar: calendar)
+            )
+        }.sorted { $0.date < $1.date }
+    }
+
+    var body: some View {
+        InsightSection(title: "Activity Over Time", systemImage: "chart.bar.xaxis") {
+            Chart(buckets) { bucket in
+                BarMark(
+                    x: .value("Period", bucket.date, unit: usesWeeklyBuckets ? .weekOfYear : .day),
+                    y: .value("Active Hours", bucket.duration / 3_600)
+                )
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel(Text(bucket.label))
+                .accessibilityValue(Text(CodePulseFormatting.duration(bucket.duration)))
+            }
+            .chartYAxisLabel("Hours")
+            .chartXAxis {
+                AxisMarks(values: .automatic) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    if usesWeeklyBuckets {
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    } else {
+                        AxisValueLabel(format: .dateTime.weekday(.narrow))
+                    }
+                }
+            }
+            .frame(height: 190)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(usesWeeklyBuckets ? "Weekly active time chart" : "Daily active time chart")
+            .accessibilityValue(accessibilitySummary)
+        }
+    }
+
+    private var accessibilitySummary: String {
+        buckets.map { "\($0.label): \(CodePulseFormatting.duration($0.duration))" }
+            .joined(separator: "; ")
+    }
+}
+
+private struct DeveloperToolInsightSection: View {
+    let insights: DeveloperToolInsights
+
+    var body: some View {
+        InsightSection(title: "Developer Tools", systemImage: "wrench.and.screwdriver") {
+            VStack(alignment: .leading, spacing: 8) {
+                InsightCountRow(label: "Codex", count: insights.sessionsWithCodex)
+                InsightCountRow(label: "OpenCode", count: insights.sessionsWithOpenCode)
+                InsightCountRow(label: "Both tools", count: insights.sessionsWithBoth)
+                InsightCountRow(label: "Any developer tool", count: insights.sessionsWithAnyTool)
+                InsightCountRow(label: "No developer tool", count: insights.sessionsWithNoTool)
+            }
+
+            Text("Participation counts sessions. A session using both tools is included in both tool totals and the overlapping Both tools total.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if insights.hasModelData {
+                InsightMetadataList(title: "Models", values: insights.modelBreakdown)
+            }
+            if insights.hasProfileData {
+                InsightMetadataList(title: "Profiles / Agents", values: insights.profileBreakdown)
+            }
+        }
+    }
+}
+
+private struct InsightCountRow: View {
+    let label: String
+    let count: Int
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text("\(count) \(count == 1 ? "session" : "sessions")")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct InsightMetadataList: View {
+    let title: String
+    let values: [InsightsCountBreakdown]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 4)
+            ForEach(values) { value in
+                HStack {
+                    Text(value.label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Text("\(value.count) \(value.count == 1 ? "session" : "sessions")")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
+private struct GitInsightSection: View {
+    let insights: GitInsights
+
+    var body: some View {
+        InsightSection(title: "Git Activity", systemImage: "arrow.triangle.branch") {
+            VStack(alignment: .leading, spacing: 8) {
+                InsightCountRow(label: "Sessions with Git context", count: insights.sessionsWithGitContext)
+                if let totalCommits = insights.totalCommits {
+                    InsightValueRow(label: "Commits", value: "\(totalCommits)")
+                }
+                if let totalFilesChanged = insights.totalFilesChanged {
+                    InsightValueRow(label: "Files Changed", value: "\(totalFilesChanged)")
+                }
+                if let totalInsertions = insights.totalInsertions {
+                    InsightValueRow(label: "Insertions", value: "+\(totalInsertions)")
+                }
+                if let totalDeletions = insights.totalDeletions {
+                    InsightValueRow(label: "Deletions", value: "−\(totalDeletions)")
+                }
+                if !insights.hasMetrics {
+                    Text("Detailed Git totals are unavailable for these historical snapshots.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct GitHubInsightSection: View {
+    let insights: GitHubInsights
+
+    var body: some View {
+        InsightSection(title: "GitHub Activity", systemImage: "arrow.up.forward.app") {
+            VStack(alignment: .leading, spacing: 8) {
+                InsightCountRow(label: "Sessions with GitHub context", count: insights.sessionsWithGitHubContext)
+                InsightCountRow(label: "Sessions with pull requests", count: insights.sessionsWithPullRequest)
+                InsightValueRow(label: "Repositories", value: "\(insights.uniqueRepositories)")
+                InsightValueRow(label: "Pull requests", value: "\(insights.uniquePullRequests)")
+            }
+
+            if !insights.repositoryBreakdown.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Repository Time")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+                    InsightBreakdownBars(values: insights.repositoryBreakdown)
+                }
+            }
+        }
+    }
+}
+
+private struct InsightValueRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
 private struct InsightsEmptyState: View {
     let timeframe: InsightsTimeframe
+    let projectTitle: String
+    let hasAnySessions: Bool
 
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: "chart.bar.xaxis")
+            Image(systemName: hasAnySessions ? "chart.bar.xaxis" : "clock")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text("No coding sessions \(timeframe == .thisWeek ? "this week" : "in this period") yet.")
+            Text(hasAnySessions ? "No Active Time in This Selection" : "No Sessions Yet")
                 .font(.headline)
-            Text("Start a session from the menu bar and your local activity will appear here.")
+            Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, minHeight: 260)
         .accessibilityElement(children: .combine)
+    }
+
+    private var message: String {
+        if !hasAnySessions {
+            return "Start a session from the menu bar and your local activity will appear here."
+        }
+        if projectTitle == "All Projects" {
+            return "There is no active session overlap in \(timeframe.title.lowercased()). Try another timeframe."
+        }
+        return "There is no active session overlap for \(projectTitle) in \(timeframe.title.lowercased()). Try another project or timeframe."
     }
 }

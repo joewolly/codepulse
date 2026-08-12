@@ -1,4 +1,5 @@
 import AppKit
+import CodePulseIntegration
 import SwiftUI
 import XCTest
 @testable import CodePulse
@@ -186,6 +187,66 @@ private struct ScreenshotFixture {
     init() {
         referenceDate = Self.date(day: 12, hour: 11, minute: 30)
 
+        let codex = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "fixture-codex-1",
+            workingDirectory: "/Users/demo/Projects/CodePulse",
+            firstActivityAt: Self.date(day: 11, hour: 14),
+            lastActivityAt: Self.date(day: 11, hour: 15),
+            model: "GPT-5.6 Sol",
+            profile: "Builder",
+            eventCount: 4
+        )
+        let openCode = DeveloperToolSessionContext(
+            tool: .opencode,
+            externalSessionID: "fixture-opencode-1",
+            workingDirectory: "/Users/demo/Projects/CodePulse",
+            firstActivityAt: Self.date(day: 11, hour: 9, minute: 30),
+            lastActivityAt: Self.date(day: 11, hour: 12),
+            model: "DeepSeek V4 Flash",
+            eventCount: 7
+        )
+        let bothCodex = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "fixture-codex-2",
+            workingDirectory: "/Users/demo/Projects/CodePulse",
+            firstActivityAt: Self.date(day: 11, hour: 9, minute: 30),
+            lastActivityAt: Self.date(day: 11, hour: 12),
+            model: "GPT-5.6 Sol",
+            profile: "Builder",
+            eventCount: 6
+        )
+        let bothOpenCode = DeveloperToolSessionContext(
+            tool: .opencode,
+            externalSessionID: "fixture-opencode-2",
+            workingDirectory: "/Users/demo/Projects/CodePulse",
+            firstActivityAt: Self.date(day: 11, hour: 9, minute: 30),
+            lastActivityAt: Self.date(day: 11, hour: 12),
+            model: "DeepSeek V4 Flash",
+            profile: "Reviewer",
+            eventCount: 5
+        )
+        let codePulsePullRequest = GitHubPullRequestSnapshot(
+            number: 18,
+            title: "Make session insights easier to scan",
+            state: .open,
+            isDraft: false,
+            url: "https://github.com/demo/codepulse/pull/18",
+            baseBranch: "main",
+            headBranch: "feature/insights"
+        )
+        let codePulseGitHub = GitHubSessionContext(
+            repositoryNameWithOwner: "demo/codepulse",
+            repositoryURL: "https://github.com/demo/codepulse",
+            repositoryIsPrivate: false,
+            pullRequest: codePulsePullRequest
+        )
+        let docsKitGitHub = GitHubSessionContext(
+            repositoryNameWithOwner: "demo/docskit",
+            repositoryURL: "https://github.com/demo/docskit",
+            repositoryIsPrivate: false
+        )
+
         let projects = [
             ProjectRecord(
                 id: codePulseID,
@@ -220,7 +281,9 @@ private struct ScreenshotFixture {
                 startMinute: 30,
                 endHour: 9,
                 endMinute: 50,
-                branch: "docs/onboarding"
+                branch: "docs/onboarding",
+                githubContext: docsKitGitHub,
+                developerToolContexts: [openCode]
             ),
             Self.session(
                 id: 2,
@@ -233,7 +296,9 @@ private struct ScreenshotFixture {
                 startHour: 14,
                 endHour: 15,
                 endMinute: 10,
-                branch: "fix/window-restore"
+                branch: "fix/window-restore",
+                githubContext: codePulseGitHub,
+                developerToolContexts: [codex]
             ),
             Self.session(
                 id: 3,
@@ -249,7 +314,9 @@ private struct ScreenshotFixture {
                 pauseStartHour: 10,
                 pauseStartMinute: 45,
                 pauseEndHour: 11,
-                branch: "feature/readme-screenshots"
+                branch: "feature/readme-screenshots",
+                githubContext: codePulseGitHub,
+                developerToolContexts: [bothCodex, bothOpenCode]
             ),
             Self.session(
                 id: 4,
@@ -278,7 +345,18 @@ private struct ScreenshotFixture {
                 pauseStartHour: 9,
                 pauseStartMinute: 45,
                 pauseEndHour: 10,
-                branch: "release/v0.5"
+                branch: "release/v0.5",
+                githubContext: codePulseGitHub,
+                developerToolContexts: [
+                    DeveloperToolSessionContext(
+                        tool: .codex,
+                        externalSessionID: "fixture-codex-3",
+                        workingDirectory: "/Users/demo/Projects/CodePulse",
+                        firstActivityAt: Self.date(day: 10, hour: 9),
+                        lastActivityAt: Self.date(day: 10, hour: 10),
+                        eventCount: 2
+                    )
+                ]
             ),
             Self.session(
                 id: 6,
@@ -367,7 +445,9 @@ private struct ScreenshotFixture {
         pauseStartHour: Int? = nil,
         pauseStartMinute: Int = 0,
         pauseEndHour: Int? = nil,
-        branch: String
+        branch: String,
+        githubContext: GitHubSessionContext? = nil,
+        developerToolContexts: [DeveloperToolSessionContext] = []
     ) -> CompletedSession {
         let pauses: [PauseInterval]
         if let pauseStartHour, let pauseEndHour {
@@ -403,7 +483,9 @@ private struct ScreenshotFixture {
                 filesChanged: 6,
                 insertions: 84,
                 deletions: 21
-            )
+            ),
+            githubContext: githubContext,
+            developerToolContexts: developerToolContexts
         )
     }
 

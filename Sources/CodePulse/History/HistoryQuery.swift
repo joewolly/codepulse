@@ -1,3 +1,4 @@
+import CodePulseIntegration
 import Foundation
 
 enum HistoryDateFilter: String, CaseIterable, Identifiable, Hashable {
@@ -67,6 +68,32 @@ enum HistoryGitFilter: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+enum HistoryDeveloperToolFilter: String, CaseIterable, Identifiable, Hashable {
+    case anyTool
+    case codex
+    case openCode
+    case noDeveloperTool
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .anyTool: return "Any Tool"
+        case .codex: return "Codex"
+        case .openCode: return "OpenCode"
+        case .noDeveloperTool: return "No Developer Tool"
+        }
+    }
+
+    var developerTool: DeveloperTool? {
+        switch self {
+        case .anyTool, .noDeveloperTool: return nil
+        case .codex: return .codex
+        case .openCode: return .opencode
+        }
+    }
+}
+
 enum HistoryProjectFilter: Hashable {
     case allProjects
     case noProject
@@ -95,6 +122,7 @@ struct HistoryQuery: Equatable {
     var date: HistoryDateFilter = .allTime
     var type: HistoryTypeFilter = .allTypes
     var git: HistoryGitFilter = .allSessions
+    var developerTool: HistoryDeveloperToolFilter = .anyTool
 
     var normalizedSearchText: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -105,7 +133,8 @@ struct HistoryQuery: Equatable {
         project != .allProjects ||
         date != .allTime ||
         type != .allTypes ||
-        git != .allSessions
+        git != .allSessions ||
+        developerTool != .anyTool
     }
 
     func matches(
@@ -141,10 +170,21 @@ struct HistoryQuery: Equatable {
             break
         }
 
+        let tools = Set(session.developerToolContexts.map(\.tool))
+        switch developerTool {
+        case .anyTool:
+            break
+        case .codex, .openCode:
+            guard let developerTool = developerTool.developerTool,
+                  tools.contains(developerTool) else { return false }
+        case .noDeveloperTool:
+            guard tools.isEmpty else { return false }
+        }
+
         let query = normalizedSearchText
         guard !query.isEmpty else { return true }
 
-        let searchableValues = [
+        var searchableValues: [String] = [
             session.projectName,
             session.goal,
             session.outcome,
@@ -155,10 +195,14 @@ struct HistoryQuery: Equatable {
             session.gitContext?.repositoryRoot,
             session.githubContext?.repositoryNameWithOwner,
             session.githubContext?.pullRequest.map { "#\($0.number)" },
+            session.githubContext?.pullRequest.map { "\($0.number)" },
             session.githubContext?.pullRequest?.title,
             session.githubContext?.pullRequest?.state.displayName,
             session.githubContext?.pullRequest?.branchDisplay
         ].compactMap { $0 }
+        searchableValues.append(contentsOf: session.developerToolContexts.flatMap { context in
+            [context.tool.title, context.model, context.profile].compactMap { $0 }
+        })
 
         return searchableValues.contains { value in
             value.localizedCaseInsensitiveContains(query)
