@@ -144,12 +144,17 @@ expected for this distribution model and is not a corrupt-DMG indication.
 
 To install the initial Sparkle-capable build:
 
-1. Open the DMG.
-2. Drag `CodePulse.app` to `Applications`.
-3. Try opening CodePulse from Finder.
-4. If macOS blocks the first launch, open System Settings → Privacy & Security
-   and use the available **Open Anyway** or **Allow** action for CodePulse,
-   then confirm the Finder open action.
+1. Drag `CodePulse.app` into `Applications`.
+2. Attempt to open CodePulse normally.
+3. macOS may show the verification warning.
+4. Click **Done** on that warning.
+5. Open **System Settings**.
+6. Open **Privacy & Security**.
+7. Scroll to the **Security** section.
+8. Find the blocked CodePulse message.
+9. Choose **Open Anyway**.
+10. Authenticate if macOS requests it.
+11. Confirm launching CodePulse.
 
 Do not disable Gatekeeper globally. The normal Finder context-menu **Open**
 flow is also an appropriate way to make the explicit first-launch decision.

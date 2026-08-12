@@ -25,7 +25,9 @@ developer-tool metadata.
   optionally their current pull request when the repository has a GitHub remote.
 - Optionally records that Codex and/or OpenCode participated in a selected
   project's session using only local lifecycle metadata.
-- Summarizes active time by day, project, and work type with native Swift Charts.
+- Provides richer local Insights for active time, sessions, projects, work types,
+  developer-tool participation, Git activity, and GitHub context with native
+  Swift Charts.
 - Exports a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -51,8 +53,8 @@ or allow the automatic update check.
 2. Optionally choose a project and work type, then describe the session goal.
 3. Start the session and pause or resume it as needed.
 4. Finish the session, record an optional outcome, and save it to History.
-5. Open History to search or edit saved sessions, or open Insights to review
-   local activity.
+5. Open History to search, filter, or edit saved sessions, or open Insights to
+   review local activity and context-derived summaries.
 6. If desired, open **Settings → Integrations** to enable Codex or OpenCode
    context enrichment. Integrations are optional and never control the timer.
 
@@ -67,7 +69,7 @@ folder you select, allowing it to read local Git metadata for that project.
 
 ### Insights
 
-![CodePulse Insights showing a weekly activity chart and project totals](docs/images/insights.png)
+![CodePulse Insights showing local summary metrics, activity, work types, and project totals](docs/images/insights.png)
 
 ## Local data and privacy
 
@@ -152,9 +154,18 @@ when the canonical working directory is that project's folder or a child
 directory. No Project sessions and unrelated projects are ignored. Integration
 events never start, pause, resume, or finish a CodePulse session.
 
-History filters before grouping sessions by day. Insights uses the user's local
-calendar and apportions active time across day and week boundaries while
-excluding pauses.
+CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
+metrics from the existing local session history, supports calendar and rolling
+timeframes plus project filtering, and shows participation-based developer-tool
+counts, optional model/profile labels, neutral Git Activity totals, and
+historical GitHub repository and pull-request context. These are local derived
+views only: CodePulse does not add an analytics database, upload analytics, or
+measure productivity.
+
+History filters before grouping sessions by day and searches existing project,
+journal, GitHub, and developer-tool metadata. Insights uses the user's local
+calendar, apportions active time across day and week boundaries while excluding
+pauses, and keeps historical GitHub snapshots unchanged.
 
 ## Tests
 
