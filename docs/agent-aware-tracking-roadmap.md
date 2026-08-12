@@ -139,7 +139,7 @@ not exist yet.
 
 | Feature | Owner | Branch | PR | Status | Merged |
 |---|---|---|---|---|---|
-| 00 | @ZacharyRW | `feature/00-roadmap` | — | In progress | — |
+| 00 | @ZacharyRW | `feature/00-roadmap` | [#1](https://github.com/ZacharyRW/codepulse/pull/1) | Merged | 2026-08-12 |
 | 01 | — | `feature/01-persistence-migrations` | — | Not started | — |
 | 02 | — | `feature/02-activity-domain-model` | — | Not started | — |
 | 03 | — | `feature/03-developer-event-v2` | — | Not started | — |
