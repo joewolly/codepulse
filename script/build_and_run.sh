@@ -79,6 +79,8 @@ fi
 }
 
 /usr/bin/xattr -cr "$APP_BUNDLE"
+/usr/bin/xattr -r -d com.apple.FinderInfo "$APP_BUNDLE" >/dev/null 2>&1 || true
+/usr/bin/xattr -r -d 'com.apple.fileprovider.fpfs#P' "$APP_BUNDLE" >/dev/null 2>&1 || true
 /usr/bin/codesign --force --sign - "$APP_BUNDLE"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
