@@ -57,15 +57,16 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
             let handler: [String: Any] = [
                 "type": "command",
                 "command": command,
-                "async": true,
                 "timeout": 2,
                 "statusMessage": Self.managedMarker
             ]
+            var backgroundHandler = handler
+            backgroundHandler["async"] = true
             hooks["SessionStart", default: []].append([
                 "matcher": "startup|resume|clear|compact",
-                "hooks": [handler]
+                "hooks": [backgroundHandler]
             ])
-            hooks["Stop", default: []].append(["hooks": [handler]])
+            hooks["Stop", default: []].append(["hooks": [backgroundHandler]])
             hooks["SessionEnd", default: []].append(["hooks": [handler]])
             root["hooks"] = hooks
             try writeHooksConfiguration(root)
