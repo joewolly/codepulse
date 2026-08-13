@@ -16,6 +16,12 @@ protocol DeveloperToolLifecycleCoordinating {
 /// events. The inbox remains the trust boundary; this coordinator receives
 /// only normalized metadata and never reads hook bodies or integration files.
 struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
+    private let workspaceResolver: GitWorkspaceResolving
+
+    init(workspaceResolver: GitWorkspaceResolving = SystemGitWorkspaceResolver()) {
+        self.workspaceResolver = workspaceResolver
+    }
+
     func apply(
         _ event: DeveloperEventV2,
         sessionFingerprint: String,
@@ -44,7 +50,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
         guard event.eventKind == .sessionStarted ||
                 event.eventKind == .activityObserved ||
                 event.eventKind == .permissionRequested,
-              let workspaceIndex = matchingWorkspaceIndex(for: event, in: state.activityGraph) else {
+              let workspaceIndex = workspaceIndex(for: event, in: &state) else {
             return false
         }
 
@@ -106,4 +112,39 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
                 return lhsLength < rhsLength
             }
     }
+
+    private func workspaceIndex(for event: DeveloperEventV2, in state: inout AppState) -> Int? {
+        if let index = matchingWorkspaceIndex(for: event, in: state.activityGraph) {
+            return index
+        }
+        guard let identity = workspaceResolver.resolve(workingDirectory: event.workingDirectory) else {
+            return nil
+        }
+        if let index = GitWorkspaceIdentityMatcher.workspaceIndex(for: identity, in: state.activityGraph) {
+            guard state.activityGraph.workspaces[index].automaticDiscoveryEnabled else { return index }
+            if !state.activityGraph.workspaces[index].roots.contains(where: { $0.path == identity.worktreeRoot }) {
+                state.activityGraph.workspaces[index].roots.append(WorkspaceRoot(
+                    path: identity.worktreeRoot,
+                    kind: .gitWorktree,
+                    addedAt: event.observedAt,
+                    gitIdentity: identity
+                ))
+            }
+            return index
+        }
+        guard state.settings.automaticGitWorkspaceDiscoveryEnabled else { return nil }
+        state.activityGraph.workspaces.append(Workspace(
+            name: URL(fileURLWithPath: identity.worktreeRoot).lastPathComponent,
+            roots: [WorkspaceRoot(
+                path: identity.worktreeRoot,
+                kind: .gitWorktree,
+                addedAt: event.observedAt,
+                gitIdentity: identity
+            )],
+            createdAt: event.observedAt,
+            source: .automatic
+        ))
+        return state.activityGraph.workspaces.index(before: state.activityGraph.workspaces.endIndex)
+    }
+
 }

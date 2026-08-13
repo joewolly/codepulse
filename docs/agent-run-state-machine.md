@@ -61,9 +61,10 @@ permission-decision fields. Feature 07 uses the OpenCode plugin event API:
 `session.deleted`. Unsupported status and error payloads remain diagnostics
 rather than being guessed into timing states.
 
-Codex correlation creates or resumes a run only for a matching local workspace
-root. Feature 08 will add Git workspace discovery; cloud-only sessions that
-have no local hook/process remain out of scope.
+Codex, Claude Code, and OpenCode correlation creates or resumes a run for a
+matching local workspace root, or a valid Git worktree discovered from the
+event's supplied working directory. Cloud-only sessions that have no local
+hook/process remain out of scope.
 
 ## Review grace and relaunch recovery
 

@@ -159,7 +159,8 @@ bodies. Codex and Claude Code hooks, plus the OpenCode local plugin event API,
 map local lifecycle signals into the shared agent-run state machine. Claude
 subagents remain separate runs linked to their parent by an installation-salted
 fingerprint. A run is correlated only when its working directory matches an
-existing local workspace; automatic workspace discovery arrives in Feature 08.
+existing local workspace or a valid Git worktree discovered from that event.
+Sibling Git worktrees stay separate; equivalent clones can share one workspace.
 These integrations do not start or control a manual CodePulse session, and
 cloud-only sessions are excluded. See
 [`docs/agent-run-state-machine.md`](docs/agent-run-state-machine.md) for the
@@ -167,7 +168,8 @@ event mapping and timing rules, and
 [`docs/codex-lifecycle-integration.md`](docs/codex-lifecycle-integration.md)
 and [`docs/claude-code-lifecycle-integration.md`](docs/claude-code-lifecycle-integration.md)
 and [`docs/opencode-lifecycle-integration.md`](docs/opencode-lifecycle-integration.md)
-for setup, privacy, and uninstall details.
+and [`docs/git-workspace-discovery.md`](docs/git-workspace-discovery.md) for
+setup, privacy, discovery, and uninstall details.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling
