@@ -32,8 +32,8 @@ developer-tool metadata.
   a review-grace countdown and waiting state. Agent runtime, manual active time,
   and de-duplicated combined wall-active time remain separate measures.
 - Classifies agent activities from content-safe local metadata into independent
-  work-type and domain labels. Optional prompt classification is off by default,
-  runs only in memory after consent, and immediately discards prompt text.
+  work-type and domain labels. Prompt classification is not currently
+  implemented or enabled.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -188,11 +188,10 @@ concurrent-run display and aggregate timing rules.
 
 Activity labels retain the existing work types while adding a separate domain
 such as Documentation or Automation. By default, classification uses only
-content-safe lifecycle/tool metadata and workspace/file-type signals. The
-optional **Use local prompt classification** setting performs a supported local
-prompt classification in memory only, then persists just the labels and a
-coarse `ephemeralPrompt` source. Activity detail controls allow local
-corrections, which always take precedence and never train or send data. See
+content-safe lifecycle/tool metadata and workspace/file-type signals. Prompt
+classification is deferred: no current integration sends prompt text to
+CodePulse for this purpose. Activity detail controls allow local corrections,
+which always take precedence and never train or send data. See
 [`docs/activity-classification.md`](docs/activity-classification.md) for the
 rule, consent, and precedence contract.
 

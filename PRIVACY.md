@@ -59,16 +59,14 @@ may leave an inbox file locally; the app removes handoffs best-effort after
 processing. Agent-run correlation is conservative and is not inferred from
 unrelated projects or manual sessions.
 
-CodePulse does **not** persist prompts, user messages, assistant messages,
+CodePulse does **not** inspect or persist prompts, user messages, assistant messages,
 conversation transcripts, source-file contents, terminal command contents,
 command output, tool-call arguments, tool-call results, permission decisions,
 reasoning, conversation summaries, credentials, or API keys. The Codex adapter
 does not parse transcript files. The OpenCode adapter does not scrape
-conversation storage or subscribe to content/tool events. The separately
-consented **Use local prompt classification** setting may classify a supported
-prompt in memory; it immediately discards the text and retains only the
-content-free labels and `ephemeralPrompt` source. It is off by default and has
-no effect on lifecycle timing.
+conversation storage or subscribe to content/tool events. Prompt classification
+is not implemented: no integration sends prompt text to CodePulse, and the v2
+event schema rejects prompt-bearing fields.
 
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and

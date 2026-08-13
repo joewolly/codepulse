@@ -56,31 +56,29 @@ final class ActivityClassificationTests: XCTestCase {
         activityObject.removeValue(forKey: "classifications")
         XCTAssertTrue(try decoder.decode(Activity.self, from: JSONSerialization.data(withJSONObject: activityObject)).classifications.isEmpty)
 
-        var settingsObject = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(CodePulseSettings())) as? [String: Any])
-        settingsObject.removeValue(forKey: "enhancedPromptClassificationEnabled")
-        XCTAssertFalse(try decoder.decode(CodePulseSettings.self, from: JSONSerialization.data(withJSONObject: settingsObject)).enhancedPromptClassificationEnabled)
     }
 
     func testMetadataFixtureMatrixKeepsWorkTypeAndDomainIndependent() {
         let workspace = Workspace(name: "Demo", createdAt: date, source: .manual)
-        let cases: [(String, SessionType, ActivityDomain)] = [
-            ("debug test", .debugging, .development),
-            ("architecture plan", .planning, .development),
-            ("review docs", .review, .documentation),
-            ("research automation", .research, .automation),
-            ("organize files", .coding, .fileOrganization)
+        let cases: [(DeveloperEventActionCategory?, DeveloperEventFileType?, SessionType, ActivityDomain)] = [
+            (.debugging, nil, .debugging, .development),
+            (.planning, nil, .planning, .development),
+            (.review, .documentation, .review, .documentation),
+            (.research, .automation, .research, .automation),
+            (.fileOrganization, nil, .coding, .fileOrganization),
+            (nil, .configuration, .coding, .administration)
         ]
 
-        for (sourceKind, expectedType, expectedDomain) in cases {
+        for (actionCategory, fileType, expectedType, expectedDomain) in cases {
             let records = ActivityClassificationRuleEngine.metadataClassifications(
-                event: event(sourceKind: sourceKind), workspace: workspace
+                event: event(actionCategory: actionCategory, fileType: fileType), workspace: workspace
             )
-            XCTAssertEqual(records.first(where: { $0.dimension == .workType })?.workType, expectedType, sourceKind)
-            XCTAssertEqual(records.first(where: { $0.dimension == .activityDomain })?.domain, expectedDomain, sourceKind)
+            XCTAssertEqual(records.first(where: { $0.dimension == .workType })?.workType, expectedType)
+            XCTAssertEqual(records.first(where: { $0.dimension == .activityDomain })?.domain, expectedDomain)
         }
 
         let localTask = Workspace(name: "Loose file", createdAt: date, source: .transientLocalTask)
-        let records = ActivityClassificationRuleEngine.metadataClassifications(event: event(sourceKind: "activity"), workspace: localTask)
+        let records = ActivityClassificationRuleEngine.metadataClassifications(event: event(), workspace: localTask)
         XCTAssertEqual(records.first(where: { $0.dimension == .activityDomain })?.domain, .localTask)
     }
 
@@ -95,7 +93,7 @@ final class ActivityClassificationTests: XCTestCase {
         let coordinator = DeveloperToolLifecycleCoordinator()
 
         XCTAssertTrue(coordinator.apply(
-            event(sourceKind: "debug documentation"),
+            event(actionCategory: .debugging, fileType: .documentation),
             sessionFingerprint: "classification-fingerprint",
             parentSessionFingerprint: nil,
             to: &state
@@ -105,51 +103,66 @@ final class ActivityClassificationTests: XCTestCase {
         XCTAssertEqual(state.activityGraph.activities.first?.classifications.map(\.source), [.metadata, .metadata])
     }
 
-    func testPromptClassificationRequiresConsentAndDoesNotPersistPromptText() throws {
-        let persistence = ClassificationPersistence()
-        let store = SessionStore(persistence: persistence, automaticallyRefresh: false)
-        let workspaceID = try XCTUnwrap(store.addWorkspace(name: "Demo", at: date))
-        let activityID = try XCTUnwrap(store.createActivity(workspaceID: workspaceID, title: "Classify", at: date))
-        let prompt = "confidential narwhal plan that must not persist"
-
-        XCTAssertFalse(store.classifyActivityFromEphemeralPrompt(prompt, id: activityID, at: date))
-        store.updateSettings { $0.enhancedPromptClassificationEnabled = true }
-        XCTAssertTrue(store.classifyActivityFromEphemeralPrompt(prompt, id: activityID, at: date))
-        XCTAssertEqual(store.activityGraph.activities.first?.workType, .planning)
-        XCTAssertEqual(store.activityGraph.activities.first?.effectiveClassification(for: .workType)?.source, .ephemeralPrompt)
-
-        let encoded = try JSONEncoder().encode(store.state)
-        XCTAssertFalse(try XCTUnwrap(String(data: encoded, encoding: .utf8)).contains(prompt))
-        let backup = try CodePulseBackupCodec.encode(state: store.state, exportedAt: date)
-        XCTAssertFalse(try XCTUnwrap(String(data: backup, encoding: .utf8)).contains(prompt))
-    }
-
     func testManualOverrideTakesPrecedenceAndUndoRestoresAutomaticValue() throws {
         let persistence = ClassificationPersistence()
         let store = SessionStore(persistence: persistence, automaticallyRefresh: false)
         let workspaceID = try XCTUnwrap(store.addWorkspace(name: "Demo", at: date))
         let activityID = try XCTUnwrap(store.createActivity(workspaceID: workspaceID, title: "Classify", at: date))
-        store.updateSettings { $0.enhancedPromptClassificationEnabled = true }
-        XCTAssertTrue(store.classifyActivityFromEphemeralPrompt("research a subject", id: activityID, at: date))
-        XCTAssertTrue(store.overrideActivityClassification(id: activityID, dimension: .workType, value: SessionType.review.rawValue, at: date.addingTimeInterval(1)))
-        XCTAssertEqual(store.activityGraph.activities.first?.workType, .review)
-        XCTAssertEqual(store.activityGraph.activities.first?.effectiveClassification(for: .workType)?.source, .userOverride)
-        XCTAssertTrue(store.undoActivityClassificationOverride(id: activityID, dimension: .workType, at: date.addingTimeInterval(2)))
-        XCTAssertEqual(store.activityGraph.activities.first?.workType, .research)
-        XCTAssertEqual(store.activityGraph.activities.first?.effectiveClassification(for: .workType)?.source, .ephemeralPrompt)
+        let automatic = try XCTUnwrap(ActivityClassification(
+            dimension: .workType,
+            value: SessionType.research.rawValue,
+            source: .metadata,
+            confidence: .high,
+            classifiedAt: date,
+            evidenceCategory: .actionCategory
+        ))
+        var graph = store.state.activityGraph
+        graph.activities[0].applyClassifications([automatic])
+        persistence.state.activityGraph = graph
+        let restoredStore = SessionStore(persistence: persistence, automaticallyRefresh: false)
+        XCTAssertTrue(restoredStore.overrideActivityClassification(id: activityID, dimension: .workType, value: SessionType.review.rawValue, at: date.addingTimeInterval(1)))
+        XCTAssertEqual(restoredStore.activityGraph.activities.first?.workType, .review)
+        XCTAssertEqual(restoredStore.activityGraph.activities.first?.effectiveClassification(for: .workType)?.source, .userOverride)
+        XCTAssertTrue(restoredStore.undoActivityClassificationOverride(id: activityID, dimension: .workType, at: date.addingTimeInterval(2)))
+        XCTAssertEqual(restoredStore.activityGraph.activities.first?.workType, .research)
+        XCTAssertEqual(restoredStore.activityGraph.activities.first?.effectiveClassification(for: .workType)?.source, .metadata)
     }
 
-    private func event(sourceKind: String) -> DeveloperEventV2 {
+    func testClassificationDoesNotPersistRawSourceKindInStateBackupOrDiagnostics() throws {
+        let rawSourceKind = "confidential-tool-payload"
+        let workspace = Workspace(name: "Demo", createdAt: date, source: .manual)
+        var activity = Activity(workspaceID: workspace.id, title: "Classify", createdAt: date)
+        activity.applyClassifications(ActivityClassificationRuleEngine.metadataClassifications(
+            event: event(sourceKind: rawSourceKind, actionCategory: .review), workspace: workspace
+        ))
+        let state = AppState(activityGraph: ActivityGraph(workspaces: [workspace], activities: [activity]))
+        let stateText = try XCTUnwrap(String(data: JSONEncoder().encode(state), encoding: .utf8))
+        let backupText = try XCTUnwrap(String(data: CodePulseBackupCodec.encode(state: state, exportedAt: date), encoding: .utf8))
+        let diagnosticsText = try XCTUnwrap(String(data: JSONEncoder().encode(ActivityGraphDiagnostics(graph: state.activityGraph)), encoding: .utf8))
+        XCTAssertFalse(stateText.contains(rawSourceKind))
+        XCTAssertFalse(backupText.contains(rawSourceKind))
+        XCTAssertFalse(diagnosticsText.contains(rawSourceKind))
+    }
+
+    private func event(
+        sourceKind: String = "test",
+        actionCategory: DeveloperEventActionCategory? = nil,
+        fileType: DeveloperEventFileType? = nil
+    ) -> DeveloperEventV2 {
         DeveloperEventV2(
             integration: .codex,
             eventKind: .activityObserved,
             observedAt: date,
-            idempotencyKey: "classification-\(sourceKind.replacingOccurrences(of: " ", with: "-"))",
+            idempotencyKey: "classification-event-key-0001",
             externalSessionKey: "classification-session",
             workingDirectory: "/tmp/classification",
             parserVersion: "test",
             integrationVersion: "test",
-            metadata: DeveloperEventMetadataV2(sourceKind: sourceKind)
+            metadata: DeveloperEventMetadataV2(
+                sourceKind: sourceKind,
+                actionCategory: actionCategory,
+                fileType: fileType
+            )
         )
     }
 }

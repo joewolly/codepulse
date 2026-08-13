@@ -274,23 +274,6 @@ final class SessionStore: ObservableObject {
         return true
     }
 
-    /// Prompt text is received only for this in-memory operation. It is not
-    /// added to AppState, diagnostics, persistence, or backup exports.
-    @discardableResult
-    func classifyActivityFromEphemeralPrompt(_ prompt: String, id: UUID, at date: Date? = nil) -> Bool {
-        guard state.settings.enhancedPromptClassificationEnabled,
-              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        var nextState = state
-        guard let index = nextState.activityGraph.activities.firstIndex(where: { $0.id == id }) else { return false }
-        let timestamp = date ?? clock.now
-        nextState.activityGraph.activities[index].applyClassifications(
-            ActivityClassificationRuleEngine.ephemeralPromptClassifications(prompt, at: timestamp)
-        )
-        nextState.activityGraph.activities[index].updatedAt = timestamp
-        commit(nextState)
-        return true
-    }
-
     @discardableResult
     func startRun(activityID: UUID, kind: RunKind = .manual, at date: Date? = nil) -> UUID? {
         var nextState = state

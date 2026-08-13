@@ -37,6 +37,28 @@ public enum DeveloperEventReceiptStatus: String, Codable, Equatable, Sendable {
     case rejected
 }
 
+/// Closed, content-free categories that an adapter may attach to a lifecycle
+/// event for local activity classification. They never contain a prompt,
+/// command, file name, or tool payload.
+public enum DeveloperEventActionCategory: String, Codable, CaseIterable, Equatable, Sendable {
+    case codeChange
+    case debugging
+    case planning
+    case review
+    case research
+    case fileOrganization
+    case automation
+    case administration
+    case documentation
+}
+
+public enum DeveloperEventFileType: String, Codable, CaseIterable, Equatable, Sendable {
+    case sourceCode
+    case documentation
+    case configuration
+    case automation
+}
+
 /// A bounded, content-free handoff from the receiver to the app's durable
 /// diagnostics journal. It intentionally has no event body, paths, or session
 /// identifiers.
@@ -75,17 +97,23 @@ public struct DeveloperEventMetadataV2: Codable, Equatable, Sendable {
     public let eventSequence: Int?
     public let sourceKind: String?
     public let transcriptAvailable: Bool?
+    public let actionCategory: DeveloperEventActionCategory?
+    public let fileType: DeveloperEventFileType?
 
     public init(
         adapterVersion: String? = nil,
         eventSequence: Int? = nil,
         sourceKind: String? = nil,
-        transcriptAvailable: Bool? = nil
+        transcriptAvailable: Bool? = nil,
+        actionCategory: DeveloperEventActionCategory? = nil,
+        fileType: DeveloperEventFileType? = nil
     ) {
         self.adapterVersion = adapterVersion
         self.eventSequence = eventSequence
         self.sourceKind = sourceKind
         self.transcriptAvailable = transcriptAvailable
+        self.actionCategory = actionCategory
+        self.fileType = fileType
     }
 }
 
@@ -153,7 +181,7 @@ public enum DeveloperEventV2Codec {
         "serviceMode", "parserVersion", "integrationVersion", "metadata"
     ]
     private static let allowedMetadataFields: Set<String> = [
-        "adapterVersion", "eventSequence", "sourceKind", "transcriptAvailable"
+        "adapterVersion", "eventSequence", "sourceKind", "transcriptAvailable", "actionCategory", "fileType"
     ]
     private static let forbiddenFields: Set<String> = [
         "prompt", "transcript", "source", "sourceContent", "content", "message", "messages",
@@ -298,7 +326,9 @@ public enum DeveloperEventV2Validator {
             adapterVersion: try sanitizeMetadata(metadata.adapterVersion),
             eventSequence: metadata.eventSequence,
             sourceKind: try sanitizeMetadata(metadata.sourceKind),
-            transcriptAvailable: metadata.transcriptAvailable
+            transcriptAvailable: metadata.transcriptAvailable,
+            actionCategory: metadata.actionCategory,
+            fileType: metadata.fileType
         )
     }
 

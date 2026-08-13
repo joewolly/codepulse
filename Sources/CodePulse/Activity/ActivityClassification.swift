@@ -10,7 +10,6 @@ enum ActivityClassificationDimension: String, Codable, CaseIterable, Equatable {
 
 enum ActivityClassificationSource: String, Codable, CaseIterable, Equatable {
     case metadata
-    case ephemeralPrompt
     case userOverride
 }
 
@@ -26,7 +25,6 @@ enum ActivityClassificationEvidenceCategory: String, Codable, CaseIterable, Equa
     case workspace
     case fileType
     case actionCategory
-    case ephemeralPrompt
     case userCorrection
 }
 
@@ -110,9 +108,8 @@ struct ActivityClassificationRuleEngine {
         event: DeveloperEventV2,
         workspace: Workspace
     ) -> [ActivityClassification] {
-        let signals = metadataSignals(event: event)
-        let workTypeMatch = workTypeMatch(for: signals)
-        let domainMatch = domainMatch(for: signals, workspace: workspace, workingDirectory: event.workingDirectory)
+        let workTypeMatch = workTypeMatch(for: event)
+        let domainMatch = domainMatch(event: event, workspace: workspace)
         return [
             ActivityClassification(
                 dimension: .workType,
@@ -133,67 +130,36 @@ struct ActivityClassificationRuleEngine {
         ].compactMap { $0 }
     }
 
-    /// This intentionally accepts text only at the call site. The resulting
-    /// records retain a coarse source category, never a token, excerpt, hash,
-    /// or any other representation of the prompt.
-    static func ephemeralPromptClassifications(_ prompt: String, at date: Date) -> [ActivityClassification] {
-        let signals = prompt.lowercased()
-        let workTypeMatch = workTypeMatch(for: signals)
-        let domainMatch = domainMatch(for: signals, workspace: nil, workingDirectory: nil)
-        return [
-            ActivityClassification(
-                dimension: .workType,
-                value: workTypeMatch.value.rawValue,
-                source: .ephemeralPrompt,
-                confidence: workTypeMatch.confidence,
-                classifiedAt: date,
-                evidenceCategory: .ephemeralPrompt
-            ),
-            ActivityClassification(
-                dimension: .activityDomain,
-                value: domainMatch.value.rawValue,
-                source: .ephemeralPrompt,
-                confidence: domainMatch.confidence,
-                classifiedAt: date,
-                evidenceCategory: .ephemeralPrompt
-            )
-        ].compactMap { $0 }
-    }
-
-    private static func metadataSignals(event: DeveloperEventV2) -> String {
-        [event.eventKind.rawValue, event.metadata?.sourceKind, event.model, event.effort, event.serviceMode]
-            .compactMap { $0?.lowercased() }
-            .joined(separator: " ")
-    }
-
-    private static func workTypeMatch(for signals: String) -> (value: SessionType, confidence: ActivityClassificationConfidence, evidence: ActivityClassificationEvidenceCategory) {
-        if containsAny(signals, ["review", "approve", "audit", "diff"]) { return (.review, .high, .toolMetadata) }
-        if containsAny(signals, ["debug", "fix", "error", "failure", "test"]) { return (.debugging, .high, .actionCategory) }
-        if containsAny(signals, ["plan", "design", "architect", "proposal"]) { return (.planning, .high, .actionCategory) }
-        if containsAny(signals, ["research", "investigate", "explore", "compare"]) { return (.research, .high, .actionCategory) }
+    private static func workTypeMatch(for event: DeveloperEventV2) -> (value: SessionType, confidence: ActivityClassificationConfidence, evidence: ActivityClassificationEvidenceCategory) {
+        switch event.metadata?.actionCategory {
+        case .debugging: return (.debugging, .high, .actionCategory)
+        case .planning: return (.planning, .high, .actionCategory)
+        case .review: return (.review, .high, .actionCategory)
+        case .research: return (.research, .high, .actionCategory)
+        default: break
+        }
         return (.coding, .low, .lifecycle)
     }
 
     private static func domainMatch(
-        for signals: String,
-        workspace: Workspace?,
-        workingDirectory: String?
+        event: DeveloperEventV2,
+        workspace: Workspace?
     ) -> (value: ActivityDomain, confidence: ActivityClassificationConfidence, evidence: ActivityClassificationEvidenceCategory) {
-        if containsAny(signals, ["file-organ", "organize", "rename", "move-file"]) { return (.fileOrganization, .high, .actionCategory) }
-        if containsAny(signals, ["automation", "workflow", "ci", "script", "build"]) { return (.automation, .high, .actionCategory) }
-        if containsAny(signals, ["admin", "setting", "config", "account"]) { return (.administration, .high, .toolMetadata) }
-        if containsAny(signals, ["documentation", "readme", "markdown", "docs"]) || hasDocumentationExtension(workingDirectory) { return (.documentation, .high, .fileType) }
+        switch event.metadata?.actionCategory {
+        case .fileOrganization: return (.fileOrganization, .high, .actionCategory)
+        case .automation: return (.automation, .high, .actionCategory)
+        case .administration: return (.administration, .high, .actionCategory)
+        case .documentation: return (.documentation, .high, .actionCategory)
+        default: break
+        }
+        switch event.metadata?.fileType {
+        case .documentation: return (.documentation, .medium, .fileType)
+        case .automation: return (.automation, .medium, .fileType)
+        case .configuration: return (.administration, .medium, .fileType)
+        default: break
+        }
         if workspace?.source == .transientLocalTask || workspace?.localTaskIdentity != nil { return (.localTask, .medium, .workspace) }
         return (.development, .low, .lifecycle)
-    }
-
-    private static func containsAny(_ value: String, _ terms: [String]) -> Bool {
-        terms.contains { value.localizedCaseInsensitiveContains($0) }
-    }
-
-    private static func hasDocumentationExtension(_ path: String?) -> Bool {
-        guard let path else { return false }
-        return ["md", "mdx", "rst", "txt"].contains(URL(fileURLWithPath: path).pathExtension.lowercased())
     }
 }
 
@@ -232,8 +198,7 @@ extension Activity {
     private static func priority(for source: ActivityClassificationSource) -> Int {
         switch source {
         case .metadata: return 0
-        case .ephemeralPrompt: return 1
-        case .userOverride: return 2
+        case .userOverride: return 1
         }
     }
 }

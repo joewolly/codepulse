@@ -405,12 +405,12 @@ not exist yet.
 1. Define classification records with dimension, value, source, confidence, timestamp, and an explainable evidence category. Keep work type and activity domain independent.
    - Test: model serialization and validation tests.
    - Commit: `feat: add activity classification records`
-2. Implement metadata-only classification rules from lifecycle/tool metadata, workspace signals, file extension/type metadata, action category, and user overrides. Do not inspect prompts in this mode.
+2. Implement metadata-only classification rules from lifecycle/tool metadata, workspace signals, closed file-type metadata, closed action categories, and user overrides. Do not derive labels from free-form adapter strings or inspect prompts in this mode.
    - Test: deterministic coding/debugging/planning/review/research and domain fixture matrix.
    - Commit: `feat: classify activity from metadata`
-3. Add optional enhanced local prompt classification behind a dedicated consent control. Perform the analysis in memory, discard prompt text immediately, persist only the resulting classification and coarse evidence source `ephemeralPrompt`.
-   - Test: prove prompt values are absent from events, persistence, diagnostics, exports, and crash reports.
-   - Commit: `feat: add ephemeral local prompt classification`
+3. Defer enhanced local prompt classification until a separately approved local handoff design exists. The v2 event contract remains prompt-free; no consent control, prompt API, or integration claim ships before the handoff, redaction, and crash-reporting requirements are implementable.
+   - Test: schema tests reject prompt-bearing events; future implementation must prove prompt values are absent from persistence, diagnostics, exports, backups, and any crash-reporting surface.
+   - Commit: `docs: defer prompt classification pending safe handoff`
 4. Add correction controls and learning boundaries: users can override a segment/activity; manual corrections take precedence and do not train/send data anywhere.
    - Test: override precedence, undo, and migration tests.
    - Commit: `feat: add activity classification overrides`
@@ -558,8 +558,8 @@ not exist yet.
 2. Add fault-injection and long-running resilience tests for broken hooks, missing executables, partial writes, parser updates, large histories, sleep/wake, timezone changes, and app restarts.
    - Test: dedicated resilience suite and manual sleep/wake checklist.
    - Commit: `test: harden agent tracking resilience`
-3. Add telemetry only if CodePulse's project policy permits it, keeping it opt-in and aggregate-only; otherwise add fully local support-bundle generation with redaction preview. Never send raw activity content automatically.
-   - Test: opt-in/opt-out, redaction, and bundle inspection tests.
+3. Do not add external crash reporting by default. If telemetry or crash reporting is later permitted by project policy, require explicit opt-in, a content-free schema, destination/retention/deletion documentation, and redaction tests proving prompts, transcripts, paths, and session identifiers are excluded; otherwise add fully local support-bundle generation with redaction preview. Never send raw activity content automatically.
+   - Test: opt-in/opt-out, crash-report or bundle redaction, and inspection tests.
    - Commit: `feat: add redacted agent tracking support bundle`
 4. Produce release notes, migration notes, a rollback/backup procedure, integration setup/uninstall guides, and a known-limitations section stating that cloud-only sessions and budgets are deferred.
    - Test: clean-machine/manual release checklist and docs link check.
