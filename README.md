@@ -34,10 +34,10 @@ developer-tool metadata.
 - Classifies agent activities from content-safe local metadata into independent
   work-type and domain labels. Prompt classification is not currently
   implemented or enabled.
-- Includes a signed, versioned offline pricing catalog and an optional Codex
-  token-usage reader. The reader is separately off by default, reads only the
-  metadata required for counters and model labels, and never affects lifecycle
-  timing. Every API-equivalent or Codex-credit value is clearly an estimate
+- Includes a signed, versioned offline pricing catalog and optional Codex and
+  Claude Code token-usage readers. Each reader is separately off by default,
+  remains independent from lifecycle timing, and stores only privacy-safe usage
+  metadata. Every API-equivalent or Codex-credit value is clearly an estimate
   with immutable source provenance.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
@@ -75,10 +75,12 @@ or allow the automatic update check.
 7. When enabled integrations have local activity, use **Active Now** to inspect
    concurrent runs; only the current CodePulse-owned manual timer can be
    finished from this view.
-8. If you use Codex locally, enable **Track Codex token usage** separately in
-   Settings to collect local token counters. See
+8. If you use Codex or Claude Code locally, enable its **Track token usage**
+   control separately in Settings to collect local token counters. See
    [`docs/codex-usage-tracking.md`](docs/codex-usage-tracking.md) before
-   enabling it.
+   enabling Codex tracking or
+   [`docs/claude-code-usage-tracking.md`](docs/claude-code-usage-tracking.md)
+   before enabling Claude Code tracking.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
@@ -208,13 +210,16 @@ The pricing foundation keeps provider-reported cost separate from
 API-equivalent estimates, Codex-credit estimates, subscription/actual-charge-
 unknown state, and unpriced values. It verifies signed, versioned catalogs and
 retains a bundled offline catalog, while a bad, replayed, expired remote cache,
-or unavailable network cannot replace a verified price source. Codex token
-usage is separately opt-in and remains local; current and future adapters do
-not turn timing consent into token-reading consent. See
+or unavailable network cannot replace a verified price source. Codex and Claude
+Code token usage are separately opt-in and remain local; adapters never turn
+timing consent into token-reading consent. Claude parent and subagent samples
+remain individually inspectable, while roll-ups count child usage once. See
 [`docs/pricing-catalog.md`](docs/pricing-catalog.md) for the catalog source,
 signature, fallback, calculation, and labeling rules, and
 [`docs/codex-usage-tracking.md`](docs/codex-usage-tracking.md) for the reader's
-privacy and attribution rules.
+privacy and attribution rules, plus
+[`docs/claude-code-usage-tracking.md`](docs/claude-code-usage-tracking.md) for
+the Claude Code transcript-metadata boundary and roll-up rules.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

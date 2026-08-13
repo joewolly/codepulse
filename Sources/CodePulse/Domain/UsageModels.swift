@@ -18,6 +18,17 @@ struct UsageTokenCounts: Codable, Equatable {
         self.cacheWriteInput = cacheWriteInput
         self.reasoning = reasoning
     }
+
+    private enum CodingKeys: String, CodingKey { case input, output, cachedInput, cacheWriteInput, reasoning }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        input = try container.decodeIfPresent(Int.self, forKey: .input)
+        output = try container.decodeIfPresent(Int.self, forKey: .output)
+        cachedInput = try container.decodeIfPresent(Int.self, forKey: .cachedInput)
+        cacheWriteInput = try container.decodeIfPresent(Int.self, forKey: .cacheWriteInput)
+        reasoning = try container.decodeIfPresent(Int.self, forKey: .reasoning)
+    }
 }
 
 /// These cases deliberately carry the label with the value. Callers cannot
@@ -95,6 +106,10 @@ struct UsageSample: Codable, Equatable, Identifiable {
     let tokens: UsageTokenCounts
     let providerReportedCost: Decimal?
     let providerReportedCurrency: String?
+    /// An aggregate may include child-agent usage. Roll-ups use it instead of
+    /// adding children a second time. Local Claude records are exclusive unless
+    /// their supported metadata explicitly declares an aggregate.
+    let includesSubagentUsage: Bool
     let calculatedCosts: [CalculatedUsageCost]
 
     init(
@@ -110,6 +125,7 @@ struct UsageSample: Codable, Equatable, Identifiable {
         tokens: UsageTokenCounts,
         providerReportedCost: Decimal? = nil,
         providerReportedCurrency: String? = nil,
+        includesSubagentUsage: Bool = false,
         calculatedCosts: [CalculatedUsageCost] = []
     ) {
         self.id = id
@@ -124,7 +140,57 @@ struct UsageSample: Codable, Equatable, Identifiable {
         self.tokens = tokens
         self.providerReportedCost = providerReportedCost
         self.providerReportedCurrency = providerReportedCurrency
+        self.includesSubagentUsage = includesSubagentUsage
         self.calculatedCosts = calculatedCosts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, integration, observedAt, sessionFingerprint, runID, workspaceID
+        case model, effort, serviceMode, tokens, providerReportedCost
+        case providerReportedCurrency, includesSubagentUsage, calculatedCosts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        integration = try container.decode(DeveloperTool.self, forKey: .integration)
+        observedAt = try container.decode(Date.self, forKey: .observedAt)
+        sessionFingerprint = try container.decodeIfPresent(String.self, forKey: .sessionFingerprint)
+        runID = try container.decodeIfPresent(UUID.self, forKey: .runID)
+        workspaceID = try container.decodeIfPresent(UUID.self, forKey: .workspaceID)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        effort = try container.decodeIfPresent(String.self, forKey: .effort)
+        serviceMode = try container.decodeIfPresent(String.self, forKey: .serviceMode)
+        tokens = try container.decode(UsageTokenCounts.self, forKey: .tokens)
+        providerReportedCost = try container.decodeIfPresent(Decimal.self, forKey: .providerReportedCost)
+        providerReportedCurrency = try container.decodeIfPresent(String.self, forKey: .providerReportedCurrency)
+        includesSubagentUsage = try container.decodeIfPresent(Bool.self, forKey: .includesSubagentUsage) ?? false
+        calculatedCosts = try container.decodeIfPresent([CalculatedUsageCost].self, forKey: .calculatedCosts) ?? []
+    }
+}
+
+enum UsageCostPresentation: Equatable {
+    case providerReported(amount: Decimal, currency: String)
+    case estimate(CalculatedUsageCost)
+    case subscription
+    case unpriced
+
+    static func resolve(sample: UsageSample, preferred: UsageCostRepresentation) -> UsageCostPresentation {
+        switch preferred {
+        case .providerReported:
+            if let amount = sample.providerReportedCost {
+                return .providerReported(amount: amount, currency: sample.providerReportedCurrency ?? "USD")
+            }
+        case .subscription:
+            return .subscription
+        case .apiEquivalentEstimate, .codexCreditEstimate:
+            if let estimate = sample.calculatedCosts.first(where: { $0.representation == preferred }) {
+                return .estimate(estimate)
+            }
+        case .unpriced:
+            return .unpriced
+        }
+        return .unpriced
     }
 }
 

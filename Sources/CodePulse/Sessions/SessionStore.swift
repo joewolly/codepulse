@@ -43,6 +43,7 @@ final class SessionStore: ObservableObject {
     let developerEventV2Consumer: DeveloperEventV2Consuming
     let developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating
     let codexUsageTracking: CodexUsageTracking
+    let claudeUsageTracking: ClaudeUsageTracking
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -58,6 +59,7 @@ final class SessionStore: ObservableObject {
         developerEventV2Consumer: DeveloperEventV2Consuming = DeveloperEventV2Consumer(),
         developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating = DeveloperToolLifecycleCoordinator(),
         codexUsageTracking: CodexUsageTracking = CodexUsageTrackingService(),
+        claudeUsageTracking: ClaudeUsageTracking = ClaudeUsageTrackingService(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
@@ -68,6 +70,7 @@ final class SessionStore: ObservableObject {
         self.developerEventV2Consumer = developerEventV2Consumer
         self.developerToolLifecycleCoordinator = developerToolLifecycleCoordinator
         self.codexUsageTracking = codexUsageTracking
+        self.claudeUsageTracking = claudeUsageTracking
         self.calendar = calendar
         self.state = persistence.load()
         self.persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
@@ -81,6 +84,7 @@ final class SessionStore: ObservableObject {
 
         processPendingIntegrationEvents(force: true)
         processCodexUsage()
+        processClaudeUsage()
         reconcileAgentRuns()
 
         if automaticallyRefresh {
@@ -171,6 +175,7 @@ final class SessionStore: ObservableObject {
         now = clock.now
         processPendingIntegrationEvents()
         processCodexUsage()
+        processClaudeUsage()
         reconcileAgentRuns()
     }
 
@@ -884,6 +889,12 @@ final class SessionStore: ObservableObject {
     private func processCodexUsage() {
         var nextState = state
         guard codexUsageTracking.process(state: &nextState, now: clock.now) else { return }
+        commit(nextState)
+    }
+
+    private func processClaudeUsage() {
+        var nextState = state
+        guard claudeUsageTracking.process(state: &nextState, now: clock.now) else { return }
         commit(nextState)
     }
 

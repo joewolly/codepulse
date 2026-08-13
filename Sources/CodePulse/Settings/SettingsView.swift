@@ -82,6 +82,15 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle("Track Claude Code token usage", isOn: Binding(
+                    get: { store.state.settings.claudeUsageTrackingEnabled },
+                    set: { enabled in store.updateSettings { $0.claudeUsageTrackingEnabled = enabled } }
+                ))
+                Text("Off by default. When enabled, CodePulse reads only supported usage metadata in local Claude session JSONL records under ~/.claude/projects: salted session identity, timestamps, model, effort/service mode, token counters, and reported cost when available. Message and transcript content are never stored or exported. Turn it off to stop reads immediately; it keeps existing local usage history.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 ForEach(DeveloperTool.allCases) { tool in
                     Picker("\(tool.title) primary cost display", selection: Binding(
                         get: { store.state.settings.primaryCostDisplay(for: tool) },
