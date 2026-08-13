@@ -50,6 +50,13 @@ Before Feature 01 a missing or malformed file silently produced an empty
   cumulative counters. It never persists raw Codex JSONL paths, IDs, or
   content. Newly added optional/defaulted fields remain backward decodable;
   they do not require a new envelope migration.
+- **Claude usage reader (Feature 14):** the `AppState` payload contains a
+  separate off-by-default consent, privacy-safe Claude usage samples, and
+  bounded checkpoints. It stores only salted source/session/record
+  fingerprints, offsets, metadata counters, and calculation provenance—not
+  raw JSONL paths, session IDs, transcript paths, or transcript content.
+  Newly added optional/defaulted fields remain backward decodable and do not
+  require a new envelope migration.
 
 ## v1 fixture policy
 

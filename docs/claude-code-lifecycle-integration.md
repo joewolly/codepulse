@@ -16,6 +16,23 @@ stores prompts, tool input or output, commands, responses, permission details,
 or raw hook payloads. External identities are converted to installation-salted
 fingerprints before they enter the activity graph.
 
+## Optional token usage
+
+Lifecycle timing does not enable token tracking. **Track Claude Code token
+usage** is a second, off-by-default consent in Settings. Once enabled,
+CodePulse reads supported assistant-record metadata from current local
+`~/.claude/projects` JSONL files: salted session identity, timestamp, model,
+effort/service mode, input/output/cache counters, and a provider-reported cost
+when present. Those records may also contain transcript text, but CodePulse
+discards it and never persists or exports content or a transcript path.
+
+Claude lifecycle hooks provide the salted parent/subagent relationship. Child
+samples remain separate; a parent roll-up adds parent-exclusive plus child
+usage exactly once. If supported metadata explicitly declares that a parent
+record is already an aggregate, the aggregate replaces child addition. See
+[`claude-code-usage-tracking.md`](claude-code-usage-tracking.md) for full
+reader, cost-label, and retention details.
+
 `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PermissionRequest`, `Stop`,
 and `SessionEnd` drive the shared lifecycle reducer. `SubagentStart` and
 `SubagentStop` create and advance separate child runs without ending or

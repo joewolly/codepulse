@@ -599,6 +599,7 @@ struct CodePulseSettings: Codable, Equatable {
     var automaticGitWorkspaceDiscoveryEnabled: Bool
     var primaryCostDisplays: [String: UsageCostRepresentation]
     var codexUsageTrackingEnabled: Bool
+    var claudeUsageTrackingEnabled: Bool
 
     init(
         launchAtLogin: Bool = false,
@@ -610,7 +611,8 @@ struct CodePulseSettings: Codable, Equatable {
         agentReviewGraceSeconds: Int = 3 * 60,
         automaticGitWorkspaceDiscoveryEnabled: Bool = true,
         primaryCostDisplays: [String: UsageCostRepresentation] = [:],
-        codexUsageTrackingEnabled: Bool = false
+        codexUsageTrackingEnabled: Bool = false,
+        claudeUsageTrackingEnabled: Bool = false
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -622,11 +624,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.automaticGitWorkspaceDiscoveryEnabled = automaticGitWorkspaceDiscoveryEnabled
         self.primaryCostDisplays = primaryCostDisplays
         self.codexUsageTrackingEnabled = codexUsageTrackingEnabled
+        self.claudeUsageTrackingEnabled = claudeUsageTrackingEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled, primaryCostDisplays, codexUsageTrackingEnabled
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled, primaryCostDisplays, codexUsageTrackingEnabled, claudeUsageTrackingEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -641,6 +644,7 @@ struct CodePulseSettings: Codable, Equatable {
         automaticGitWorkspaceDiscoveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticGitWorkspaceDiscoveryEnabled) ?? true
         primaryCostDisplays = try container.decodeIfPresent([String: UsageCostRepresentation].self, forKey: .primaryCostDisplays) ?? [:]
         codexUsageTrackingEnabled = try container.decodeIfPresent(Bool.self, forKey: .codexUsageTrackingEnabled) ?? false
+        claudeUsageTrackingEnabled = try container.decodeIfPresent(Bool.self, forKey: .claudeUsageTrackingEnabled) ?? false
     }
 }
 
@@ -654,6 +658,7 @@ struct AppState: Codable, Equatable {
     var activityGraph: ActivityGraph
     var usageSamples: [UsageSample]
     var codexUsageProcessing: CodexUsageProcessingState?
+    var claudeUsageProcessing: ClaudeUsageProcessingState?
 
     init(
         projects: [ProjectRecord] = [],
@@ -664,7 +669,8 @@ struct AppState: Codable, Equatable {
         developerEventDiagnostics: DeveloperEventDiagnosticsJournal? = nil,
         activityGraph: ActivityGraph = ActivityGraph(),
         usageSamples: [UsageSample] = [],
-        codexUsageProcessing: CodexUsageProcessingState? = nil
+        codexUsageProcessing: CodexUsageProcessingState? = nil,
+        claudeUsageProcessing: ClaudeUsageProcessingState? = nil
     ) {
         self.projects = projects
         self.completedSessions = completedSessions
@@ -675,10 +681,11 @@ struct AppState: Codable, Equatable {
         self.activityGraph = activityGraph
         self.usageSamples = usageSamples
         self.codexUsageProcessing = codexUsageProcessing
+        self.claudeUsageProcessing = claudeUsageProcessing
     }
 
     private enum CodingKeys: String, CodingKey {
-        case projects, completedSessions, activeSession, settings, developerToolIntegration, developerEventDiagnostics, activityGraph, usageSamples, codexUsageProcessing
+        case projects, completedSessions, activeSession, settings, developerToolIntegration, developerEventDiagnostics, activityGraph, usageSamples, codexUsageProcessing, claudeUsageProcessing
     }
 
     init(from decoder: Decoder) throws {
@@ -692,6 +699,7 @@ struct AppState: Codable, Equatable {
         activityGraph = try container.decodeIfPresent(ActivityGraph.self, forKey: .activityGraph) ?? ActivityGraph()
         usageSamples = try container.decodeIfPresent([UsageSample].self, forKey: .usageSamples) ?? []
         codexUsageProcessing = try container.decodeIfPresent(CodexUsageProcessingState.self, forKey: .codexUsageProcessing)
+        claudeUsageProcessing = try container.decodeIfPresent(ClaudeUsageProcessingState.self, forKey: .claudeUsageProcessing)
     }
 }
 

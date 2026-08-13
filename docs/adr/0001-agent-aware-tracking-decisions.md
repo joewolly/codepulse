@@ -75,8 +75,9 @@ with evidence.
 
 ## Consequences
 
-- Features can ship independently: timing works before any usage adapter
-  exists, and a broken adapter degrades usage only.
+- Features ship independently: timing works before usage adapters, and a
+  broken adapter degrades usage only. Codex and Claude Code readers require
+  their own separate consent.
 - Some questions stay unanswerable by design. Cloud-only sessions produce no
   record, and unmatched usage samples stay in an explicit unassigned bucket
   rather than being guessed into a project.

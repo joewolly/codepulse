@@ -41,6 +41,12 @@ Depending on how the app is used, that state can include:
   unassigned-or-conservatively-matched run/workspace identifiers, and immutable
   pricing provenance. It never contains a raw Codex session ID, path, JSONL
   record, prompt, transcript, command, or source-file text.
+- Optional Claude Code usage state: installation-salted session, source, and
+  processed-record fingerprints; bounded offsets/checkpoints; timestamps,
+  model, effort/service mode, token counters, available provider-reported cost,
+  and conservative run/workspace links. It never contains a raw Claude session
+  ID, transcript path, message body, prompt, response, tool data, command, or
+  source-file text.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -81,12 +87,28 @@ storage or subscribe to content/tool events. Prompt classification is not
 implemented: no integration sends prompt text to CodePulse, and the v2 event
 schema rejects prompt-bearing fields.
 
+When **Track Claude Code token usage** is separately enabled, CodePulse opens
+current local `~/.claude/projects` JSONL session records solely to parse
+assistant-record usage metadata: session identity, timestamp, model,
+effort/service mode, token counters, and a reported USD cost when present. The
+same source records can contain conversation text, but CodePulse discards that
+content during parsing and never persists or exports it. Session identifiers,
+file paths, and per-record identifiers are salted before storage. Lifecycle
+metadata provides parent/subagent relationships; child samples are stored once.
+
 Codex token tracking is off by default and independent from lifecycle timing.
 Turning it off immediately stops CodePulse from enumerating or opening Codex
 usage files; it retains already stored local, privacy-safe usage metadata until
 the user deletes CodePulse data. Token totals use cumulative deltas to avoid
 double-counting repeated records. A sample is attached only to one matching
 Codex run; ambiguous or delayed samples remain unassigned.
+
+Claude Code token tracking is also off by default and independent from timing.
+Turning it off immediately stops CodePulse from enumerating or opening Claude
+usage files. It retains existing privacy-safe local usage history until the
+user deletes CodePulse data. A parent roll-up adds parent-exclusive and child
+samples once; when a supported parent aggregate explicitly includes children,
+the aggregate is used instead to avoid double counting.
 
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and
@@ -129,10 +151,9 @@ CodePulse does not intentionally add credentials, conversation content, or file
 contents, but user-entered text may itself be sensitive. Protect backup files
 and review them before sharing.
 
-Once usage adapters are enabled in later features, backups can also include the
-privacy-safe token/cost metadata and calculation provenance described above.
-They will not include raw usage source files, prompts, transcripts, commands,
-or external session identifiers.
+Backups can include the privacy-safe token/cost metadata and calculation
+provenance described above. They do not include raw usage source files, prompts,
+transcripts, commands, transcript paths, or external session identifiers.
 
 CodePulse currently exports backups but does not restore them automatically.
 
