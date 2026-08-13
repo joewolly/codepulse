@@ -148,8 +148,7 @@ final class DeveloperEventV2Tests: XCTestCase {
         ] {
             let url = try XCTUnwrap(Bundle.module.url(
                 forResource: name,
-                withExtension: "json",
-                subdirectory: "developer-events-v2"
+                withExtension: "json"
             ))
             let event = try DeveloperEventV2Validator.validateEncodedData(Data(contentsOf: url), now: now)
             XCTAssertEqual(event.integration, integration)

@@ -19,6 +19,7 @@ final class DeveloperEventV2Consumer: DeveloperEventV2Consuming {
         var journal = state.developerEventDiagnostics ?? DeveloperEventDiagnosticsJournal()
         var changed = prune(&journal, now: now)
         var knownFingerprints = Set(journal.entries.compactMap(\.eventFingerprint))
+        var receiptFingerprints = Set<String>()
 
         for url in inbox.pendingReceiptURLs() {
             do {
@@ -35,6 +36,9 @@ final class DeveloperEventV2Consumer: DeveloperEventV2Consuming {
                 if receipt.status == .accepted, let fingerprint = receipt.eventFingerprint {
                     knownFingerprints.insert(fingerprint)
                 }
+                if receipt.status != .rejected, let fingerprint = receipt.eventFingerprint {
+                    receiptFingerprints.insert(fingerprint)
+                }
             } catch {
                 journal.append(DeveloperEventDiagnostic(
                     receivedAt: now,
@@ -50,7 +54,12 @@ final class DeveloperEventV2Consumer: DeveloperEventV2Consuming {
             do {
                 let event = try inbox.readEvent(from: url, now: now)
                 let fingerprint = inbox.fingerprint(for: event.idempotencyKey)
-                if knownFingerprints.contains(fingerprint) {
+                // The receiver has already emitted the canonical receipt for
+                // this inbox handoff. Do not turn an accepted receipt into a
+                // spurious duplicate merely because its event is now read.
+                if receiptFingerprints.contains(fingerprint) {
+                    // Receipt already persisted the outcome.
+                } else if knownFingerprints.contains(fingerprint) {
                     journal.append(DeveloperEventDiagnostic(
                         receivedAt: now,
                         status: .duplicate,
