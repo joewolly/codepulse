@@ -807,6 +807,15 @@ final class SessionStore: ObservableObject {
         try persistence.exportRecoveryCopy(to: fileURL)
     }
 
+    func exportRedactedSupportBundle(to fileURL: URL, at date: Date? = nil) throws {
+        let data = try RedactedSupportBundleCodec.encode(
+            state: state,
+            createdAt: date ?? clock.now,
+            persistenceRecoveryIssue: persistenceRecoveryIssue
+        )
+        try data.write(to: fileURL, options: .atomic)
+    }
+
     /// Removes persisted metadata attributable to one integration. It neither
     /// touches the integration's own configuration nor source logs owned by
     /// Codex, Claude Code, or OpenCode. Unattributed rejection diagnostics are

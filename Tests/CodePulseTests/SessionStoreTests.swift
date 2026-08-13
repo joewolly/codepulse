@@ -81,6 +81,40 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.state.developerEventDiagnostics?.entries.map { $0.integration }, ["claude-code", nil])
     }
 
+    func testRedactedSupportBundleContainsOnlyAggregateIntegrationEvidence() throws {
+        let clock = TestClock(start)
+        let state = AppState(
+            completedSessions: [CompletedSession(
+                id: UUID(),
+                projectID: nil,
+                projectName: nil,
+                type: .coding,
+                goal: "private goal",
+                outcome: nil,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(60),
+                pauseIntervals: []
+            )],
+            developerEventDiagnostics: DeveloperEventDiagnosticsJournal(entries: [
+                DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "codex", eventFingerprint: "secret-fingerprint")
+            ]),
+            usageSamples: [UsageSample(integration: .codex, observedAt: start, sessionFingerprint: "secret-session", tokens: UsageTokenCounts(input: 5))]
+        )
+        let store = makeStore(clock: clock, persistence: InMemoryPersistence(state))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("codepulse-support-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try store.exportRedactedSupportBundle(to: url, at: start)
+
+        let text = try XCTUnwrap(String(data: Data(contentsOf: url), encoding: .utf8))
+        XCTAssertTrue(text.contains("codepulse-redacted-support-bundle"))
+        XCTAssertTrue(text.contains("usageSampleCount"))
+        XCTAssertFalse(text.contains("private goal"))
+        XCTAssertFalse(text.contains("secret-fingerprint"))
+        XCTAssertFalse(text.contains("secret-session"))
+        XCTAssertFalse(text.contains("completedSessions"))
+    }
+
     func testLegacySessionControlsMaintainCompatibleManualActivityRun() throws {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

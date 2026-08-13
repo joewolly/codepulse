@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var loginItemError: String?
     @State private var backupError: String?
     @State private var recoveryExportError: String?
+    @State private var supportBundleError: String?
     @State private var integrationDataToDelete: DeveloperTool?
 
     var body: some View {
@@ -131,6 +132,19 @@ struct SettingsView: View {
                 .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
 
                 Text("Backups include local projects, settings, saved sessions, and any active session. No secrets or external data are included.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    exportRedactedSupportBundle()
+                } label: {
+                    Label("Export Redacted Support Bundle…", systemImage: "cross.case")
+                }
+                .accessibilityLabel("Export redacted support bundle")
+                .accessibilityHint("Saves aggregate diagnostics without paths, session identifiers, or session content")
+
+                Text("Support bundles contain aggregate counts and adapter states only. Review the generated file before sharing it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -322,6 +336,14 @@ struct SettingsView: View {
         } message: {
             Text(recoveryExportError ?? "CodePulse could not export the recovery copy.")
         }
+        .alert("Support Bundle Export Failed", isPresented: Binding(
+            get: { supportBundleError != nil },
+            set: { if !$0 { supportBundleError = nil } }
+        )) {
+            Button("OK", role: .cancel) { supportBundleError = nil }
+        } message: {
+            Text(supportBundleError ?? "CodePulse could not export the redacted support bundle.")
+        }
     }
 
     private var integrationSection: some View {
@@ -467,6 +489,20 @@ struct SettingsView: View {
             try store.exportPersistenceRecoveryCopy(to: url)
         } catch {
             recoveryExportError = error.localizedDescription
+        }
+    }
+
+    private func exportRedactedSupportBundle() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "CodePulse Support \(CodePulseFormatting.exportDate(store.now)).json"
+        panel.prompt = "Export Support Bundle"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try store.exportRedactedSupportBundle(to: url)
+        } catch {
+            supportBundleError = error.localizedDescription
         }
     }
 }
