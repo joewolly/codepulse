@@ -51,9 +51,12 @@ later events do not reopen them.
 
 This table is the canonical reducer contract. Feature 05 implements the Codex
 mapping through local hooks: `SessionStart`, `UserPromptSubmit`,
-`PostToolUse`, `PermissionRequest`, `Stop`, and `SessionEnd`. The mapper reads
-only whitelisted metadata and discards prompt, transcript, command, tool, and
-permission-decision fields. Claude Code and OpenCode remain later features.
+`PostToolUse`, `PermissionRequest`, `Stop`, and `SessionEnd`. Feature 06 uses
+the documented Claude Code hooks with the same lifecycle mapping plus
+`SubagentStart` and `SubagentStop`; each subagent is a separate run whose
+parent is represented by a salted fingerprint. Both mappers read only
+whitelisted metadata and discard prompt, transcript, command, tool, and
+permission-decision fields. OpenCode remains a later feature.
 
 Codex correlation creates or resumes a run only for a matching local workspace
 root. Feature 08 will add Git workspace discovery; cloud-only sessions that
