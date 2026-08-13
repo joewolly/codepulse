@@ -1460,13 +1460,20 @@ final class SessionStore: ObservableObject {
     func inspectBackup(at fileURL: URL) throws -> BackupRestoreCandidate {
         let data: Data
         do {
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
-                  let size = attributes[.size] as? NSNumber,
-                  size.uint64Value <= UInt64(CodePulseBackupError.maximumInputBytes) else {
-                if FileManager.default.fileExists(atPath: fileURL.path) {
-                    throw CodePulseBackupError.inputTooLarge
-                }
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
                 throw BackupRestoreError.fileUnreadable
+            }
+            let attributes: [FileAttributeKey: Any]
+            do {
+                attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            } catch {
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard let size = attributes[.size] as? NSNumber else {
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard size.uint64Value <= UInt64(CodePulseBackupError.maximumInputBytes) else {
+                throw CodePulseBackupError.inputTooLarge
             }
             guard let readData = try? Data(contentsOf: fileURL) else {
                 throw BackupRestoreError.fileUnreadable

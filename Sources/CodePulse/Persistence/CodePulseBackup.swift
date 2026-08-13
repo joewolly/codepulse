@@ -173,10 +173,10 @@ enum CodePulseBackupCodec {
 
     private static func requireHistoryArray(_ key: String, in state: [String: Any]) throws {
         guard state[key] != nil else {
-            throw CodePulseBackupError.missingRequiredField(key)
+            throw CodePulseBackupError.missingRequiredField(historyField(for: key))
         }
         guard state[key] is [[String: Any]] else {
-            throw CodePulseBackupError.malformedHistoryField(key)
+            throw CodePulseBackupError.malformedHistoryField(historyField(for: key))
         }
     }
 
@@ -188,7 +188,7 @@ enum CodePulseBackupCodec {
     ) throws {
         guard let raw = state[key] else {
             if optional { return }
-            throw CodePulseBackupError.missingRequiredField(key)
+            throw CodePulseBackupError.missingRequiredField(historyField(for: key))
         }
         guard let records = raw as? [[String: Any]] else {
             throw CodePulseBackupError.malformedConfiguration
@@ -196,7 +196,7 @@ enum CodePulseBackupCodec {
         var identifiers = Set<String>()
         for record in records {
             guard let id = record["id"] as? String, UUID(uuidString: id) != nil else {
-                throw CodePulseBackupError.malformedHistoryField(key)
+                throw CodePulseBackupError.malformedHistoryField(historyField(for: key))
             }
             guard identifiers.insert(id.lowercased()).inserted else {
                 throw CodePulseBackupError.duplicateIdentifier(label)
@@ -225,6 +225,15 @@ enum CodePulseBackupCodec {
         if codingPath.contains(where: { $0.stringValue == "projects" }) { return "project" }
         if codingPath.contains(where: { $0.stringValue == "activeSession" }) { return "active session" }
         return "saved session"
+    }
+
+    private static func historyField(for key: String) -> String {
+        switch key {
+        case "projects": return "project"
+        case "completedSessions": return "saved session"
+        case "activeSession": return "active session"
+        default: return key
+        }
     }
 
     private static func codingPath(for error: DecodingError) -> [CodingKey] {

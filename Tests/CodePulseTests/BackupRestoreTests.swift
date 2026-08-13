@@ -72,7 +72,7 @@ final class BackupRestoreTests: XCTestCase {
         state.removeValue(forKey: "completedSessions")
         object["state"] = state
         XCTAssertThrowsError(try CodePulseBackupCodec.decode(try JSONSerialization.data(withJSONObject: object))) { error in
-            XCTAssertEqual(error as? CodePulseBackupError, .missingRequiredField("completedSessions"))
+            XCTAssertEqual(error as? CodePulseBackupError, .missingRequiredField("saved session"))
         }
     }
 
@@ -407,12 +407,14 @@ final class BackupRestoreTests: XCTestCase {
         let userBackup = backupDirectory.appendingPathComponent("My Export.json")
         try Data("user backup".utf8).write(to: userBackup)
 
+        var receipts: [StateRestoreReceipt] = []
         for offset in 0..<7 {
-            _ = try persistence.replaceStateTransactionally(
+            let receipt = try persistence.replaceStateTransactionally(
                 with: offset.isMultiple(of: 2) ? stateA : stateB,
                 recoverySnapshot: offset.isMultiple(of: 2) ? stateB : stateA,
                 exportedAt: now.addingTimeInterval(TimeInterval(offset))
             )
+            receipts.append(receipt)
         }
 
         let files = try FileManager.default.contentsOfDirectory(
@@ -421,7 +423,18 @@ final class BackupRestoreTests: XCTestCase {
         )
         XCTAssertEqual(files.filter { $0.lastPathComponent.hasPrefix("Pre-Restore Backup ") }.count, 5)
         XCTAssertTrue(FileManager.default.fileExists(atPath: userBackup.path))
-        XCTAssertFalse(files.contains { $0.lastPathComponent.contains("2025-05-") })
+        for receipt in receipts.prefix(2) {
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path),
+                "Expected \(receipt.recoveryBackupURL.lastPathComponent) to be pruned"
+            )
+        }
+        for receipt in receipts.suffix(5) {
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path),
+                "Expected \(receipt.recoveryBackupURL.lastPathComponent) to be retained"
+            )
+        }
     }
 
     func testManagedSymlinkPathIsRejected() throws {

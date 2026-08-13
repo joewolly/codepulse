@@ -73,12 +73,12 @@ decisions, reasoning, conversation summaries, credentials, or API keys. The
 Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
-Developer-tool metadata and the processed-event ledger remain local as part of
-CodePulse state. Portable backups retain developer-tool contexts already
-attached to saved or active sessions, but omit the processed-event ledger and
-the separate control ledger. Restoring a backup resets both ledgers, preserves
-the current Mac's launch-at-login setting, and leaves Session Automation
-disabled until the user reviews it. Automation rules and active-session
+The live CodePulse state can contain developer-tool metadata and the
+processed-event ledger. Portable backups retain only developer-tool contexts
+already attached to saved or active sessions; they omit the live processed-event
+ledger and the separate control ledger. Restoring a backup resets both ledgers,
+preserves the current Mac's launch-at-login setting, and leaves Session
+Automation disabled until the user reviews it. Automation rules and active-session
 ownership are local configuration/recovery state; imported active-session
 timelines are retained while stale automation claims and pending automatic-save
 ownership are cleared. When an application rule is enabled, CodePulse observes

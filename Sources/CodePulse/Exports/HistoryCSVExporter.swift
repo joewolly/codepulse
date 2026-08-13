@@ -101,8 +101,15 @@ struct HistoryCSVExporter {
     }
 
     private static func escape(_ field: String) -> String {
-        let escaped = field.replacingOccurrences(of: "\"", with: "\"\"")
-        let needsQuotes = field.contains { character in
+        let trimmed = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeField: String
+        if let first = trimmed.first, "=+-@".contains(first) {
+            safeField = "'\(field)"
+        } else {
+            safeField = field
+        }
+        let escaped = safeField.replacingOccurrences(of: "\"", with: "\"\"")
+        let needsQuotes = safeField.contains { character in
             character == "," || character == "\"" || character == "\r" || character == "\n"
         }
         return needsQuotes ? "\"\(escaped)\"" : escaped

@@ -213,6 +213,35 @@ final class ExportTests: XCTestCase {
         }
     }
 
+    func testHistoryCSVNeutralizesSpreadsheetFormulaFields() {
+        let start = date(year: 2024, month: 4, day: 20, hour: 12)
+        let session = CompletedSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000031")!,
+            projectID: nil,
+            projectName: "=Project",
+            goal: "+SUM(A1)",
+            outcome: "-Command",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(60),
+            pauseIntervals: [],
+            gitContext: GitSessionContext(
+                repositoryRoot: "/private/repository-root",
+                branchAtStart: "@branch"
+            )
+        )
+
+        let csv = HistoryCSVExporter.csv(for: [session])
+
+        XCTAssertTrue(csv.contains("'=Project"))
+        XCTAssertTrue(csv.contains("'+SUM(A1)"))
+        XCTAssertTrue(csv.contains("'-Command"))
+        XCTAssertTrue(csv.contains("'@branch"))
+        XCTAssertFalse(csv.contains(",=Project"))
+        XCTAssertFalse(csv.contains(",+SUM(A1)"))
+        XCTAssertFalse(csv.contains(",-Command"))
+        XCTAssertFalse(csv.contains(",@branch"))
+    }
+
     func testHistoryCSVEmptyResultIsHeaderOnlyAndUTF8WithoutBOM() {
         let data = HistoryCSVExporter.data(for: [])
         let expected = Data((HistoryCSVExporter.columns.joined(separator: ",") + "\r\n").utf8)
