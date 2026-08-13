@@ -597,6 +597,7 @@ struct CodePulseSettings: Codable, Equatable {
     var globalShortcutEnabled: Bool
     var agentReviewGraceSeconds: Int
     var automaticGitWorkspaceDiscoveryEnabled: Bool
+    var enhancedPromptClassificationEnabled: Bool
 
     init(
         launchAtLogin: Bool = false,
@@ -606,7 +607,8 @@ struct CodePulseSettings: Codable, Equatable {
         specificProjectID: UUID? = nil,
         globalShortcutEnabled: Bool = true,
         agentReviewGraceSeconds: Int = 3 * 60,
-        automaticGitWorkspaceDiscoveryEnabled: Bool = true
+        automaticGitWorkspaceDiscoveryEnabled: Bool = true,
+        enhancedPromptClassificationEnabled: Bool = false
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -616,11 +618,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.globalShortcutEnabled = globalShortcutEnabled
         self.agentReviewGraceSeconds = max(0, agentReviewGraceSeconds)
         self.automaticGitWorkspaceDiscoveryEnabled = automaticGitWorkspaceDiscoveryEnabled
+        self.enhancedPromptClassificationEnabled = enhancedPromptClassificationEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled, enhancedPromptClassificationEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -633,6 +636,7 @@ struct CodePulseSettings: Codable, Equatable {
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
         agentReviewGraceSeconds = max(0, try container.decodeIfPresent(Int.self, forKey: .agentReviewGraceSeconds) ?? 3 * 60)
         automaticGitWorkspaceDiscoveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticGitWorkspaceDiscoveryEnabled) ?? true
+        enhancedPromptClassificationEnabled = try container.decodeIfPresent(Bool.self, forKey: .enhancedPromptClassificationEnabled) ?? false
     }
 }
 

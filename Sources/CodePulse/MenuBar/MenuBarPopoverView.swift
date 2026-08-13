@@ -132,11 +132,53 @@ private struct ActivityDetailView: View {
             LabeledContent("Agent runtime", value: CodePulseFormatting.duration(metrics.agentRuntime, includeSeconds: true))
             LabeledContent("Agent waiting", value: CodePulseFormatting.duration(metrics.agentWaiting, includeSeconds: true))
             LabeledContent("Combined wall-active", value: CodePulseFormatting.duration(metrics.combinedWallActive, includeSeconds: true))
+            if let activity {
+                ActivityClassificationControls(activity: activity)
+            }
             Divider()
             ActivityTimelineView(activityID: activityID)
         }
         .padding(20)
         .frame(minWidth: 360)
+    }
+}
+
+private struct ActivityClassificationControls: View {
+    @EnvironmentObject private var store: SessionStore
+    let activity: Activity
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Classification")
+                .font(.headline)
+            HStack {
+                Picker("Work type", selection: Binding(
+                    get: { activity.workType },
+                    set: { _ = store.overrideActivityClassification(id: activity.id, dimension: .workType, value: $0.rawValue) }
+                )) {
+                    ForEach(SessionType.allCases) { Text($0.title).tag($0) }
+                }
+                if activity.effectiveClassification(for: .workType)?.source == .userOverride {
+                    Button("Undo") { _ = store.undoActivityClassificationOverride(id: activity.id, dimension: .workType) }
+                        .buttonStyle(.link)
+                }
+            }
+            HStack {
+                Picker("Domain", selection: Binding(
+                    get: { activity.domain },
+                    set: { _ = store.overrideActivityClassification(id: activity.id, dimension: .activityDomain, value: $0.rawValue) }
+                )) {
+                    ForEach(ActivityDomain.allCases) { Text($0.rawValue).tag($0) }
+                }
+                if activity.effectiveClassification(for: .activityDomain)?.source == .userOverride {
+                    Button("Undo") { _ = store.undoActivityClassificationOverride(id: activity.id, dimension: .activityDomain) }
+                        .buttonStyle(.link)
+                }
+            }
+            Text("Manual corrections stay on this Mac and take precedence over automatic classification.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

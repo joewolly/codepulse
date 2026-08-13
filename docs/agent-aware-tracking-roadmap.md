@@ -153,7 +153,7 @@ not exist yet.
 | 07 | @ZacharyRW | `feature/07-opencode-lifecycle` | [#11](https://github.com/ZacharyRW/codepulse/pull/11) | Merged | 2026-08-13 |
 | 08 | @ZacharyRW | `feature/08-git-workspace-discovery` | [#12](https://github.com/ZacharyRW/codepulse/pull/12) | Merged | 2026-08-13 |
 | 09 | @ZacharyRW | `feature/09-local-task-discovery` | [#14](https://github.com/ZacharyRW/codepulse/pull/14) | Merged | 2026-08-13 |
-| 10 | @ZacharyRW | `feature/10-concurrent-activity-ui` | [#15](https://github.com/ZacharyRW/codepulse/pull/15) | In review | — |
+| 10 | @ZacharyRW | `feature/10-concurrent-activity-ui` | [#15](https://github.com/ZacharyRW/codepulse/pull/15) | Merged | 2026-08-13 |
 | 11 | — | `feature/11-activity-classification` | — | Not started | — |
 | 12 | — | `feature/12-pricing-catalog` | — | Not started | — |
 | 13 | — | `feature/13-codex-usage` | — | Not started | — |

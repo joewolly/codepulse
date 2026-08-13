@@ -235,6 +235,63 @@ final class SessionStore: ObservableObject {
     }
 
     @discardableResult
+    func overrideActivityClassification(
+        id: UUID,
+        dimension: ActivityClassificationDimension,
+        value: String,
+        at date: Date? = nil
+    ) -> Bool {
+        guard let classification = ActivityClassification(
+            dimension: dimension,
+            value: value,
+            source: .userOverride,
+            confidence: .high,
+            classifiedAt: date ?? clock.now,
+            evidenceCategory: .userCorrection
+        ) else { return false }
+        var nextState = state
+        guard let index = nextState.activityGraph.activities.firstIndex(where: { $0.id == id }) else { return false }
+        nextState.activityGraph.activities[index].applyClassifications([classification])
+        nextState.activityGraph.activities[index].updatedAt = classification.classifiedAt
+        commit(nextState)
+        return true
+    }
+
+    @discardableResult
+    func undoActivityClassificationOverride(
+        id: UUID,
+        dimension: ActivityClassificationDimension,
+        at date: Date? = nil
+    ) -> Bool {
+        var nextState = state
+        guard let index = nextState.activityGraph.activities.firstIndex(where: { $0.id == id }),
+              nextState.activityGraph.activities[index].classifications.contains(where: { $0.dimension == dimension && $0.source == .userOverride }) else {
+            return false
+        }
+        nextState.activityGraph.activities[index].removeUserOverride(for: dimension)
+        nextState.activityGraph.activities[index].updatedAt = date ?? clock.now
+        commit(nextState)
+        return true
+    }
+
+    /// Prompt text is received only for this in-memory operation. It is not
+    /// added to AppState, diagnostics, persistence, or backup exports.
+    @discardableResult
+    func classifyActivityFromEphemeralPrompt(_ prompt: String, id: UUID, at date: Date? = nil) -> Bool {
+        guard state.settings.enhancedPromptClassificationEnabled,
+              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        var nextState = state
+        guard let index = nextState.activityGraph.activities.firstIndex(where: { $0.id == id }) else { return false }
+        let timestamp = date ?? clock.now
+        nextState.activityGraph.activities[index].applyClassifications(
+            ActivityClassificationRuleEngine.ephemeralPromptClassifications(prompt, at: timestamp)
+        )
+        nextState.activityGraph.activities[index].updatedAt = timestamp
+        commit(nextState)
+        return true
+    }
+
+    @discardableResult
     func startRun(activityID: UUID, kind: RunKind = .manual, at date: Date? = nil) -> UUID? {
         var nextState = state
         do {

@@ -85,6 +85,15 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("Use local prompt classification", isOn: Binding(
+                    get: { store.state.settings.enhancedPromptClassificationEnabled },
+                    set: { value in store.updateSettings { $0.enhancedPromptClassificationEnabled = value } }
+                ))
+                Text("Off by default. When enabled, a supported local integration may classify a prompt in memory. CodePulse immediately discards the prompt and stores only its work-type/domain result with an ephemeral-prompt source label.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Workspace Discovery") {

@@ -48,8 +48,15 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
                 to: &state.activityGraph.runs[runIndex],
                 reviewGrace: TimeInterval(state.settings.agentReviewGraceSeconds)
             )
-            if applied, let model = event.model {
-                state.activityGraph.runs[runIndex].agentMetadata?.model = model
+            if applied {
+                if let model = event.model {
+                    state.activityGraph.runs[runIndex].agentMetadata?.model = model
+                }
+                classifyActivity(
+                    id: state.activityGraph.runs[runIndex].activityID,
+                    event: event,
+                    in: &state.activityGraph
+                )
             }
             return applied
         }
@@ -106,6 +113,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
             return false
         }
         state.activityGraph.runs.append(run)
+        classifyActivity(id: activityID, event: event, in: &state.activityGraph)
         return true
     }
 
@@ -175,6 +183,16 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
             localTaskIdentity: identity
         ))
         return state.activityGraph.workspaces.index(before: state.activityGraph.workspaces.endIndex)
+    }
+
+    private func classifyActivity(id: UUID, event: DeveloperEventV2, in graph: inout ActivityGraph) {
+        guard let activityIndex = graph.activities.firstIndex(where: { $0.id == id }),
+              let workspace = graph.workspaces.first(where: { $0.id == graph.activities[activityIndex].workspaceID }) else {
+            return
+        }
+        let classifications = ActivityClassificationRuleEngine.metadataClassifications(event: event, workspace: workspace)
+        graph.activities[activityIndex].applyClassifications(classifications)
+        graph.activities[activityIndex].updatedAt = max(graph.activities[activityIndex].updatedAt, event.observedAt)
     }
 
 }

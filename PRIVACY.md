@@ -28,6 +28,10 @@ Depending on how the app is used, that state can include:
   rejection codes, parser/integration versions, and installation-salted event
   fingerprints. Agent runs retain only the integration, salted session
   fingerprint, lifecycle state, and interval timestamps needed for timing.
+- Activity-classification records: a constrained work-type or domain label,
+  source, confidence, timestamp, and coarse evidence category. These records
+  do not contain raw lifecycle metadata, prompts, excerpts, tokens, hashes, or
+  embeddings.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -55,12 +59,16 @@ may leave an inbox file locally; the app removes handoffs best-effort after
 processing. Agent-run correlation is conservative and is not inferred from
 unrelated projects or manual sessions.
 
-CodePulse does **not** persist or inspect prompts, user messages, assistant
-messages, conversation transcripts, source-file contents, terminal command
-contents, command output, tool-call arguments, tool-call results, permission
-decisions, reasoning, conversation summaries, credentials, or API keys. The
-Codex adapter does not parse transcript files. The OpenCode adapter does not
-scrape conversation storage or subscribe to content/tool events.
+CodePulse does **not** persist prompts, user messages, assistant messages,
+conversation transcripts, source-file contents, terminal command contents,
+command output, tool-call arguments, tool-call results, permission decisions,
+reasoning, conversation summaries, credentials, or API keys. The Codex adapter
+does not parse transcript files. The OpenCode adapter does not scrape
+conversation storage or subscribe to content/tool events. The separately
+consented **Use local prompt classification** setting may classify a supported
+prompt in memory; it immediately discards the text and retains only the
+content-free labels and `ephemeralPrompt` source. It is off by default and has
+no effect on lifecycle timing.
 
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and
