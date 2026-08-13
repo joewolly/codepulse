@@ -5,6 +5,7 @@ protocol DeveloperToolLifecycleCoordinating {
     func apply(
         _ event: DeveloperEventV2,
         sessionFingerprint: String,
+        parentSessionFingerprint: String?,
         to state: inout AppState
     ) -> Bool
 
@@ -18,9 +19,10 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
     func apply(
         _ event: DeveloperEventV2,
         sessionFingerprint: String,
+        parentSessionFingerprint: String?,
         to state: inout AppState
     ) -> Bool {
-        guard event.integration == .codex,
+        guard [.codex, .claudeCode].contains(event.integration),
               event.eventKind != .integrationError else {
             return false
         }
@@ -54,7 +56,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
 
         let activity = Activity(
             workspaceID: workspaceID,
-            title: "Codex session",
+            title: "\(event.integration.title) session",
             createdAt: event.observedAt
         )
         state.activityGraph.activities.append(activity)
@@ -66,6 +68,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
             agentMetadata: AgentRunMetadata(
                 integration: event.integration,
                 sessionFingerprint: sessionFingerprint,
+                parentSessionFingerprint: parentSessionFingerprint,
                 lastEventAt: event.observedAt
             )
         )
