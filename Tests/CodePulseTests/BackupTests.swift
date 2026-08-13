@@ -186,6 +186,7 @@ final class BackupTests: XCTestCase {
             status: status
         )
         var state = AppState()
+        state.localInputAcceptanceDate = Date(timeIntervalSince1970: 1_800_000_000)
         state.controlProcessing = CodePulseControlProcessingState(processedCommands: [
             CodePulseProcessedControlCommand(
                 id: commandID,
@@ -199,7 +200,9 @@ final class BackupTests: XCTestCase {
         let backup = try CodePulseBackupCodec.decode(data)
 
         XCTAssertNil(backup.state.controlProcessing)
+        XCTAssertNil(backup.state.localInputAcceptanceDate)
         XCTAssertFalse(text.contains("controlProcessing"))
+        XCTAssertFalse(text.contains("localInputAcceptanceDate"))
         XCTAssertFalse(text.contains(commandID.uuidString))
     }
 }

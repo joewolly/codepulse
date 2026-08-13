@@ -649,6 +649,20 @@ final class SessionStore: ObservableObject {
             return response
         }
 
+        if !LocalInputAcceptance.accepts(
+            timestamp: command.issuedAt,
+            after: state.localInputAcceptanceDate
+        ) {
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .commandRejected,
+                message: "The command was issued before the most recent CodePulse restore.",
+                status: controlStatus(at: date)
+            )
+            recordControlResponseIfNeeded(response, for: command.action, at: date)
+            return response
+        }
+
         if command.issuedAt < controlLaunchDate {
             let response = CodePulseControlResponse(
                 commandID: command.id,
@@ -1517,15 +1531,22 @@ final class SessionStore: ObservableObject {
         }
 
         do {
+            let restoreAcceptanceDate = clock.now
+            var restoredState = candidate.state
+            // The boundary is included in the candidate verified by the
+            // transactional persistence layer. It becomes effective only if
+            // the durable replacement succeeds, and therefore cannot advance
+            // on a failed or rolled-back restore.
+            restoredState.localInputAcceptanceDate = restoreAcceptanceDate
             let receipt = try restoringPersistence.replaceStateTransactionally(
-                with: candidate.state,
+                with: restoredState,
                 recoverySnapshot: state,
-                exportedAt: clock.now
+                exportedAt: restoreAcceptanceDate
             )
             // The durable replacement and its readback have completed. This is
             // the first point where the live in-memory store may change.
-            state = candidate.state
-            now = clock.now
+            state = restoredState
+            now = restoreAcceptanceDate
             configureApplicationMonitoring()
             return BackupRestoreResult(
                 preview: candidate.preview,

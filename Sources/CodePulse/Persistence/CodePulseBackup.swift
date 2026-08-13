@@ -168,6 +168,7 @@ enum CodePulseBackupCodec {
         var portable = state
         portable.controlProcessing = nil
         portable.developerToolIntegration = nil
+        portable.localInputAcceptanceDate = nil
         return portable
     }
 

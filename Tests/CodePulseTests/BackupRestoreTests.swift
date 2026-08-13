@@ -33,6 +33,7 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertFalse(restored.settings.launchAtLogin)
         XCTAssertNil(restored.developerToolIntegration)
         XCTAssertNil(restored.controlProcessing)
+        XCTAssertNil(restored.localInputAcceptanceDate)
         XCTAssertEqual(restored.projects.map(\.name), ["Fixture Main", "Fixture Docs"])
         XCTAssertEqual(restored.completedSessions.first?.developerToolContexts.count, 1)
         XCTAssertEqual(restored.activeSession?.developerToolContexts.count, 1)
@@ -573,8 +574,10 @@ final class BackupRestoreTests: XCTestCase {
         let candidate = try store.inspectBackup(at: backupURL)
         let result = try store.restoreBackup(candidate)
 
-        XCTAssertEqual(store.state, candidate.state)
-        XCTAssertEqual(JSONFilePersistence(fileURL: stateURL).load(), candidate.state)
+        var expectedRestoredState = candidate.state
+        expectedRestoredState.localInputAcceptanceDate = now
+        XCTAssertEqual(store.state, expectedRestoredState)
+        XCTAssertEqual(JSONFilePersistence(fileURL: stateURL).load(), expectedRestoredState)
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.recoveryBackupURL.path))
 
         let failingPersistence = JSONFilePersistence(

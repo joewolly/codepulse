@@ -666,6 +666,7 @@ struct AppState: Codable, Equatable {
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
     var automationRules: [SessionAutomationRule]
     var controlProcessing: CodePulseControlProcessingState?
+    var localInputAcceptanceDate: Date?
 
     init(
         projects: [ProjectRecord] = [],
@@ -675,7 +676,8 @@ struct AppState: Codable, Equatable {
         sessionPresets: [SessionPreset] = [],
         developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
         automationRules: [SessionAutomationRule] = [],
-        controlProcessing: CodePulseControlProcessingState? = nil
+        controlProcessing: CodePulseControlProcessingState? = nil,
+        localInputAcceptanceDate: Date? = nil
     ) {
         self.projects = projects
         self.completedSessions = completedSessions
@@ -685,11 +687,13 @@ struct AppState: Codable, Equatable {
         self.developerToolIntegration = developerToolIntegration
         self.automationRules = automationRules.map { $0.canonicalized() }
         self.controlProcessing = Self.normalizedControlProcessing(controlProcessing)
+        self.localInputAcceptanceDate = localInputAcceptanceDate
     }
 
     private enum CodingKeys: String, CodingKey {
         case projects, completedSessions, activeSession, settings
         case sessionPresets, developerToolIntegration, automationRules, controlProcessing
+        case localInputAcceptanceDate
     }
 
     init(from decoder: Decoder) throws {
@@ -717,6 +721,10 @@ struct AppState: Codable, Equatable {
             CodePulseControlProcessingState.self,
             forKey: .controlProcessing
         )
+        let localInputAcceptanceDate = try? container.decodeIfPresent(
+            Date.self,
+            forKey: .localInputAcceptanceDate
+        )
         self.init(
             projects: projects,
             completedSessions: completedSessions,
@@ -725,7 +733,8 @@ struct AppState: Codable, Equatable {
             sessionPresets: sessionPresets,
             developerToolIntegration: developerToolIntegration,
             automationRules: automationRules,
-            controlProcessing: controlProcessing
+            controlProcessing: controlProcessing,
+            localInputAcceptanceDate: localInputAcceptanceDate
         )
     }
 

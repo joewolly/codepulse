@@ -123,6 +123,7 @@ enum BackupRestoreNormalizer {
         restored.settings.automationEnabled = false
         restored.controlProcessing = nil
         restored.developerToolIntegration = nil
+        restored.localInputAcceptanceDate = nil
 
         if var activeSession = restored.activeSession,
            var metadata = activeSession.automationMetadata {

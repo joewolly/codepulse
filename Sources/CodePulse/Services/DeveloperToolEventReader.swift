@@ -29,6 +29,17 @@ final class DeveloperToolEventReader {
                 continue
             }
 
+            guard LocalInputAcceptance.accepts(
+                timestamp: event.timestamp,
+                after: state.localInputAcceptanceDate
+            ) else {
+                // A restore clears the portable processed-event ledger. Do not
+                // let an inbox file from the previous local state become
+                // eligible again after that reset.
+                inbox.remove(url)
+                continue
+            }
+
             guard !processedIDs.contains(event.id), !surfacedIDs.contains(event.id) else {
                 inbox.remove(url)
                 continue
