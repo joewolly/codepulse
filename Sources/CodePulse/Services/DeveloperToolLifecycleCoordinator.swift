@@ -149,7 +149,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
         }) { return index }
         let root = identity.isTransient ? [] : [WorkspaceRoot(
             path: identity.canonicalPath,
-            kind: .folder,
+            kind: identity.isFile ? .localFile : .folder,
             addedAt: event.observedAt
         )]
         state.activityGraph.workspaces.append(Workspace(

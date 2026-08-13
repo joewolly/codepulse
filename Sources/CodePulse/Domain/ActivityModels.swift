@@ -23,6 +23,7 @@ enum WorkspaceSource: String, Codable, Equatable {
 enum WorkspaceRootKind: String, Codable, Equatable {
     case folder
     case gitWorktree
+    case localFile
 }
 
 struct WorkspaceRoot: Codable, Equatable, Identifiable {
@@ -86,6 +87,7 @@ struct GitWorkspaceIdentity: Codable, Equatable {
 struct LocalTaskIdentity: Codable, Equatable {
     let canonicalPath: String
     let displayName: String
+    let isFile: Bool
     let isTransient: Bool
 }
 
