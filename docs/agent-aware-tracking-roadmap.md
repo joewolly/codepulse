@@ -25,6 +25,10 @@ This document is the implementation source of truth. Each feature is intentional
 | Prices | A signed, versioned pricing manifest with a bundled offline fallback. Historical calculations retain the catalog version used. |
 | Codex credits | Estimate from the applicable official OpenAI/Codex rate card; never represent an estimate as remaining or billed credits. |
 | Claude subagents | Show child runs individually and provide a parent roll-up that de-duplicates child totals. |
+| Application architecture | Retain the SwiftPM/macOS structure and evolve it incrementally. `SessionStore` remains the app-facing facade while integration ingestion, enrichment, and legacy manual-session compatibility move into focused collaborators as agent features require them. |
+| Build tooling | SwiftPM commands and repository scripts are the canonical local build/test path. XcodeBuildMCP is optional for targeted Xcode debugging or profiling, not a CI or release dependency. |
+| CI and release automation | Keep validation focused on pull requests and `main`; use least-privilege permissions, cancelled superseded validation runs, bounded job time, and a non-publishing release preflight. Keep release publication isolated to the signed tag workflow. |
+| Dependency maintenance | Use Dependabot for weekly Swift and GitHub Actions update PRs. Do not auto-merge dependency or release-workflow updates; require normal macOS validation and review. |
 | Review grace | Default three minutes after agent completion/stop, unless resumed or a lifecycle state ends it sooner. |
 | Budgets | Deferred until after the Usage Insights release is validated. |
 | Cloud-only runs | Explicitly out of scope initially. A session must have a local process, hook, or local usage record accessible to CodePulse. |
@@ -101,9 +105,9 @@ Each step below ends with an exact commit message. After implementing that step:
 Adapt the exact target names to CodePulse's existing build configuration, but maintain these layers throughout: unit tests for model/store logic, integration tests for parsers/installers, migration fixture tests, and a manual macOS smoke test for menu-bar/UI changes.
 
 ```bash
-swift test
-xcodebuild -scheme CodePulse -configuration Debug build
-xcodebuild -scheme CodePulse -configuration Debug test
+swift build --configuration debug
+swift test --configuration debug
+script/build_and_run.sh
 ```
 
 ## Roadmap sequence
@@ -269,16 +273,19 @@ not exist yet.
 **PR title:** `feat: add Codex agent lifecycle tracking`  
 **Depends on:** 04
 
-1. Audit the current Codex integration installer and update CodePulse-managed hook configuration without overwriting user hooks. Install only supported lifecycle hooks and provide an uninstall/repair path.
+1. Extract integration event ingestion, asynchronous Git/GitHub enrichment, and lifecycle reconciliation from `SessionStore` into focused collaborators. Keep `SessionStore` as the `@MainActor` application-facing facade and preserve the legacy manual-session adapter until the concurrent UI fully supersedes it.
+   - Test: existing manual-session, persistence, event-reconciliation, and stale-result tests pass unchanged; add focused coordinator tests with deterministic clocks/services.
+   - Commit: `refactor: isolate integration lifecycle coordination`
+2. Audit the current Codex integration installer and update CodePulse-managed hook configuration without overwriting user hooks. Install only supported lifecycle hooks and provide an uninstall/repair path.
    - Test: configuration merge fixtures with unrelated user hooks preserved; manual install/uninstall smoke test.
    - Commit: `feat: manage Codex lifecycle hooks safely`
-2. Map Codex local lifecycle events such as session start, prompt submit, tool activity, permission request, stop, and session end into `DeveloperEventV2`. Treat unknown events as diagnostics only.
+3. Map Codex local lifecycle events such as session start, prompt submit, tool activity, permission request, stop, and session end into `DeveloperEventV2`. Treat unknown events as diagnostics only.
    - Test: Codex contract fixtures and mapper tests.
    - Commit: `feat: map Codex lifecycle events`
-3. Correlate Codex events by external session ID and working directory, then create/resume the appropriate agent run through the timing reducer.
+4. Correlate Codex events by external session ID and working directory, then create/resume the appropriate agent run through the timing reducer.
    - Test: two simultaneous Codex sessions, one session resuming after stop, and duplicate-event scenarios.
    - Commit: `feat: correlate Codex runs to activities`
-4. Add Codex integration settings/status: enable/disable, hook health, timing-only mode, and a clear notice that cloud-only sessions are not tracked in this release.
+5. Add Codex integration settings/status: enable/disable, hook health, timing-only mode, and a clear notice that cloud-only sessions are not tracked in this release.
    - Test: settings persistence and disabled-integration rejection tests.
    - Commit: `feat: add Codex integration settings`
 
@@ -374,7 +381,7 @@ not exist yet.
 **PR title:** `feat: show concurrent agent activities`  
 **Depends on:** 02, 04, 08, 09
 
-1. Replace single-active-session assumptions in app state and menu-bar presentation with a query for all current runs, grouped by workspace/activity and ordered by state/recency.
+1. Replace single-active-session assumptions in app state and menu-bar presentation with a query for all current runs, grouped by workspace/activity and ordered by state/recency. Build this as a focused read projection over the activity graph rather than adding more view/query responsibilities to `SessionStore`.
    - Test: view-model tests for zero, one, and many active/waiting runs.
    - Commit: `feat: support multiple current activity runs`
 2. Build the **Active Now** UI: workspace, activity label, integration/model, run state, elapsed active time, review-grace countdown, and a clear waiting badge. Provide safe actions to open activity details or stop only CodePulse-owned manual runs.
@@ -557,7 +564,13 @@ not exist yet.
 4. Produce release notes, migration notes, a rollback/backup procedure, integration setup/uninstall guides, and a known-limitations section stating that cloud-only sessions and budgets are deferred.
    - Test: clean-machine/manual release checklist and docs link check.
    - Commit: `docs: prepare agent aware tracking release`
-5. Add only the data-model seams for a later budgets feature—threshold policy models are not enabled, no alerts are shipped, and no enforcement occurs. Link a follow-on roadmap issue after Insights feedback.
+5. Harden CI and release automation. Update validation to the current checkout action, remove the retired feature-branch push trigger, use `contents: read`, cancel superseded validation runs, and set job timeouts. Add a non-publishing release preflight that exercises the production package, Sparkle-signing validation, and artifact verification before a release tag is created; keep the signed tag workflow as the only publisher.
+   - Test: validation runs for a pull request and `main`; a preflight validates a synthetic release version/artifacts without creating a GitHub release; release-workflow permissions and tag guards are regression-tested or reviewed with a fixture checklist.
+   - Commit: `ci: harden validation and release workflows`
+6. Add `.github/dependabot.yml` for weekly `swift` and `github-actions` version updates from the repository root. Limit open version-update PRs to three per ecosystem, keep ecosystems separate, and document that Sparkle and workflow updates require normal review and macOS validation rather than auto-merge.
+   - Test: validate the Dependabot configuration against GitHub's supported ecosystem names and confirm it detects `Package.swift` and `.github/workflows` on the default branch.
+   - Commit: `ci: enable Dependabot updates`
+7. Add only the data-model seams for a later budgets feature—threshold policy models are not enabled, no alerts are shipped, and no enforcement occurs. Link a follow-on roadmap issue after Insights feedback.
    - Test: confirm budget code cannot affect calculations, notifications, or UI in this release.
    - Commit: `chore: reserve usage budget extension points`
 
