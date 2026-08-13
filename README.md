@@ -6,10 +6,10 @@
 
 CodePulse is a native macOS menu-bar timer, coding journal, and local insights
 tool for developers. It is lightweight and local-first: there are no accounts,
-cloud sync, telemetry, product analytics, or activity monitoring. CodePulse
-contacts GitHub only to check for and download authenticated app updates or to
-optionally enrich a local session with read-only repository, pull request, and
-developer-tool metadata.
+cloud sync, telemetry, product analytics, or application/browser/keyboard/mouse/
+filesystem activity monitoring. CodePulse contacts GitHub only to check for and
+download authenticated app updates or to optionally enrich a local session with
+read-only repository, pull request, and developer-tool metadata.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -25,6 +25,9 @@ developer-tool metadata.
   optionally their current pull request when the repository has a GitHub remote.
 - Optionally records that Codex and/or OpenCode participated in a selected
   project's session using only local lifecycle metadata.
+- Optionally starts, pauses, resumes, and saves a session from configured Codex
+  or OpenCode lifecycle signals. Session Automation is disabled by default and
+  never takes control of a manually started session.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -56,7 +59,8 @@ or allow the automatic update check.
 5. Open History to search, filter, or edit saved sessions, or open Insights to
    review local activity and context-derived summaries.
 6. If desired, open **Settings → Integrations** to enable Codex or OpenCode
-   context enrichment. Integrations are optional and never control the timer.
+   context enrichment. Integrations are optional and separate from **Settings →
+   Session Automation**, which is also optional and disabled by default.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
@@ -74,18 +78,21 @@ folder you select, allowing it to read local Git metadata for that project.
 ## Local data and privacy
 
 CodePulse stores its state as JSON under the user's Application Support
-directory. Session notes, project paths, settings, Git snapshots, GitHub context
-snapshots, developer-tool session metadata, and active session state stay on the
-Mac unless the user exports or shares a backup. Developer-tool metadata is
-limited to the tool name, external session identifier, working directory,
-timestamps, lifecycle event count, and optional model/profile labels. CodePulse
-also keeps a local deduplication ledger of processed event identifiers and
-timestamps (up to 2,048 entries; event processing prunes entries older than
-30 days), which may appear in exported backups. Inbox cleanup after processing
-is best effort, so a filesystem failure may leave a local event file. CodePulse
-does not collect prompts, responses, transcripts, source code, terminal command contents, command
-output, tool-call arguments or results, permission decisions, reasoning,
-conversation summaries, or credentials.
+directory. Session notes, project paths, settings, automation rules, active
+automation ownership, Git snapshots, GitHub context snapshots, developer-tool
+session metadata, and active session state stay on the Mac unless the user
+exports or shares a backup. Developer-tool metadata is limited to the tool name,
+external session identifier, working directory, timestamps, lifecycle event
+count, and optional model/profile labels. When Session Automation is enabled,
+CodePulse uses only those local lifecycle signals and the working directory to
+match an explicit rule to a configured project. CodePulse also keeps a local
+deduplication ledger of processed event identifiers and timestamps (up to 2,048
+entries; event processing prunes entries older than 30 days), which may appear
+in exported backups. Inbox cleanup after processing is best effort, so a
+filesystem failure may leave a local event file. CodePulse does not collect
+prompts, messages, responses, transcripts, source code, terminal command
+contents, command output, tool-call arguments or results, permission decisions,
+reasoning, conversation summaries, or credentials.
 
 Sparkle checks CodePulse release assets on GitHub. When `gh` is installed, the
 optional GitHub Context feature uses the user's existing GitHub CLI setup for
@@ -152,7 +159,15 @@ inbox at `~/Library/Application Support/CodePulse/Integrations/Inbox/`.
 CodePulse associates an event only with the currently active, selected project
 when the canonical working directory is that project's folder or a child
 directory. No Project sessions and unrelated projects are ignored. Integration
-events never start, pause, resume, or finish a CodePulse session.
+context enrichment remains independent from Session Automation.
+
+CodePulse 0.8 adds optional Session Automation for Codex and OpenCode. A user
+can enable the global setting and create a rule for a configured project. A
+matching `sessionStarted` or `activity` signal can start one locally owned
+session; later signals can keep it alive, resume an automatic pause, and finish
+and save it after the configured grace periods. Existing active sessions are
+never switched to another project, manual lifecycle actions take control
+immediately, and raw event files are not retained as an activity history.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling
