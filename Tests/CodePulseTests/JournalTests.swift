@@ -1,4 +1,5 @@
 import Foundation
+import CodePulseIntegration
 import XCTest
 @testable import CodePulse
 
@@ -191,6 +192,136 @@ final class JournalTests: XCTestCase {
             calendar: calendar,
             referenceDate: start
         ))
+    }
+
+    func testHistoryQuerySearchesDeveloperToolAndGitHubMetadata() {
+        let start = date(year: 2023, month: 8, day: 9, hour: 10)
+        let developerContext = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "codex-session",
+            workingDirectory: "/tmp/codepulse",
+            firstActivityAt: start,
+            lastActivityAt: start.addingTimeInterval(300),
+            model: "GPT-5.6 Sol",
+            profile: "Builder"
+        )
+        let pullRequest = GitHubPullRequestSnapshot(
+            number: 42,
+            title: "Improve session intelligence",
+            state: .open,
+            isDraft: false,
+            url: "https://github.com/owner/repository/pull/42"
+        )
+        let matching = CompletedSession(
+            id: UUID(),
+            projectID: UUID(),
+            projectName: "CodePulse",
+            type: .review,
+            goal: "Inspect insights",
+            outcome: "Documented the result",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_600),
+            pauseIntervals: [],
+            githubContext: GitHubSessionContext(
+                repositoryNameWithOwner: "owner/repository",
+                repositoryURL: "https://github.com/owner/repository",
+                pullRequest: pullRequest
+            ),
+            developerToolContexts: [developerContext]
+        )
+        let unrelated = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: "Other",
+            type: .coding,
+            goal: "Unrelated",
+            outcome: nil,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_600),
+            pauseIntervals: []
+        )
+
+        for searchText in [
+            "Codex", "GPT-5.6", "Builder", "owner/repository", "42", "Improve session intelligence"
+        ] {
+            let query = HistoryQuery(searchText: searchText)
+            XCTAssertTrue(query.matches(matching, calendar: calendar, referenceDate: start), searchText)
+            XCTAssertFalse(query.matches(unrelated, calendar: calendar, referenceDate: start), searchText)
+        }
+    }
+
+    func testHistoryDeveloperToolFiltersTreatMultipleContextsAsOneToolParticipation() {
+        let start = date(year: 2023, month: 8, day: 9, hour: 10)
+        let codex = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "codex-1",
+            workingDirectory: "/tmp/codepulse",
+            firstActivityAt: start,
+            lastActivityAt: start
+        )
+        let codexAgain = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "codex-2",
+            workingDirectory: "/tmp/codepulse",
+            firstActivityAt: start,
+            lastActivityAt: start
+        )
+        let openCode = DeveloperToolSessionContext(
+            tool: .opencode,
+            externalSessionID: "opencode-1",
+            workingDirectory: "/tmp/codepulse",
+            firstActivityAt: start,
+            lastActivityAt: start
+        )
+        let codexSession = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(600),
+            pauseIntervals: [],
+            developerToolContexts: [codex, codexAgain]
+        )
+        let openCodeSession = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(600),
+            pauseIntervals: [],
+            developerToolContexts: [openCode]
+        )
+        let noToolSession = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(600),
+            pauseIntervals: []
+        )
+
+        let sessions = [codexSession, openCodeSession, noToolSession]
+        XCTAssertEqual(sessions.filter {
+            HistoryQuery(developerTool: .anyTool).matches($0, calendar: calendar, referenceDate: start)
+        }.count, 3)
+        XCTAssertEqual(sessions.filter {
+            HistoryQuery(developerTool: .codex).matches($0, calendar: calendar, referenceDate: start)
+        }.count, 1)
+        XCTAssertEqual(sessions.filter {
+            HistoryQuery(developerTool: .openCode).matches($0, calendar: calendar, referenceDate: start)
+        }.count, 1)
+        XCTAssertEqual(sessions.filter {
+            HistoryQuery(developerTool: .noDeveloperTool).matches($0, calendar: calendar, referenceDate: start)
+        }.count, 1)
     }
 
     func testHistoryGroupsFilterBeforeGroupingAndUseVisibleTotals() {

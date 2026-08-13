@@ -455,11 +455,75 @@ final class SessionStore: ObservableObject {
             .map { name in
                 HistoryProjectOption(
                     id: "historical-\(name)",
-                    title: name,
-                    filter: .historicalName(name)
-                )
+                title: name,
+                filter: .historicalName(name)
+            )
             }
         return currentOptions + historicalNames
+    }
+
+    var insightsProjectOptions: [InsightsProjectOption] {
+        let currentProjects = projectsSortedByRecentUse.map { project in
+            InsightsProjectOption(
+                id: "project-\(project.id.uuidString)",
+                title: project.name,
+                filter: .projectID(project.id)
+            )
+        }
+        let currentIDs = Set(state.projects.map(\.id))
+        let currentNames = Set(state.projects.map(\.name))
+        var historicalByID: [UUID: (name: String, startedAt: Date)] = [:]
+        var historicalNames = Set<String>()
+
+        func collect(projectID: UUID?, projectName: String?, startedAt: Date) {
+            if let projectID, !currentIDs.contains(projectID) {
+                let name = projectName.flatMap { $0.isEmpty ? nil : $0 } ?? "Historical Project"
+                if let existing = historicalByID[projectID], existing.startedAt >= startedAt { return }
+                historicalByID[projectID] = (name: name, startedAt: startedAt)
+            } else if projectID == nil,
+                      let projectName,
+                      !projectName.isEmpty,
+                      !currentNames.contains(projectName) {
+                historicalNames.insert(projectName)
+            }
+        }
+        for session in state.completedSessions {
+            collect(
+                projectID: session.projectID,
+                projectName: session.projectName,
+                startedAt: session.startedAt
+            )
+        }
+        if let activeSession = state.activeSession {
+            collect(
+                projectID: activeSession.projectID,
+                projectName: activeSession.projectName,
+                startedAt: activeSession.startedAt
+            )
+        }
+
+        func precedes(_ lhs: InsightsProjectOption, _ rhs: InsightsProjectOption) -> Bool {
+            let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+            if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+
+        let historicalIDOptions = historicalByID.map { projectID, value in
+            InsightsProjectOption(
+                id: "historical-project-\(projectID.uuidString)",
+                title: value.name,
+                filter: .projectID(projectID)
+            )
+        }.sorted(by: precedes)
+        let historicalNameOptions = historicalNames.map { name in
+            InsightsProjectOption(
+                id: "historical-name-\(name)",
+                title: name,
+                filter: .historicalName(name)
+            )
+        }.sorted(by: precedes)
+
+        return currentProjects + historicalIDOptions + historicalNameOptions
     }
 
     @discardableResult
