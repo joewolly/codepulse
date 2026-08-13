@@ -9,22 +9,32 @@ struct CodePulseIntegrationCLI {
         // never change the tool's lifecycle or exit status.
         guard let mode = CommandLine.arguments.dropFirst().first else { return }
         guard let input = readStandardInput() else { return }
+        let inbox = DeveloperEventV2Inbox()
 
-        let event: DeveloperToolEvent?
         switch mode {
+        case "--event-v2":
+            // The v2 receiver validates the complete bounded envelope,
+            // including the integration allow-list and idempotency key, before
+            // it writes anything for the app to inspect.
+            _ = try? inbox.receive(input)
+            return
         case "--event":
-            event = try? DeveloperToolEventCodec.decode(input)
+            guard let event = try? DeveloperToolEventCodec.decode(input),
+                  let sanitized = try? DeveloperToolEventValidator.sanitized(event) else {
+                inbox.recordRejected(code: "legacy-schema-rejected")
+                return
+            }
+            receiveLegacy(sanitized, using: inbox)
         case "--codex-hook":
-            event = makeCodexEvent(from: input)
+            guard let event = makeCodexEvent(from: input),
+                  let sanitized = try? DeveloperToolEventValidator.sanitized(event) else {
+                inbox.recordRejected(code: "legacy-schema-rejected")
+                return
+            }
+            receiveLegacy(sanitized, using: inbox)
         default:
-            event = nil
-        }
-
-        guard let event,
-              let sanitized = try? DeveloperToolEventValidator.sanitized(event) else {
             return
         }
-        try? DeveloperToolInbox().write(sanitized)
     }
 
     private static func readStandardInput() -> Data? {
@@ -74,7 +84,20 @@ struct CodePulseIntegrationCLI {
         input.readabilityHandler = nil
         lock.lock()
         defer { lock.unlock() }
-        return data.isEmpty || oversized ? nil : data
+        if oversized {
+            // Preserve only the fact of oversize for the v2 receiver. Never
+            // retain the actual hook body beyond the bounded read buffer.
+            return Data(repeating: 0, count: DeveloperToolIntegrationLimits.maximumEventBytes + 1)
+        }
+        return data.isEmpty ? nil : data
+    }
+
+    private static func receiveLegacy(_ event: DeveloperToolEvent, using inbox: DeveloperEventV2Inbox) {
+        guard let data = try? DeveloperEventV2Codec.encode(DeveloperEventV2(legacy: event)) else {
+            inbox.recordRejected(code: "legacy-normalization-rejected")
+            return
+        }
+        _ = try? inbox.receive(data)
     }
 
     private static func makeCodexEvent(from data: Data) -> DeveloperToolEvent? {
