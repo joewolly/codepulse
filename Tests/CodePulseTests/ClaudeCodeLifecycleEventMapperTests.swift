@@ -33,5 +33,15 @@ final class ClaudeCodeLifecycleEventMapperTests: XCTestCase {
         XCTAssertFalse(text.contains("do not retain"))
         XCTAssertFalse(text.contains("/private/transcript.jsonl"))
         XCTAssertFalse(text.contains("tool_input"))
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-claude-mapper-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inbox = DeveloperEventV2Inbox(
+            paths: DeveloperToolIntegrationPaths(applicationSupportDirectory: root),
+            fingerprintSalt: Data(repeating: 1, count: 32)
+        )
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(event), now: now), .accepted)
+        let stored = try XCTUnwrap(inbox.pendingEventURLs().first)
+        XCTAssertEqual(try inbox.readEvent(from: stored, now: now).metadata?.transcriptAvailable, true)
     }
 }

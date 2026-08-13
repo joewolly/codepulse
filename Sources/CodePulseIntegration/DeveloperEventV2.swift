@@ -152,7 +152,9 @@ public enum DeveloperEventV2Codec {
         "externalSessionKey", "parentSessionKey", "workingDirectory", "model", "effort",
         "serviceMode", "parserVersion", "integrationVersion", "metadata"
     ]
-    private static let allowedMetadataFields: Set<String> = ["adapterVersion", "eventSequence", "sourceKind"]
+    private static let allowedMetadataFields: Set<String> = [
+        "adapterVersion", "eventSequence", "sourceKind", "transcriptAvailable"
+    ]
     private static let forbiddenFields: Set<String> = [
         "prompt", "transcript", "source", "sourceContent", "content", "message", "messages",
         "command", "arguments", "input", "output", "toolCall", "toolCalls", "fileContents"
@@ -295,7 +297,8 @@ public enum DeveloperEventV2Validator {
         return DeveloperEventMetadataV2(
             adapterVersion: try sanitizeMetadata(metadata.adapterVersion),
             eventSequence: metadata.eventSequence,
-            sourceKind: try sanitizeMetadata(metadata.sourceKind)
+            sourceKind: try sanitizeMetadata(metadata.sourceKind),
+            transcriptAvailable: metadata.transcriptAvailable
         )
     }
 
