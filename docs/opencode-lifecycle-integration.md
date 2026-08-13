@@ -52,3 +52,13 @@ CodePulse-owned plugin is present. **Enable / Repair integration** replaces
 only that marked filename; it refuses to overwrite a non-CodePulse file.
 **Disable integration** removes only the managed plugin. Restart OpenCode after
 enabling, repairing, or disabling so it reloads its plugin directory.
+
+## Local data controls
+
+**Settings → Integration Data** can remove CodePulse-held OpenCode runs,
+optional usage samples, diagnostics, and reader checkpoints for this
+integration. The action also disables OpenCode token usage; it does not delete
+the managed plugin, OpenCode data, user configuration, projects, manual
+sessions, or files the user already exported. See
+[`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles) for
+the complete deletion and sharing boundary.

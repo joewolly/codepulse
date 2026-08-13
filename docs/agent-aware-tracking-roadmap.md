@@ -161,7 +161,7 @@ not exist yet.
 | 15 | @ZacharyRW | `feature/15-opencode-usage` | [#20](https://github.com/ZacharyRW/codepulse/pull/20) | Merged | 2026-08-13 |
 | 16 | @ZacharyRW | `feature/16-usage-attribution` | [#21](https://github.com/ZacharyRW/codepulse/pull/21) | Merged | 2026-08-13 |
 | 17 | @ZacharyRW | `feature/17-usage-insights` | [#22](https://github.com/ZacharyRW/codepulse/pull/22) | Merged | 2026-08-13 |
-| 18 | @ZacharyRW | `feature/18-release-hardening` | [#23](https://github.com/ZacharyRW/codepulse/pull/23) | In review | — |
+| 18 | @ZacharyRW | `feature/18-release-hardening` | [#23](https://github.com/ZacharyRW/codepulse/pull/23) | Merged | 2026-08-13 |
 
 ---
 

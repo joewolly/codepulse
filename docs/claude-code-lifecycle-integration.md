@@ -67,3 +67,13 @@ handler `statusMessage` is `CodePulse Claude Code lifecycle integration
 4. Stop a run and let the review grace expire. Verify the resulting waiting
    interval is excluded from active runtime.
 5. Disable the integration and verify an unrelated Claude user hook remains.
+
+## Local data controls
+
+**Settings → Integration Data** can remove CodePulse-held Claude Code runs,
+optional usage samples, diagnostics, and reader checkpoints for this
+integration. The action also disables Claude Code token usage; it does not
+delete Claude JSONL source files, user configuration, projects, manual
+sessions, or files the user already exported. See
+[`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles) for
+the complete deletion and sharing boundary.

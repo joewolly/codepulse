@@ -48,3 +48,12 @@ local process or hook are not tracked.
 
 Use **Disable integration** to remove CodePulse-managed hooks. Existing timing
 history remains local until deleted through CodePulse's data controls.
+
+## Local data controls
+
+**Settings → Integration Data** can remove CodePulse-held Codex runs, optional
+usage samples, diagnostics, and reader checkpoints for this integration. The
+action also disables Codex token usage; it does not delete Codex session logs,
+user configuration, projects, manual sessions, or files the user already
+exported. See [`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles)
+for the complete deletion and sharing boundary.

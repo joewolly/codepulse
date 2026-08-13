@@ -71,6 +71,14 @@ Before Feature 01 a missing or malformed file silently produced an empty
   reconciliation summaries in memory from existing `usageSamples` and the
   activity graph. It adds no persistence field, analytics database, raw-source
   identifier, or migration.
+- **Hardening and deferred budgets (Feature 18):** per-integration deletion
+  removes only CodePulse-held runs, samples, diagnostics, checkpoints, and
+  related consent from the current state; it does not touch source logs or
+  user-owned configuration. Redacted support bundles are separate, generated
+  aggregate-only JSON artifacts and are never persisted as application state.
+  The OpenCode usage inbox is transient and bounded to 2,048 files or 16 MiB.
+  Reserved `UsageBudgetPolicy` types are inactive extension points: they are
+  not persisted, displayed, evaluated, or enforced.
 
 ## v1 fixture policy
 

@@ -37,6 +37,12 @@ rejects malformed records, unsafe paths, oversized data, negative counters, and
 records without a positive token count before storing an atomic handoff. After
 processing, CodePulse removes the handoff.
 
+The CodePulse-owned inbox is bounded to 2,048 handoff files or 16 MiB. A new
+handoff that would exceed either limit is rejected before it is written, so a
+stalled or misbehaving local plugin cannot grow the inbox without limit. A
+rejected usage handoff affects usage metadata only; lifecycle timing continues
+normally.
+
 ## Normalization and attribution
 
 CodePulse converts the OpenCode session ID to an installation-salted fingerprint
@@ -64,3 +70,12 @@ future plugin version is reported as usage-adapter health only. It is removed
 without changing activity timing, lifecycle events, or manual sessions. Repair
 the managed OpenCode integration and restart OpenCode after plugin changes; the
 next supported record restores the adapter to `healthy`.
+
+## Retention and deletion
+
+Turning off the adapter stops new handoffs but preserves existing privacy-safe
+samples. To remove CodePulse-held OpenCode usage samples and inbox processing
+state, use **Settings → Integration Data**. It also removes OpenCode agent runs
+and attributable diagnostics, but never alters OpenCode data, user
+configuration, or previously exported files. See
+[`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles).
