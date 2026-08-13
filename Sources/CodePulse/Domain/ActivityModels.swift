@@ -150,6 +150,7 @@ struct Run: Codable, Equatable, Identifiable {
     var endedAt: Date?
     var intervals: [Interval]
     var legacySessionID: UUID?
+    var agentMetadata: AgentRunMetadata?
 
     init(
         id: UUID = UUID(),
@@ -158,7 +159,8 @@ struct Run: Codable, Equatable, Identifiable {
         startedAt: Date,
         endedAt: Date? = nil,
         intervals: [Interval] = [],
-        legacySessionID: UUID? = nil
+        legacySessionID: UUID? = nil,
+        agentMetadata: AgentRunMetadata? = nil
     ) {
         self.id = id
         self.activityID = activityID
@@ -167,9 +169,26 @@ struct Run: Codable, Equatable, Identifiable {
         self.endedAt = endedAt
         self.intervals = intervals
         self.legacySessionID = legacySessionID
+        self.agentMetadata = agentMetadata
     }
 
     var openInterval: Interval? { intervals.first(where: \.isOpen) }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, activityID, kind, startedAt, endedAt, intervals, legacySessionID, agentMetadata
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        activityID = try container.decode(UUID.self, forKey: .activityID)
+        kind = try container.decode(RunKind.self, forKey: .kind)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        intervals = try container.decodeIfPresent([Interval].self, forKey: .intervals) ?? []
+        legacySessionID = try container.decodeIfPresent(UUID.self, forKey: .legacySessionID)
+        agentMetadata = try container.decodeIfPresent(AgentRunMetadata.self, forKey: .agentMetadata)
+    }
 }
 
 struct ActivityGraph: Codable, Equatable {
@@ -298,6 +317,7 @@ struct ActivityGraphDiagnostics: Codable, Equatable {
         let kind: RunKind
         let intervalStates: [IntervalState]
         let isEnded: Bool
+        let agentState: AgentRunState?
     }
 
     let workspaces: [WorkspaceSnapshot]
@@ -309,7 +329,16 @@ struct ActivityGraphDiagnostics: Codable, Equatable {
         self.activities = graph.activities.map { activity in
             ActivitySnapshot(id: activity.id, workspaceID: activity.workspaceID, workType: activity.workType, domain: activity.domain, runCount: graph.runs.filter { $0.activityID == activity.id }.count)
         }
-        self.runs = graph.runs.map { RunSnapshot(id: $0.id, activityID: $0.activityID, kind: $0.kind, intervalStates: $0.intervals.map(\.state), isEnded: $0.endedAt != nil) }
+        self.runs = graph.runs.map {
+            RunSnapshot(
+                id: $0.id,
+                activityID: $0.activityID,
+                kind: $0.kind,
+                intervalStates: $0.intervals.map(\.state),
+                isEnded: $0.endedAt != nil,
+                agentState: $0.agentMetadata?.state
+            )
+        }
     }
 }
 
