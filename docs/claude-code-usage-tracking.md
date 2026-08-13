@@ -48,3 +48,12 @@ Claude API-equivalent estimate is unavailable until a verified catalog update
 contains a matching model; then the existing typed calculation preserves its
 catalog source and version. See [`pricing-catalog.md`](pricing-catalog.md) for
 catalog trust and estimate semantics.
+
+## Retention and deletion
+
+Turning off the reader prevents further local source access but preserves
+existing privacy-safe samples. To remove CodePulse-held Claude Code usage
+samples and their checkpoints, use **Settings → Integration Data**. It also
+removes Claude Code agent runs and attributable diagnostics, but never alters
+Claude JSONL source files or user configuration. See
+[`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles).

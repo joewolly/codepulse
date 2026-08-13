@@ -72,3 +72,9 @@ Workspace and activity labels are opt-in in the export menu. Provider, model,
 effort, and service mode can also be selected. Paths, UUIDs, source/session
 fingerprints, raw provider records, prompts, transcripts, commands, source
 code, and credentials are never exportable by this feature.
+
+Usage exports are not support bundles or backups. For a shareable,
+aggregate-only diagnostic file, use **Settings → Export Redacted Support
+Bundle…**; it contains no usage rows, paths, identifiers, prompts, transcripts,
+or freeform session text. See
+[`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles).

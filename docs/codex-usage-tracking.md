@@ -54,3 +54,12 @@ Pricing metadata uses the signed catalog described in
 [`pricing-catalog.md`](pricing-catalog.md). Usage metadata is never sent to a
 CodePulse service. A separately configured pricing-catalog refresh fetches only
 a public HTTPS manifest and sends no usage, session, workspace, or path data.
+
+## Retention and deletion
+
+Turning off the reader prevents further local source access but preserves
+existing privacy-safe samples. To remove CodePulse-held Codex usage samples and
+their checkpoints, use **Settings → Integration Data**. It also removes Codex
+agent runs and attributable diagnostics, but never alters Codex source logs or
+user configuration. See
+[`../PRIVACY.md`](../PRIVACY.md#integration-deletion-and-support-bundles).

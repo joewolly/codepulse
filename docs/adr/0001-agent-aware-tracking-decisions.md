@@ -37,41 +37,48 @@ with evidence.
 6. Every integration can be disabled, its token reader disabled, and its
    stored data deleted. Exports cover only the metadata named on the privacy
    screen.
+7. A redacted support bundle is a user-chosen, local aggregate-only artifact.
+   It is never uploaded automatically and excludes paths, identifiers, prompts,
+   transcripts, source content, credentials, and freeform session text.
 
 ### Architecture
 
-7. Timing and usage accounting are separate pipelines. A failed parser or a
+8. Timing and usage accounting are separate pipelines. A failed parser or a
    disabled usage permission must never stop timing from working.
-8. Token tracking is a separate, off-by-default consent toggle per
+9. Token tracking is a separate, off-by-default consent toggle per
    integration. Activity tracking never requires it.
-9. All integrations feed one versioned, normalized developer-event schema, and
+10. All integrations feed one versioned, normalized developer-event schema, and
    one shared run-state reducer derives intervals from it. Integrations do not
    compute their own time.
-10. Runs are never collapsed merely because they share a workspace. Manual
-    time, agent runtime, and combined wall-active time stay distinct measures,
-    and summed concurrency is never presented as personal time.
-11. Waiting time is visible but excluded from active totals. Review grace after
-    an agent stops defaults to three minutes.
-12. Claude subagents are shown individually with a parent roll-up that counts
-    child usage exactly once.
+11. Runs are never collapsed merely because they share a workspace. Manual
+   time, agent runtime, and combined wall-active time stay distinct measures,
+   and summed concurrency is never presented as personal time.
+12. Waiting time is visible but excluded from active totals. Review grace after
+   an agent stops defaults to three minutes.
+13. Claude subagents are shown individually with a parent roll-up that counts
+   child usage exactly once.
 
 ### Cost representation
 
-13. Prices come from a signed, versioned manifest with a bundled offline
-    fallback. Historical calculations retain the catalog version used, so past
-    figures do not change when prices do.
-14. Reported cost, API-equivalent estimate, Codex-credit estimate,
-    subscription/unpriced state, and calculation provenance are all preserved.
-    The user picks which one displays primarily per integration.
-15. The UI never labels an estimate as an actual charge, and a Codex-credit
-    estimate is never presented as remaining or billed credits.
+14. Prices come from a signed, versioned manifest with a bundled offline
+   fallback. Historical calculations retain the catalog version used, so past
+   figures do not change when prices do.
+15. Reported cost, API-equivalent estimate, Codex-credit estimate,
+   subscription/unpriced state, and calculation provenance are all preserved.
+   The user picks which one displays primarily per integration.
+16. The UI never labels an estimate as an actual charge, and a Codex-credit
+   estimate is never presented as remaining or billed credits.
 
 ### Scope
 
-16. A tracked session must have a local process, hook, or local usage record.
-    Cloud-only runs are out of scope for this release.
-17. Budgets, threshold alerts, and enforcement are deferred until the Usage
-    Insights release has been validated.
+17. A tracked session must have a local process, hook, or local usage record.
+   Cloud-only runs are out of scope for this release.
+18. Budget policy models may exist as inactive extension points, but budgets,
+   threshold alerts, and enforcement remain deferred until Usage Insights has
+   been validated.
+19. Release publication is isolated to the signed-tag workflow. Validation and
+   manual release preflight use minimal permissions, bounded jobs, and
+   SHA-pinned third-party actions; dependency updates require normal review.
 
 ## Consequences
 
