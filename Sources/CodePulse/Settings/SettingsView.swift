@@ -58,6 +58,7 @@ struct SettingsView: View {
                 }
             }
 
+            SessionPresetSettingsView()
             AutomationSettingsView()
 
             Section("Workflow") {
@@ -76,7 +77,7 @@ struct SettingsView: View {
                 .accessibilityLabel("Export CodePulse Backup")
                 .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
 
-                Text("Backups include local projects, settings, saved sessions, and any active session. No secrets or external data are included.")
+                Text("Backups include local projects, presets, settings, saved sessions, automation rules, and any active session. No secrets, app-activation history, or external data are included.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

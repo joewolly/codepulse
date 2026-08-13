@@ -37,6 +37,7 @@ struct MenuBarPopoverView: View {
 
 private struct IdleSessionView: View {
     @EnvironmentObject private var store: SessionStore
+    @State private var selectedPresetID: UUID?
     @State private var selectedProjectID: UUID?
     @State private var selectedType: SessionType = .coding
     @State private var goal = ""
@@ -48,6 +49,37 @@ private struct IdleSessionView: View {
 
             Text("Ready to code?")
                 .font(.headline)
+
+            if !store.sessionPresetsSorted.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Quick Start")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Picker("Session preset", selection: $selectedPresetID) {
+                            Text("Choose a preset").tag(UUID?.none)
+                            ForEach(store.sessionPresetsSorted) { preset in
+                                Text(preset.name).tag(Optional(preset.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+
+                        Button {
+                            guard let selectedPresetID,
+                                  let preset = store.sessionPreset(id: selectedPresetID) else { return }
+                            _ = store.startSession(using: preset)
+                        } label: {
+                            Label("Start", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(selectedPresetID == nil)
+                        .accessibilityLabel("Start selected session preset")
+                        .accessibilityHint("Starts a manual session using the selected preset")
+                    }
+                }
+            }
 
             ProjectSelectionRow(selectedProjectID: $selectedProjectID)
 
@@ -118,16 +150,14 @@ private struct ActiveSessionView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            if let session = store.activeSession,
-               let metadata = session.automationMetadata,
-               metadata.controlEnabled {
+            if let automationStatus = store.activeAutomationStatusLabel {
                 Label(
-                    metadata.statusLabel(contexts: session.developerToolContexts),
+                    automationStatus,
                     systemImage: "bolt.badge.clock"
                 )
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Color.accentColor)
-                .accessibilityLabel(metadata.statusLabel(contexts: session.developerToolContexts))
+                .accessibilityLabel(automationStatus)
             }
 
             Text(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))

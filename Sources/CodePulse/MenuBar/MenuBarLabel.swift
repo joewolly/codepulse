@@ -47,12 +47,7 @@ struct MenuBarLabel: View {
     }
 
     private var accessibilityText: String {
-        let automationStatus: String? = {
-            guard let session = store.activeSession,
-                  let metadata = session.automationMetadata,
-                  metadata.controlEnabled else { return nil }
-            return metadata.statusLabel(contexts: session.developerToolContexts)
-        }()
+        let automationStatus = store.activeAutomationStatusLabel
 
         switch store.phase {
         case .idle:
