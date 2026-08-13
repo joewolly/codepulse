@@ -1,0 +1,15 @@
+{
+  "schemaVersion" : 2,
+  "integration" : "opencode",
+  "eventKind" : "session.started",
+  "observedAt" : "2027-01-15T08:00:00Z",
+  "idempotencyKey" : "opencode-0123456789abcdef",
+  "externalSessionKey" : "opencode-session-1",
+  "workingDirectory" : "/tmp/codepulse",
+  "model" : "open-model",
+  "effort" : "low",
+  "serviceMode" : "local",
+  "parserVersion" : "1",
+  "integrationVersion" : "1",
+  "metadata" : { "adapterVersion" : "1", "eventSequence" : 3, "sourceKind" : "plugin" }
+}
