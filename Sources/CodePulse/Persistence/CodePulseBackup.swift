@@ -36,7 +36,12 @@ enum CodePulseBackupCodec {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(CodePulseBackup(exportedAt: exportedAt, state: state))
+        var backupState = state
+        // The control ledger is an internal exactly-once recovery mechanism,
+        // not user history. Commands and responses are never part of a
+        // portable backup; replay protection starts fresh after an import.
+        backupState.controlProcessing = nil
+        return try encoder.encode(CodePulseBackup(exportedAt: exportedAt, state: backupState))
     }
 
     static func decode(_ data: Data) throws -> CodePulseBackup {

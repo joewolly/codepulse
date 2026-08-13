@@ -644,6 +644,7 @@ struct AppState: Codable, Equatable {
     var sessionPresets: [SessionPreset]
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
     var automationRules: [SessionAutomationRule]
+    var controlProcessing: CodePulseControlProcessingState?
 
     init(
         projects: [ProjectRecord] = [],
@@ -652,7 +653,8 @@ struct AppState: Codable, Equatable {
         settings: CodePulseSettings = CodePulseSettings(),
         sessionPresets: [SessionPreset] = [],
         developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
-        automationRules: [SessionAutomationRule] = []
+        automationRules: [SessionAutomationRule] = [],
+        controlProcessing: CodePulseControlProcessingState? = nil
     ) {
         self.projects = projects
         self.completedSessions = completedSessions
@@ -661,11 +663,12 @@ struct AppState: Codable, Equatable {
         self.sessionPresets = Self.normalizedPresets(sessionPresets, rules: automationRules)
         self.developerToolIntegration = developerToolIntegration
         self.automationRules = automationRules.map { $0.canonicalized() }
+        self.controlProcessing = Self.normalizedControlProcessing(controlProcessing)
     }
 
     private enum CodingKeys: String, CodingKey {
         case projects, completedSessions, activeSession, settings
-        case sessionPresets, developerToolIntegration, automationRules
+        case sessionPresets, developerToolIntegration, automationRules, controlProcessing
     }
 
     init(from decoder: Decoder) throws {
@@ -680,6 +683,13 @@ struct AppState: Codable, Equatable {
             forKey: .developerToolIntegration
         )
         let automationRules = try container.decodeIfPresent([SessionAutomationRule].self, forKey: .automationRules) ?? []
+        // Control bookkeeping is auxiliary recovery state. If it is damaged,
+        // keep the user's sessions and configuration and start with an empty
+        // ledger rather than treating the whole state file as corrupt.
+        let controlProcessing = try? container.decode(
+            CodePulseControlProcessingState.self,
+            forKey: .controlProcessing
+        )
         self.init(
             projects: projects,
             completedSessions: completedSessions,
@@ -687,7 +697,8 @@ struct AppState: Codable, Equatable {
             settings: settings,
             sessionPresets: sessionPresets,
             developerToolIntegration: developerToolIntegration,
-            automationRules: automationRules
+            automationRules: automationRules,
+            controlProcessing: controlProcessing
         )
     }
 
@@ -712,6 +723,22 @@ struct AppState: Codable, Equatable {
 
         return orderedIDs.compactMap { presetsByID[$0] }
     }
+
+    private static func normalizedControlProcessing(
+        _ processing: CodePulseControlProcessingState?
+    ) -> CodePulseControlProcessingState? {
+        guard var processing,
+              !processing.processedCommands.isEmpty else {
+            return nil
+        }
+        processing.processedCommands.sort { $0.processedAt > $1.processedAt }
+        if processing.processedCommands.count > CodePulseControlLimits.maximumProcessedCommands {
+            processing.processedCommands.removeLast(
+                processing.processedCommands.count - CodePulseControlLimits.maximumProcessedCommands
+            )
+        }
+        return processing
+    }
 }
 
 struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
@@ -726,4 +753,14 @@ struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
 
 struct DeveloperToolIntegrationProcessingState: Codable, Equatable {
     var processedEvents: [DeveloperToolProcessedEvent] = []
+}
+
+struct CodePulseProcessedControlCommand: Codable, Equatable, Identifiable {
+    let id: UUID
+    let processedAt: Date
+    let response: CodePulseControlResponse
+}
+
+struct CodePulseControlProcessingState: Codable, Equatable {
+    var processedCommands: [CodePulseProcessedControlCommand] = []
 }

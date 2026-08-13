@@ -41,10 +41,13 @@ final class SessionStore: ObservableObject {
     let developerToolEventConsumer: DeveloperToolEventConsuming
     let sessionAutomationCoordinator: SessionAutomationCoordinator
     let frontmostApplicationMonitor: FrontmostApplicationMonitoring?
+    let controlTransport: CodePulseControlTransport?
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
     private var lastIntegrationScanAt: Date?
+    private let controlLaunchDate: Date
+    private var lastControlScanAt: Date?
     private var isMonitoringApplications = false
     private(set) var currentFrontmostApplication: ApplicationIdentity?
 
@@ -56,7 +59,8 @@ final class SessionStore: ObservableObject {
         githubContextService: GitHubContextServicing = SystemGitHubContextService(),
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
         automaticallyRefresh: Bool = true,
-        frontmostApplicationMonitor: FrontmostApplicationMonitoring? = nil
+        frontmostApplicationMonitor: FrontmostApplicationMonitoring? = nil,
+        controlTransport: CodePulseControlTransport? = nil
     ) {
         self.persistence = persistence
         self.clock = clock
@@ -65,11 +69,15 @@ final class SessionStore: ObservableObject {
         self.developerToolEventConsumer = developerToolEventConsumer
         self.sessionAutomationCoordinator = SessionAutomationCoordinator()
         self.frontmostApplicationMonitor = frontmostApplicationMonitor
+        self.controlTransport = controlTransport
         self.calendar = calendar
         self.state = persistence.load()
-        self.now = clock.now
+        let initialNow = clock.now
+        self.now = initialNow
         self.gitCaptureSessionID = nil
         self.lastIntegrationScanAt = nil
+        self.controlLaunchDate = initialNow
+        self.lastControlScanAt = nil
         self.currentFrontmostApplication = nil
 
         self.frontmostApplicationMonitor?.onChange = { [weak self] application in
@@ -87,6 +95,7 @@ final class SessionStore: ObservableObject {
             persistence.save(normalizedState)
         }
 
+        processPendingControlCommands(force: true)
         processPendingIntegrationEvents(force: true)
         restoreAutomaticFinishingState()
         evaluateAutomaticLifecycle(at: clock.now)
@@ -113,7 +122,8 @@ final class SessionStore: ObservableObject {
             developerToolEventConsumer: DeveloperToolEventConsumer(
                 inbox: DeveloperToolInbox()
             ),
-            frontmostApplicationMonitor: NSWorkspaceFrontmostApplicationMonitor()
+            frontmostApplicationMonitor: NSWorkspaceFrontmostApplicationMonitor(),
+            controlTransport: CodePulseControlTransport()
         )
     }
 
@@ -185,6 +195,7 @@ final class SessionStore: ObservableObject {
 
     func refresh() {
         now = clock.now
+        processPendingControlCommands()
         processPendingIntegrationEvents()
         evaluateAutomaticLifecycle(at: now)
     }
@@ -351,7 +362,30 @@ final class SessionStore: ObservableObject {
         at startDate: Date,
         automationMetadata: SessionAutomationMetadata?
     ) -> Bool {
-        guard state.activeSession == nil else { return false }
+        guard let prepared = preparedStartState(
+            projectID: projectID,
+            goal: goal,
+            type: type,
+            at: startDate,
+            automationMetadata: automationMetadata
+        ) else {
+            return false
+        }
+
+        commit(prepared.state)
+        now = clock.now
+        scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
+        return true
+    }
+
+    private func preparedStartState(
+        projectID: UUID?,
+        goal: String?,
+        type: SessionType,
+        at startDate: Date,
+        automationMetadata: SessionAutomationMetadata?
+    ) -> (state: AppState, session: ActiveSession, folderURL: URL?)? {
+        guard state.activeSession == nil else { return nil }
 
         let project = projectID.flatMap { id in state.projects.first(where: { $0.id == id }) }
         let folderURL = project.flatMap { projectFolderURL(for: $0) }
@@ -370,59 +404,76 @@ final class SessionStore: ObservableObject {
            let index = nextState.projects.firstIndex(where: { $0.id == projectID }) {
             nextState.projects[index].lastUsedAt = startDate
         }
-        commit(nextState)
-        now = clock.now
-        if let folderURL,
-           FileManager.default.fileExists(atPath: folderURL.path) {
-            scheduleStartGitCapture(for: session.id, folderURL: folderURL)
+        return (nextState, session, folderURL)
+    }
+
+    private func scheduleStartGitCaptureIfNeeded(for session: ActiveSession, folderURL: URL?) {
+        guard let folderURL,
+              FileManager.default.fileExists(atPath: folderURL.path) else {
+            return
         }
-        return true
+        scheduleStartGitCapture(for: session.id, folderURL: folderURL)
     }
 
     @discardableResult
     func pause(at date: Date? = nil) -> Bool {
-        guard var session = state.activeSession else { return false }
-        let changed = session.pause(at: date ?? clock.now)
-        guard changed else { return false }
-        relinquishManualAutomationControl(in: &session)
-
-        var nextState = state
-        nextState.activeSession = session
-        commit(nextState)
+        guard let prepared = preparedManualPauseState(at: date ?? clock.now) else { return false }
+        commit(prepared.state)
         refresh()
         return true
     }
 
     @discardableResult
     func resume(at date: Date? = nil) -> Bool {
-        guard var session = state.activeSession else { return false }
-        let changed = session.resume(at: date ?? clock.now)
-        guard changed else { return false }
-        relinquishManualAutomationControl(in: &session)
-
-        var nextState = state
-        nextState.activeSession = session
-        commit(nextState)
+        guard let prepared = preparedManualResumeState(at: date ?? clock.now) else { return false }
+        commit(prepared.state)
         refresh()
         return true
     }
 
     @discardableResult
     func finish(at date: Date? = nil) -> Bool {
-        guard var session = state.activeSession else { return false }
-        let changed = session.finish(at: date ?? clock.now)
-        guard changed else { return false }
-        relinquishManualAutomationControl(in: &session)
-
-        var nextState = state
-        nextState.activeSession = session
-        commit(nextState)
+        guard let prepared = preparedManualFinishState(at: date ?? clock.now) else { return false }
+        commit(prepared.state)
         refresh()
 
-        if session.gitContext != nil {
-            scheduleFinalGitCapture(for: session.id)
+        if prepared.session.gitContext != nil {
+            scheduleFinalGitCapture(for: prepared.session.id)
         }
         return true
+    }
+
+    private func preparedManualPauseState(at date: Date) -> (state: AppState, session: ActiveSession)? {
+        guard var session = state.activeSession,
+              session.pause(at: date) else {
+            return nil
+        }
+        relinquishManualAutomationControl(in: &session)
+        var nextState = state
+        nextState.activeSession = session
+        return (nextState, session)
+    }
+
+    private func preparedManualResumeState(at date: Date) -> (state: AppState, session: ActiveSession)? {
+        guard var session = state.activeSession,
+              session.resume(at: date) else {
+            return nil
+        }
+        relinquishManualAutomationControl(in: &session)
+        var nextState = state
+        nextState.activeSession = session
+        return (nextState, session)
+    }
+
+    private func preparedManualFinishState(at date: Date) -> (state: AppState, session: ActiveSession)? {
+        guard var session = state.activeSession,
+              session.finish(at: date) else {
+            return nil
+        }
+        relinquishManualAutomationControl(in: &session)
+        var nextState = state
+        nextState.activeSession = session
+        return (nextState, session)
     }
 
     @discardableResult
@@ -452,6 +503,414 @@ final class SessionStore: ObservableObject {
         gitCaptureInProgress = false
         refresh()
         return true
+    }
+
+    func controlStatus(at date: Date? = nil) -> CodePulseControlStatus {
+        controlStatus(for: state, at: date ?? clock.now)
+    }
+
+    @discardableResult
+    func processControlCommand(
+        _ rawCommand: CodePulseControlCommand,
+        at date: Date? = nil
+    ) -> CodePulseControlResponse {
+        let date = date ?? clock.now
+        let isMutation = isControlMutation(rawCommand.action)
+        if isMutation,
+           let existing = state.controlProcessing?.processedCommands.first(where: { $0.id == rawCommand.id }) {
+            return existing.response
+        }
+
+        let command: CodePulseControlCommand
+        do {
+            command = try CodePulseControlCommandValidator.sanitized(rawCommand, now: date)
+        } catch let error as CodePulseControlValidationError {
+            let response = CodePulseControlResponse(
+                commandID: rawCommand.id,
+                result: .commandRejected,
+                message: controlValidationMessage(error),
+                status: controlStatus(at: date)
+            )
+            recordControlResponseIfNeeded(response, for: rawCommand.action, at: date)
+            return response
+        } catch {
+            let response = CodePulseControlResponse(
+                commandID: rawCommand.id,
+                result: .internalFailure,
+                message: "CodePulse could not validate the local control command.",
+                status: controlStatus(at: date)
+            )
+            recordControlResponseIfNeeded(response, for: rawCommand.action, at: date)
+            return response
+        }
+
+        if command.issuedAt < controlLaunchDate {
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .commandRejected,
+                message: "The command was issued before CodePulse launched.",
+                status: controlStatus(at: date)
+            )
+            recordControlResponseIfNeeded(response, for: command.action, at: date)
+            return response
+        }
+
+        switch command.action {
+        case .status:
+            return CodePulseControlResponse(
+                commandID: command.id,
+                result: .success,
+                message: "CodePulse status retrieved.",
+                status: controlStatus(at: date)
+            )
+
+        case .startPreset(let name):
+            return processControlStart(
+                commandID: command.id,
+                action: command.action,
+                preset: resolvePreset(named: name),
+                date: date
+            )
+
+        case .startPresetID(let id):
+            return processControlStart(
+                commandID: command.id,
+                action: command.action,
+                preset: state.sessionPresets.first(where: { $0.id == id }).map { .found($0) } ?? .notFound,
+                date: date
+            )
+
+        case .startManual(let projectName, let sessionType, let goal):
+            guard state.activeSession == nil else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .invalidStateTransition,
+                    message: "A session is already active.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard let project = uniqueProject(named: projectName) else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .presetOrProjectNotFound,
+                    message: "The requested project was not found or is ambiguous.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard let type = SessionType(rawValue: sessionType) else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .commandRejected,
+                    message: "The requested session type is not supported.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard let prepared = preparedStartState(
+                projectID: project.id,
+                goal: goal,
+                type: type,
+                at: date,
+                automationMetadata: nil
+            ) else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .invalidStateTransition,
+                    message: "A session could not be started from the current state.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            let responseStatus = controlStatus(for: prepared.state, at: date)
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .success,
+                message: "CodePulse: started manual session.",
+                status: responseStatus
+            )
+            var nextState = prepared.state
+            appendControlResponse(response, to: &nextState, at: date)
+            commit(nextState)
+            now = clock.now
+            scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
+            processPendingIntegrationEvents(force: true)
+            return response
+
+        case .pause:
+            guard let prepared = preparedManualPauseState(at: date) else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .invalidStateTransition,
+                    message: "Pause is not valid while CodePulse is idle or already paused.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .success,
+                message: "CodePulse: paused session.",
+                status: controlStatus(for: prepared.state, at: date)
+            )
+            var nextState = prepared.state
+            appendControlResponse(response, to: &nextState, at: date)
+            commit(nextState)
+            refresh()
+            return response
+
+        case .resume:
+            guard let prepared = preparedManualResumeState(at: date) else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .invalidStateTransition,
+                    message: "Resume is only valid for a paused session.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .success,
+                message: "CodePulse: resumed session.",
+                status: controlStatus(for: prepared.state, at: date)
+            )
+            var nextState = prepared.state
+            appendControlResponse(response, to: &nextState, at: date)
+            commit(nextState)
+            refresh()
+            return response
+
+        case .finish:
+            guard let prepared = preparedManualFinishState(at: date) else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .invalidStateTransition,
+                    message: "Finish is not valid while CodePulse is idle or already finishing.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .success,
+                message: "CodePulse: finishing session. Save the outcome in the app.",
+                status: controlStatus(for: prepared.state, at: date)
+            )
+            var nextState = prepared.state
+            appendControlResponse(response, to: &nextState, at: date)
+            commit(nextState)
+            refresh()
+            if prepared.session.gitContext != nil {
+                scheduleFinalGitCapture(for: prepared.session.id)
+            }
+            return response
+        }
+    }
+
+    private enum PresetResolution {
+        case found(SessionPreset)
+        case notFound
+        case ambiguous
+    }
+
+    private func processControlStart(
+        commandID: UUID,
+        action: CodePulseControlAction,
+        preset resolution: PresetResolution,
+        date: Date
+    ) -> CodePulseControlResponse {
+        guard state.activeSession == nil else {
+            return recordControlFailure(
+                commandID: commandID,
+                result: .invalidStateTransition,
+                message: "A session is already active.",
+                action: action,
+                date: date
+            )
+        }
+
+        let preset: SessionPreset
+        switch resolution {
+        case .notFound:
+            return recordControlFailure(
+                commandID: commandID,
+                result: .presetOrProjectNotFound,
+                message: "The requested session preset was not found.",
+                action: action,
+                date: date
+            )
+        case .ambiguous:
+            return recordControlFailure(
+                commandID: commandID,
+                result: .commandRejected,
+                message: "The preset name is ambiguous; use --preset-id.",
+                action: action,
+                date: date
+            )
+        case .found(let value):
+            preset = value
+        }
+
+        guard preset.isValid,
+              preset.projectID == nil || state.projects.contains(where: { $0.id == preset.projectID }) else {
+            return recordControlFailure(
+                commandID: commandID,
+                result: .presetOrProjectNotFound,
+                message: "The session preset references a missing project.",
+                action: action,
+                date: date
+            )
+        }
+        guard let prepared = preparedStartState(
+            projectID: preset.projectID,
+            goal: preset.goal,
+            type: preset.sessionType,
+            at: date,
+            automationMetadata: nil
+        ) else {
+            return recordControlFailure(
+                commandID: commandID,
+                result: .invalidStateTransition,
+                message: "A session could not be started from the current state.",
+                action: action,
+                date: date
+            )
+        }
+
+        let response = CodePulseControlResponse(
+            commandID: commandID,
+            result: .success,
+            message: "CodePulse: started manual session from \(preset.name).",
+            status: controlStatus(for: prepared.state, at: date)
+        )
+        var nextState = prepared.state
+        appendControlResponse(response, to: &nextState, at: date)
+        commit(nextState)
+        now = clock.now
+        scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
+        processPendingIntegrationEvents(force: true)
+        return response
+    }
+
+    private func resolvePreset(named name: String) -> PresetResolution {
+        let matches = state.sessionPresets.filter {
+            $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }
+        guard !matches.isEmpty else { return .notFound }
+        guard matches.count == 1, let match = matches.first else { return .ambiguous }
+        return .found(match)
+    }
+
+    private func uniqueProject(named name: String) -> ProjectRecord? {
+        let matches = state.projects.filter {
+            $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }
+        guard matches.count == 1 else { return nil }
+        return matches.first
+    }
+
+    private func recordControlFailure(
+        commandID: UUID,
+        result: CodePulseControlResultCode,
+        message: String,
+        action: CodePulseControlAction,
+        date: Date
+    ) -> CodePulseControlResponse {
+        let response = CodePulseControlResponse(
+            commandID: commandID,
+            result: result,
+            message: message,
+            status: controlStatus(at: date)
+        )
+        recordControlResponseIfNeeded(response, for: action, at: date)
+        return response
+    }
+
+    private func recordControlResponseIfNeeded(
+        _ response: CodePulseControlResponse,
+        for action: CodePulseControlAction,
+        at date: Date
+    ) {
+        guard isControlMutation(action) else { return }
+        var nextState = state
+        appendControlResponse(response, to: &nextState, at: date)
+        commit(nextState)
+    }
+
+    private func appendControlResponse(
+        _ response: CodePulseControlResponse,
+        to state: inout AppState,
+        at date: Date
+    ) {
+        var processing = state.controlProcessing ?? CodePulseControlProcessingState()
+        processing.processedCommands.removeAll {
+            date.timeIntervalSince($0.processedAt) > CodePulseControlLimits.processedCommandRetention
+        }
+        processing.processedCommands.removeAll { $0.id == response.commandID }
+        processing.processedCommands.append(CodePulseProcessedControlCommand(
+            id: response.commandID,
+            processedAt: date,
+            response: response
+        ))
+        processing.processedCommands.sort { $0.processedAt > $1.processedAt }
+        if processing.processedCommands.count > CodePulseControlLimits.maximumProcessedCommands {
+            processing.processedCommands.removeLast(
+                processing.processedCommands.count - CodePulseControlLimits.maximumProcessedCommands
+            )
+        }
+        state.controlProcessing = processing
+    }
+
+    private func isControlMutation(_ action: CodePulseControlAction) -> Bool {
+        switch action {
+        case .status: return false
+        case .startPreset, .startPresetID, .startManual, .pause, .resume, .finish: return true
+        }
+    }
+
+    private func controlStatus(
+        for state: AppState,
+        at date: Date
+    ) -> CodePulseControlStatus {
+        guard let session = state.activeSession else {
+            return CodePulseControlStatus(
+                phase: SessionPhase.idle.rawValue,
+                elapsedSeconds: 0,
+                automationControlled: false
+            )
+        }
+
+        let elapsed = Int(max(0, session.activeDuration(at: date)).rounded(.down))
+        return CodePulseControlStatus(
+            phase: session.phase.rawValue,
+            project: session.projectName.flatMap { $0.isEmpty ? nil : $0 },
+            sessionType: session.type.rawValue,
+            elapsedSeconds: elapsed,
+            automationControlled: session.automationMetadata?.controlEnabled == true
+        )
+    }
+
+    private func controlValidationMessage(_ error: CodePulseControlValidationError) -> String {
+        switch error {
+        case .commandTooLarge:
+            return "The control command is too large."
+        case .unsupportedSchemaVersion:
+            return "The control command schema is unsupported."
+        case .commandTooOld:
+            return "The control command has expired."
+        case .commandInFuture:
+            return "The control command timestamp is invalid."
+        case .invalidEnvelope, .unexpectedField:
+            return "The control command envelope is invalid."
+        case .emptyValue(let field):
+            return "The control command has an empty \(field)."
+        case .valueTooLong(let field):
+            return "The control command \(field) is too long."
+        case .invalidValue(let field):
+            return "The control command \(field) is invalid."
+        }
     }
 
     func todayTotal(at date: Date? = nil) -> TimeInterval {
@@ -670,6 +1129,13 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func upsertSessionPreset(_ preset: SessionPreset) -> Bool {
+        guard preset.isValid,
+              !state.sessionPresets.contains(where: {
+                  $0.id != preset.id &&
+                      $0.name.localizedCaseInsensitiveCompare(preset.name) == .orderedSame
+              }) else {
+            return false
+        }
         var nextState = state
         if let index = nextState.sessionPresets.firstIndex(where: { $0.id == preset.id }) {
             nextState.sessionPresets[index] = preset
@@ -697,7 +1163,8 @@ final class SessionStore: ObservableObject {
     }
 
     func isAutomationRuleUsable(_ rule: SessionAutomationRule) -> Bool {
-        guard isAutomationTriggerValid(rule.trigger),
+        guard rule.isValid,
+              isAutomationTriggerValid(rule.trigger),
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
               let project = state.projects.first(where: { $0.id == projectID }),
@@ -710,7 +1177,8 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
-        guard state.sessionPresets.contains(where: { $0.id == rule.presetID }),
+        guard rule.isValid,
+              state.sessionPresets.contains(where: { $0.id == rule.presetID }),
               isAutomationTriggerValid(rule.trigger) else { return false }
         var nextState = state
         if let index = nextState.automationRules.firstIndex(where: { $0.id == rule.id }) {
@@ -799,6 +1267,54 @@ final class SessionStore: ObservableObject {
         state = nextState
         persistence.save(nextState)
         configureApplicationMonitoring()
+    }
+
+    func processPendingControlCommands(force: Bool = false) {
+        guard let controlTransport else { return }
+        let scanDate = clock.now
+        if !force,
+           let lastControlScanAt,
+           scanDate.timeIntervalSince(lastControlScanAt) < 0.25 {
+            return
+        }
+        lastControlScanAt = scanDate
+        pruneControlLedger(at: scanDate)
+        controlTransport.pruneResponses(now: scanDate)
+
+        for url in controlTransport.pendingCommandURLs() {
+            let response: CodePulseControlResponse
+            do {
+                let command = try controlTransport.readCommand(from: url)
+                response = processControlCommand(command, at: scanDate)
+            } catch {
+                // A malformed or oversized envelope has no trustworthy
+                // response ID. Remove only the direct child file surfaced by
+                // the transport and continue processing other commands.
+                _ = controlTransport.removeCommand(at: url)
+                continue
+            }
+
+            do {
+                try controlTransport.writeResponse(response)
+                _ = controlTransport.removeCommand(at: url)
+            } catch {
+                // Keep the command for the next scan. Mutation responses are
+                // already persisted in the bounded ledger, so retrying the
+                // response cannot execute the action twice.
+            }
+        }
+    }
+
+    private func pruneControlLedger(at date: Date) {
+        guard var processing = state.controlProcessing else { return }
+        let retained = processing.processedCommands.filter {
+            date.timeIntervalSince($0.processedAt) <= CodePulseControlLimits.processedCommandRetention
+        }
+        guard retained.count != processing.processedCommands.count else { return }
+        processing.processedCommands = retained
+        var nextState = state
+        nextState.controlProcessing = processing.processedCommands.isEmpty ? nil : processing
+        commit(nextState)
     }
 
     private func processPendingIntegrationEvents(force: Bool = false) {
