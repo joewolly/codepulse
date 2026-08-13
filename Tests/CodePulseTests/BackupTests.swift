@@ -1,3 +1,4 @@
+import CodePulseIntegration
 import Foundation
 import XCTest
 @testable import CodePulse
@@ -169,5 +170,36 @@ final class BackupTests: XCTestCase {
         XCTAssertThrowsError(try CodePulseBackupCodec.decode(wrongVersion)) { error in
             XCTAssertEqual(error as? CodePulseBackupError, .unsupportedVersion(999))
         }
+    }
+
+    func testControlLedgerIsNotExportedAsUserBackupHistory() throws {
+        let commandID = UUID()
+        let status = CodePulseControlStatus(
+            phase: "idle",
+            elapsedSeconds: 0,
+            automationControlled: false
+        )
+        let response = CodePulseControlResponse(
+            commandID: commandID,
+            result: .success,
+            message: "CodePulse status retrieved.",
+            status: status
+        )
+        var state = AppState()
+        state.controlProcessing = CodePulseControlProcessingState(processedCommands: [
+            CodePulseProcessedControlCommand(
+                id: commandID,
+                processedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                response: response
+            )
+        ])
+
+        let data = try CodePulseBackupCodec.encode(state: state, exportedAt: Date())
+        let text = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let backup = try CodePulseBackupCodec.decode(data)
+
+        XCTAssertNil(backup.state.controlProcessing)
+        XCTAssertFalse(text.contains("controlProcessing"))
+        XCTAssertFalse(text.contains(commandID.uuidString))
     }
 }
