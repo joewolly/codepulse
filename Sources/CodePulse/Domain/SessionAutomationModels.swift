@@ -8,6 +8,10 @@ struct SessionPreset: Codable, Equatable, Identifiable, Sendable {
     var sessionType: SessionType
     var goal: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, projectID, sessionType, goal
+    }
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -22,11 +26,42 @@ struct SessionPreset: Codable, Equatable, Identifiable, Sendable {
         self.goal = Self.cleanOptionalText(goal)
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            name: try container.decodeIfPresent(String.self, forKey: .name) ?? "Session Preset",
+            projectID: try container.decodeIfPresent(UUID.self, forKey: .projectID),
+            sessionType: try container.decodeIfPresent(SessionType.self, forKey: .sessionType) ?? .coding,
+            goal: try container.decodeIfPresent(String.self, forKey: .goal)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(projectID, forKey: .projectID)
+        try container.encode(sessionType, forKey: .sessionType)
+        try container.encodeIfPresent(goal, forKey: .goal)
+    }
+
     /// A small source-compatible alias for callers that use the session model's
     /// shorter terminology. It is not a separate persisted field.
     var type: SessionType {
         get { sessionType }
         set { sessionType = newValue }
+    }
+
+    var isValid: Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty,
+              cleanName.count <= 200 else {
+            return false
+        }
+        return cleanName.unicodeScalars.allSatisfy { scalar in
+            !CharacterSet.controlCharacters.contains(scalar)
+        }
     }
 
     private static func cleanName(_ value: String) -> String {
@@ -235,7 +270,7 @@ struct SessionAutomationRule: Codable, Equatable, Identifiable, Sendable {
         self.trigger = trigger
         self.presetID = presetID
         self.pauseDelay = max(0, pauseDelay)
-        self.finishDelay = max(self.pauseDelay, finishDelay)
+        self.finishDelay = max(0, finishDelay)
         self.minimumSavedDuration = max(0, minimumSavedDuration)
         self.legacyPresetDetails = nil
     }
@@ -352,6 +387,28 @@ struct SessionAutomationRule: Codable, Equatable, Identifiable, Sendable {
 
     var developerTool: DeveloperTool? { trigger.developerTool }
     var applicationTrigger: ApplicationAutomationTrigger? { trigger.applicationTrigger }
+
+    var isValid: Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty,
+              cleanName.count <= 200,
+              cleanName.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+              pauseDelay.isFinite,
+              finishDelay.isFinite,
+              minimumSavedDuration.isFinite,
+              pauseDelay >= 0,
+              finishDelay >= pauseDelay,
+              minimumSavedDuration >= 0 else {
+            return false
+        }
+
+        switch trigger {
+        case .developerTool:
+            return true
+        case .applications(let trigger):
+            return trigger.isValid
+        }
+    }
 
     // Source-compatible accessors for Milestone 1 code. Canonical rules use
     // SessionStore/AppState to resolve their preset rather than these values.

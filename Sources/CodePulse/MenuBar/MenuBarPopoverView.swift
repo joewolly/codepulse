@@ -74,9 +74,16 @@ private struct IdleSessionView: View {
                             Label("Start", systemImage: "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(selectedPresetID == nil)
+                        .disabled(selectedPresetID.flatMap { store.sessionPreset(id: $0) } == nil)
                         .accessibilityLabel("Start selected session preset")
-                        .accessibilityHint("Starts a manual session using the selected preset")
+                        .accessibilityHint("Starts a manual session using the selected preset, when it is still available")
+                    }
+
+                    if let selectedPresetID,
+                       store.sessionPreset(id: selectedPresetID) == nil {
+                        Label("The selected preset is no longer available.", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
                 }
             }
@@ -158,6 +165,12 @@ private struct ActiveSessionView: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Color.accentColor)
                 .accessibilityLabel(automationStatus)
+            } else if store.activeSession?.automationMetadata != nil {
+                Label("Manual control", systemImage: "hand.raised")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Manual control")
+                    .accessibilityHint("Automation no longer controls this session")
             }
 
             Text(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))

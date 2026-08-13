@@ -50,8 +50,9 @@ struct SessionPresetSettingsView: View {
                 preset: presetBeingEdited,
                 projects: store.projectsSortedByRecentUse,
                 save: { preset in
-                    _ = store.upsertSessionPreset(preset)
+                    guard store.upsertSessionPreset(preset) else { return false }
                     isPresentingEditor = false
+                    return true
                 },
                 cancel: { isPresentingEditor = false }
             )
@@ -112,18 +113,19 @@ private struct SessionPresetRow: View {
 private struct SessionPresetEditorView: View {
     let preset: SessionPreset?
     let projects: [ProjectRecord]
-    let save: (SessionPreset) -> Void
+    let save: (SessionPreset) -> Bool
     let cancel: () -> Void
 
     @State private var name: String
     @State private var projectID: UUID?
     @State private var sessionType: SessionType
     @State private var goal: String
+    @State private var saveError: String?
 
     init(
         preset: SessionPreset?,
         projects: [ProjectRecord],
-        save: @escaping (SessionPreset) -> Void,
+        save: @escaping (SessionPreset) -> Bool,
         cancel: @escaping () -> Void
     ) {
         self.preset = preset
@@ -134,6 +136,7 @@ private struct SessionPresetEditorView: View {
         _projectID = State(initialValue: preset?.projectID)
         _sessionType = State(initialValue: preset?.sessionType ?? .coding)
         _goal = State(initialValue: preset?.goal ?? "")
+        _saveError = State(initialValue: nil)
     }
 
     var body: some View {
@@ -168,6 +171,13 @@ private struct SessionPresetEditorView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let saveError {
+                Label(saveError, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel", action: cancel)
@@ -190,6 +200,8 @@ private struct SessionPresetEditorView: View {
             sessionType: sessionType,
             goal: goal
         )
-        save(value)
+        if !save(value) {
+            saveError = "Preset names must be unique, ignoring capitalization."
+        }
     }
 }
