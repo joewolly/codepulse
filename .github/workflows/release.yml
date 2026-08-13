@@ -15,10 +15,12 @@ concurrency:
 jobs:
   release:
     runs-on: macos-14
+    timeout-minutes: 45
 
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v6
+        # v4.1.7; pin prevents a mutable action tag from accessing release secrets.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
 
