@@ -49,6 +49,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Text("Codex lifecycle tracking is timing-only: it uses local Codex hooks to record active, permission-waiting, review-grace, and ended intervals. It never reads prompts, responses, transcripts, commands, tool input/output, or permission decisions. A cloud-only Codex session with no local hook/process is not tracked.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 ForEach(DeveloperTool.allCases) { tool in
                     DeveloperToolIntegrationRow(
                         tool: tool,

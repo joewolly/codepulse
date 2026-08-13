@@ -23,10 +23,11 @@ developer-tool metadata.
 - Captures best-effort local Git context without changing the repository.
 - GitHub context — associates local sessions with their GitHub repository and
   optionally their current pull request when the repository has a GitHub remote.
-- Receives optional local lifecycle metadata from Codex and OpenCode through a
-  versioned, content-safe event boundary; dedicated per-tool run correlation is
-  introduced incrementally by the agent-tracking roadmap. It records redacted
-  receipt diagnostics without starting or controlling a CodePulse session.
+- Receives optional local Codex lifecycle metadata through a versioned,
+  content-safe event boundary and records matching local Codex runs as active,
+  waiting, review-grace, or ended intervals. It never starts or controls a
+  manual CodePulse session; cloud-only sessions without a local hook/process
+  are not tracked.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -57,8 +58,8 @@ or allow the automatic update check.
 4. Finish the session, record an optional outcome, and save it to History.
 5. Open History to search, filter, or edit saved sessions, or open Insights to
    review local activity and context-derived summaries.
-6. If desired, open **Settings → Integrations** to enable Codex or OpenCode
-   context enrichment. Integrations are optional and never control the timer.
+6. If desired, open **Settings → Integrations** to enable local Codex lifecycle
+   tracking. It is optional, timing-only, and never controls the manual timer.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
@@ -153,12 +154,16 @@ normalize lifecycle metadata into `DeveloperEventV2`. The receiver validates
 event size, schema, timestamp, integration, and idempotency before passing it
 through CodePulse-owned v2 inboxes. It keeps bounded, redacted diagnostics and
 never persists prompts, transcripts, source content, commands, or raw hook
-bodies. The shared agent-run state machine defines active, waiting, review-
-grace, ended, and orphaned timing for explicitly correlated agent runs;
-dedicated per-tool correlation arrives in the next roadmap features. It does
-not start or control a manual CodePulse session. See
+bodies. Codex hooks currently map local session start, prompt submission, tool
+completion, permission request, stop, and session end into the shared agent-run
+state machine. A run is correlated only when its working directory matches an
+existing local workspace; automatic workspace discovery arrives in Feature 08.
+It does not start or control a manual CodePulse session, and cloud-only Codex
+sessions are excluded. See
 [`docs/agent-run-state-machine.md`](docs/agent-run-state-machine.md) for the
-event mapping and timing rules.
+event mapping and timing rules, and
+[`docs/codex-lifecycle-integration.md`](docs/codex-lifecycle-integration.md)
+for setup, privacy, and uninstall details.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling
