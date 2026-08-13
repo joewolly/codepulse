@@ -46,7 +46,8 @@ final class ProcessGitCommandRunner: GitCommandRunning {
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.executableURL = executableURL
-        process.arguments = arguments
+        process.arguments = Self.safeConfigurationArguments + arguments
+        process.environment = Self.safeEnvironment
         process.currentDirectoryURL = directory.standardizedFileURL
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = stdoutPipe
@@ -99,6 +100,28 @@ final class ProcessGitCommandRunner: GitCommandRunning {
             stderr: stderrBox.get()
         )
     }
+
+    /// Git captures metadata from repositories chosen by the user or local
+    /// integrations. Do not inherit their Git hooks, pager, fsmonitor, diff, or
+    /// text-conversion configuration through the host process environment.
+    private static let safeConfigurationArguments = [
+        "-c", "core.fsmonitor=false",
+        "-c", "core.pager=cat",
+        "-c", "pager.branch=false",
+        "-c", "pager.diff=false",
+        "-c", "diff.external=",
+    ]
+
+    private static let safeEnvironment = [
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_PAGER": "cat",
+        "PAGER": "cat",
+        "GIT_EXTERNAL_DIFF": "",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+    ]
 }
 
 struct GitStartSnapshot: Equatable {
@@ -442,7 +465,7 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
             if let startSHA = startSnapshot.headSHA {
                 if startSHA == endSHA || isAncestor(startSHA, endSHA, in: repositoryRoot) {
                     if let result = runner.run(
-                        arguments: ["diff", "--numstat", "--no-renames", "-z", startSHA, endSHA],
+                        arguments: ["diff", "--no-ext-diff", "--no-textconv", "--numstat", "--no-renames", "-z", startSHA, endSHA],
                         in: repositoryRoot
                     ), result.succeeded {
                         statistics.merge(GitDiffStatsParser.parse(result.stdout))
@@ -451,7 +474,7 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
                 }
             } else if let emptyTreeSHA = emptyTreeSHA(in: repositoryRoot),
                       let result = runner.run(
-                          arguments: ["diff", "--numstat", "--no-renames", "-z", emptyTreeSHA, endSHA],
+                          arguments: ["diff", "--no-ext-diff", "--no-textconv", "--numstat", "--no-renames", "-z", emptyTreeSHA, endSHA],
                           in: repositoryRoot
                       ), result.succeeded {
                 statistics.merge(GitDiffStatsParser.parse(result.stdout))
@@ -462,7 +485,7 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
         if let baseline = startSnapshot.preExistingWorkingTreePaths {
             if let endSHA,
                let result = runner.run(
-                   arguments: ["diff", "--numstat", "--no-renames", "-z", endSHA],
+                   arguments: ["diff", "--no-ext-diff", "--no-textconv", "--numstat", "--no-renames", "-z", endSHA],
                    in: repositoryRoot
                ), result.succeeded {
                 for entry in GitDiffStatsParser.entries(from: result.stdout) where !baseline.contains(entry.path) {
@@ -474,7 +497,7 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
             if let untrackedPaths = readUntrackedPaths(in: repositoryRoot) {
                 for path in untrackedPaths where !baseline.contains(path) {
                     guard let result = runner.run(
-                        arguments: ["diff", "--no-index", "--numstat", "-z", "--", "/dev/null", path],
+                        arguments: ["diff", "--no-ext-diff", "--no-textconv", "--no-index", "--numstat", "-z", "--", "/dev/null", path],
                         in: repositoryRoot
                     ) else { continue }
 
