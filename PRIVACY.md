@@ -32,6 +32,12 @@ Depending on how the app is used, that state can include:
   source, confidence, timestamp, and coarse evidence category. These records
   do not contain raw lifecycle metadata, prompts, excerpts, tokens, hashes, or
   embeddings.
+- Pricing-catalog state: only signed provider-published rate metadata (model
+  aliases, token-unit rates, effective/expiry dates, source URLs, catalog
+  version, key identifier, and signature) plus an optional verified cached
+  catalog. A future usage sample may retain token counters, provider-reported
+  cost when locally available, and immutable calculation provenance; it never
+  contains prompt, transcript, command, source, or raw external-session text.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -68,6 +74,10 @@ conversation storage or subscribe to content/tool events. Prompt classification
 is not implemented: no integration sends prompt text to CodePulse, and the v2
 event schema rejects prompt-bearing fields.
 
+Feature 12 adds pricing infrastructure only; it does not enable any token
+reader. Later per-tool usage tracking requires a separate explicit consent
+toggle and must remain independent from lifecycle timing.
+
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and
 normal JSON backups. Disabling an integration removes only the CodePulse-owned
@@ -83,6 +93,11 @@ repository and branch needed to read repository and pull request metadata.
 CodePulse does not store GitHub credentials, ask for a Personal Access Token, or
 perform GitHub mutations. Downloaded updates are authenticated with an Ed25519
 signature before installation.
+
+If a future configured catalog refresh is requested, it fetches only a public
+HTTPS pricing manifest. No CodePulse state, token counters, project paths, or
+session metadata is sent with that request. The manifest must pass local P-256
+signature and monotonic-version checks before it can replace the cached catalog.
 
 Insights in CodePulse 0.7 are derived in memory from the local session records
 already described above. Timeframe totals, counts, project/work-type
@@ -103,6 +118,11 @@ processed-event ledger containing event identifiers and processing timestamps
 CodePulse does not intentionally add credentials, conversation content, or file
 contents, but user-entered text may itself be sensitive. Protect backup files
 and review them before sharing.
+
+Once usage adapters are enabled in later features, backups can also include the
+privacy-safe token/cost metadata and calculation provenance described above.
+They will not include raw usage source files, prompts, transcripts, commands,
+or external session identifiers.
 
 CodePulse currently exports backups but does not restore them automatically.
 

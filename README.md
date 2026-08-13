@@ -34,6 +34,10 @@ developer-tool metadata.
 - Classifies agent activities from content-safe local metadata into independent
   work-type and domain labels. Prompt classification is not currently
   implemented or enabled.
+- Includes a signed, versioned offline pricing catalog for future token-usage
+  adapters. Catalog refreshes accept only newer, verified HTTPS manifests, and
+  every API-equivalent or Codex-credit value is labeled as an estimate with
+  immutable source provenance; no token reader is enabled by this foundation.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -194,6 +198,15 @@ CodePulse for this purpose. Activity detail controls allow local corrections,
 which always take precedence and never train or send data. See
 [`docs/activity-classification.md`](docs/activity-classification.md) for the
 rule, consent, and precedence contract.
+
+The pricing foundation keeps provider-reported cost separate from
+API-equivalent estimates, Codex-credit estimates, subscription/actual-charge-
+unknown state, and unpriced values. It verifies signed, versioned catalogs and
+retains a bundled offline catalog, while a bad, replayed, expired remote cache,
+or unavailable network cannot replace a verified price source. Usage adapters
+arrive in later roadmap features, so this release reads no token sources. See
+[`docs/pricing-catalog.md`](docs/pricing-catalog.md) for the catalog source,
+signature, fallback, calculation, and labeling rules.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

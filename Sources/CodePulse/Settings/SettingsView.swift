@@ -73,6 +73,21 @@ struct SettingsView: View {
                     )
                 }
 
+                ForEach(DeveloperTool.allCases) { tool in
+                    Picker("\(tool.title) primary cost display", selection: Binding(
+                        get: { store.state.settings.primaryCostDisplay(for: tool) },
+                        set: { display in store.updateSettings { $0.setPrimaryCostDisplay(display, for: tool) } }
+                    )) {
+                        ForEach(UsageCostRepresentation.allCases) { display in
+                            Text(display.displayLabel).tag(display)
+                        }
+                    }
+                }
+                Text("This preference changes only which preserved cost representation is shown first. API-equivalent and Codex-credit values are always labeled estimates, never bills or account balances.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Stepper(
                     "Agent review grace: \(store.state.settings.agentReviewGraceSeconds / 60) minutes",
                     value: Binding(
