@@ -233,6 +233,21 @@ final class UsageAttributionTests: XCTestCase {
         XCTAssertEqual(document.samples.first?.workspace, "Workspace")
         XCTAssertEqual(document.samples.first?.activity, "Activity")
     }
+
+    func testUsageBudgetExtensionPointIsNotPersistedOrEnabled() throws {
+        let policy = UsageBudgetPolicy(
+            createdAt: Fixture.makeDate("2026-08-13T00:00:00Z"),
+            integration: "codex",
+            currency: "USD",
+            threshold: 20
+        )
+        XCTAssertEqual(try JSONDecoder().decode(UsageBudgetPolicy.self, from: JSONEncoder().encode(policy)), policy)
+        XCTAssertFalse(UsageBudgetExtensionPoint.isEnabled)
+        XCTAssertEqual(UsageBudgetExtensionPoint.implementationStatus, "reserved-only")
+
+        let state = try String(decoding: JSONEncoder().encode(AppState()), as: UTF8.self)
+        XCTAssertFalse(state.localizedCaseInsensitiveContains("budget"))
+    }
 }
 
 private struct Fixture {
@@ -283,5 +298,5 @@ private struct Fixture {
 
     func date(_ string: String) -> Date { Self.makeDate(string) }
 
-    private static func makeDate(_ string: String) -> Date { ISO8601DateFormatter().date(from: string)! }
+    static func makeDate(_ string: String) -> Date { ISO8601DateFormatter().date(from: string)! }
 }
