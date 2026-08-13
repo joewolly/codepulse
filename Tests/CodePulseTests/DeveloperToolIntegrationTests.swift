@@ -620,6 +620,43 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertEqual(String(data: try Data(contentsOf: configURL), encoding: .utf8), "[features]\nhooks = false\n")
     }
 
+    func testClaudeCodeInstallerPreservesUserSettingsAndRemovesOnlyManagedHooks() throws {
+        let root = try temporaryDirectory()
+        let settingsURL = root.appendingPathComponent(".claude/settings.json")
+        try FileManager.default.createDirectory(at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let userSettings: [String: Any] = [
+            "permissions": ["allow": ["Bash(git status)"]],
+            "hooks": [
+                "Stop": [["hooks": [[
+                    "type": "command",
+                    "command": "/usr/local/bin/user-stop"
+                ]]]]
+            ]
+        ]
+        try JSONSerialization.data(withJSONObject: userSettings).write(to: settingsURL, options: .atomic)
+        let installer = ClaudeCodeIntegrationInstaller(settingsURL: settingsURL)
+        let helperURL = root.appendingPathComponent("CodePulse.app/Contents/Helpers/codepulse-integration")
+
+        try installer.enable(helperURL: helperURL)
+        try installer.enable(helperURL: helperURL)
+        let enabled = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: settingsURL)) as? [String: Any])
+        XCTAssertNotNil(enabled["permissions"])
+        let hooks = try XCTUnwrap(enabled["hooks"] as? [String: Any])
+        for eventName in ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd", "SubagentStart", "SubagentStop"] {
+            XCTAssertNotNil(hooks[eventName], "Missing \(eventName)")
+        }
+        XCTAssertEqual((hooks["Stop"] as? [[String: Any]])?.count, 2)
+
+        try installer.disable()
+        let disabled = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: settingsURL)) as? [String: Any])
+        XCTAssertNotNil(disabled["permissions"])
+        let disabledHooks = try XCTUnwrap(disabled["hooks"] as? [String: Any])
+        XCTAssertEqual((disabledHooks["Stop"] as? [[String: Any]])?.count, 1)
+        for eventName in ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "SessionEnd", "SubagentStart", "SubagentStop"] {
+            XCTAssertNil(disabledHooks[eventName], "Retained \(eventName)")
+        }
+    }
+
     func testCodexInstallerRejectsSymlinkedConfigurationDirectory() throws {
         let root = try temporaryDirectory()
         let codexDirectory = root.appendingPathComponent(".codex", isDirectory: true)

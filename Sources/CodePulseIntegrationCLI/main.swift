@@ -32,6 +32,13 @@ struct CodePulseIntegrationCLI {
                 return
             }
             _ = try? inbox.receive(encoded)
+        case "--claude-code-hook":
+            guard let event = ClaudeCodeLifecycleEventMapper.map(input),
+                  let encoded = try? DeveloperEventV2Codec.encode(event) else {
+                inbox.recordRejected(code: "claude-code-hook-rejected")
+                return
+            }
+            _ = try? inbox.receive(encoded)
         default:
             return
         }

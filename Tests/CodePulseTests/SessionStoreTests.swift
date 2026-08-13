@@ -538,6 +538,96 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.runs(workspaceID: workspaceID).count, 2)
     }
 
+    func testClaudeParentAndOverlappingChildrenRemainSeparateWhenParentEndsFirst() throws {
+        let clock = TestClock(start)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-claude-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperEventV2Inbox(paths: paths, fingerprintSalt: Data(repeating: 6, count: 32))
+        let store = SessionStore(
+            persistence: InMemoryPersistence(),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            developerEventV2Consumer: DeveloperEventV2Consumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        let workspacePath = "/tmp/codepulse-claude"
+        let workspaceID = try XCTUnwrap(store.addWorkspace(
+            name: "CodePulse",
+            roots: [WorkspaceRoot(path: workspacePath, addedAt: start)],
+            at: start
+        ))
+        let parent = developerEvent(
+            integration: .claudeCode,
+            kind: .sessionStarted,
+            at: start,
+            key: "claude-parent-start-0123456789",
+            path: workspacePath,
+            session: "parent"
+        )
+        let firstChild = developerEvent(
+            integration: .claudeCode,
+            kind: .sessionStarted,
+            at: start.addingTimeInterval(1),
+            key: "claude-first-child-start-0123456789",
+            path: workspacePath,
+            session: "first-child",
+            parent: "parent"
+        )
+        let secondChild = developerEvent(
+            integration: .claudeCode,
+            kind: .sessionStarted,
+            at: start.addingTimeInterval(2),
+            key: "claude-second-child-start-012345678",
+            path: workspacePath,
+            session: "second-child",
+            parent: "parent"
+        )
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(parent), now: start), .accepted)
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(firstChild), now: start.addingTimeInterval(1)), .accepted)
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(secondChild), now: start.addingTimeInterval(2)), .accepted)
+        clock.advance(5)
+        store.refresh()
+
+        let firstChildRun = try XCTUnwrap(store.runs(workspaceID: workspaceID).first(where: {
+            $0.agentMetadata?.sessionFingerprint == inbox.fingerprint(for: "claude-code:first-child")
+        }))
+        let secondChildRun = try XCTUnwrap(store.runs(workspaceID: workspaceID).first(where: {
+            $0.agentMetadata?.sessionFingerprint == inbox.fingerprint(for: "claude-code:second-child")
+        }))
+        XCTAssertEqual(firstChildRun.agentMetadata?.parentSessionFingerprint, inbox.fingerprint(for: "claude-code:parent"))
+        XCTAssertEqual(secondChildRun.agentMetadata?.parentSessionFingerprint, inbox.fingerprint(for: "claude-code:parent"))
+
+        let overlappingActivity = developerEvent(
+            integration: .claudeCode,
+            kind: .activityObserved,
+            at: start.addingTimeInterval(10),
+            key: "claude-second-child-activity-012345",
+            path: workspacePath,
+            session: "second-child",
+            parent: "parent"
+        )
+        let parentEnd = developerEvent(
+            integration: .claudeCode,
+            kind: .sessionEnded,
+            at: start.addingTimeInterval(11),
+            key: "claude-parent-end-0123456789ab",
+            path: workspacePath,
+            session: "parent"
+        )
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(overlappingActivity), now: start.addingTimeInterval(10)), .accepted)
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(parentEnd), now: start.addingTimeInterval(11)), .accepted)
+        clock.advance(10)
+        store.refresh()
+
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).count, 3)
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).first(where: { $0.id == firstChildRun.id })?.agentMetadata?.state, .active)
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).first(where: { $0.id == secondChildRun.id })?.agentMetadata?.state, .active)
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).first(where: {
+            $0.agentMetadata?.sessionFingerprint == inbox.fingerprint(for: "claude-code:parent")
+        })?.agentMetadata?.state, .ended)
+    }
+
     private func makeStore(
         clock: TestClock,
         persistence: InMemoryPersistence = InMemoryPersistence(),
@@ -558,12 +648,32 @@ final class SessionStoreTests: XCTestCase {
         path: String,
         session: String = "codex-session"
     ) -> DeveloperEventV2 {
-        DeveloperEventV2(
+        developerEvent(
             integration: .codex,
+            kind: kind,
+            at: date,
+            key: key,
+            path: path,
+            session: session
+        )
+    }
+
+    private func developerEvent(
+        integration: DeveloperEventIntegration,
+        kind: DeveloperEventKindV2,
+        at date: Date,
+        key: String,
+        path: String,
+        session: String,
+        parent: String? = nil
+    ) -> DeveloperEventV2 {
+        DeveloperEventV2(
+            integration: integration,
             eventKind: kind,
             observedAt: date,
             idempotencyKey: key,
             externalSessionKey: session,
+            parentSessionKey: parent,
             workingDirectory: path,
             model: "gpt-5.6",
             parserVersion: "codex-hooks-v1",

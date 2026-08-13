@@ -8,6 +8,17 @@ public enum DeveloperEventIntegration: String, Codable, CaseIterable, Equatable,
     case codex
     case claudeCode = "claude-code"
     case openCode = "opencode"
+
+    public var title: String {
+        switch self {
+        case .codex:
+            return "Codex"
+        case .claudeCode:
+            return "Claude Code"
+        case .openCode:
+            return "OpenCode"
+        }
+    }
 }
 
 public enum DeveloperEventKindV2: String, Codable, CaseIterable, Equatable, Sendable {
@@ -63,11 +74,18 @@ public struct DeveloperEventMetadataV2: Codable, Equatable, Sendable {
     public let adapterVersion: String?
     public let eventSequence: Int?
     public let sourceKind: String?
+    public let transcriptAvailable: Bool?
 
-    public init(adapterVersion: String? = nil, eventSequence: Int? = nil, sourceKind: String? = nil) {
+    public init(
+        adapterVersion: String? = nil,
+        eventSequence: Int? = nil,
+        sourceKind: String? = nil,
+        transcriptAvailable: Bool? = nil
+    ) {
         self.adapterVersion = adapterVersion
         self.eventSequence = eventSequence
         self.sourceKind = sourceKind
+        self.transcriptAvailable = transcriptAvailable
     }
 }
 
@@ -134,7 +152,9 @@ public enum DeveloperEventV2Codec {
         "externalSessionKey", "parentSessionKey", "workingDirectory", "model", "effort",
         "serviceMode", "parserVersion", "integrationVersion", "metadata"
     ]
-    private static let allowedMetadataFields: Set<String> = ["adapterVersion", "eventSequence", "sourceKind"]
+    private static let allowedMetadataFields: Set<String> = [
+        "adapterVersion", "eventSequence", "sourceKind", "transcriptAvailable"
+    ]
     private static let forbiddenFields: Set<String> = [
         "prompt", "transcript", "source", "sourceContent", "content", "message", "messages",
         "command", "arguments", "input", "output", "toolCall", "toolCalls", "fileContents"
@@ -277,7 +297,8 @@ public enum DeveloperEventV2Validator {
         return DeveloperEventMetadataV2(
             adapterVersion: try sanitizeMetadata(metadata.adapterVersion),
             eventSequence: metadata.eventSequence,
-            sourceKind: try sanitizeMetadata(metadata.sourceKind)
+            sourceKind: try sanitizeMetadata(metadata.sourceKind),
+            transcriptAvailable: metadata.transcriptAvailable
         )
     }
 

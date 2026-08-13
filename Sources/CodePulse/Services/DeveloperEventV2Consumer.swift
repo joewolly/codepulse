@@ -5,13 +5,13 @@ protocol DeveloperEventV2Consuming: AnyObject {
     func processPending(
         state: inout AppState,
         now: Date,
-        accepting event: (DeveloperEventV2, String, inout AppState) -> Bool
+        accepting event: (DeveloperEventV2, String, String?, inout AppState) -> Bool
     ) -> Bool
 }
 
 extension DeveloperEventV2Consuming {
     func processPending(state: inout AppState, now: Date) -> Bool {
-        processPending(state: &state, now: now) { _, _, _ in false }
+        processPending(state: &state, now: now) { _, _, _, _ in false }
     }
 }
 
@@ -28,7 +28,7 @@ final class DeveloperEventV2Consumer: DeveloperEventV2Consuming {
     func processPending(
         state: inout AppState,
         now: Date,
-        accepting eventHandler: (DeveloperEventV2, String, inout AppState) -> Bool
+        accepting eventHandler: (DeveloperEventV2, String, String?, inout AppState) -> Bool
     ) -> Bool {
         var journal = state.developerEventDiagnostics ?? DeveloperEventDiagnosticsJournal()
         var changed = prune(&journal, now: now)
@@ -71,6 +71,9 @@ final class DeveloperEventV2Consumer: DeveloperEventV2Consuming {
                 let sessionFingerprint = inbox.fingerprint(
                     for: "\(event.integration.rawValue):\(event.externalSessionKey)"
                 )
+                let parentSessionFingerprint = event.parentSessionKey.map {
+                    inbox.fingerprint(for: "\(event.integration.rawValue):\($0)")
+                }
                 // The receiver has already emitted the canonical receipt for
                 // this inbox handoff. Do not turn an accepted receipt into a
                 // spurious duplicate merely because its event is now read.
@@ -96,7 +99,7 @@ final class DeveloperEventV2Consumer: DeveloperEventV2Consuming {
                     ))
                     knownFingerprints.insert(fingerprint)
                 }
-                changed = eventHandler(event, sessionFingerprint, &state) || changed
+                changed = eventHandler(event, sessionFingerprint, parentSessionFingerprint, &state) || changed
             } catch {
                 journal.append(DeveloperEventDiagnostic(
                     receivedAt: now,

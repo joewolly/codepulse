@@ -781,10 +781,11 @@ final class SessionStore: ObservableObject {
         let didProcessV2 = developerEventV2Consumer.processPending(
             state: &nextState,
             now: scanDate
-        ) { [developerToolLifecycleCoordinator] event, sessionFingerprint, state in
+        ) { [developerToolLifecycleCoordinator] event, sessionFingerprint, parentSessionFingerprint, state in
             developerToolLifecycleCoordinator.apply(
                 event,
                 sessionFingerprint: sessionFingerprint,
+                parentSessionFingerprint: parentSessionFingerprint,
                 to: &state
             )
         }

@@ -2,6 +2,7 @@ import Foundation
 
 public enum DeveloperTool: String, Codable, CaseIterable, Equatable, Hashable, Identifiable, Sendable {
     case codex
+    case claudeCode = "claude-code"
     case opencode
 
     public var id: String { rawValue }
@@ -10,6 +11,8 @@ public enum DeveloperTool: String, Codable, CaseIterable, Equatable, Hashable, I
         switch self {
         case .codex:
             return "Codex"
+        case .claudeCode:
+            return "Claude Code"
         case .opencode:
             return "OpenCode"
         }
@@ -19,6 +22,8 @@ public enum DeveloperTool: String, Codable, CaseIterable, Equatable, Hashable, I
         switch self {
         case .codex:
             return "codex"
+        case .claudeCode:
+            return "claude"
         case .opencode:
             return "opencode"
         }
@@ -28,6 +33,8 @@ public enum DeveloperTool: String, Codable, CaseIterable, Equatable, Hashable, I
         switch self {
         case .codex:
             return "sparkles"
+        case .claudeCode:
+            return "brain"
         case .opencode:
             return "terminal"
         }

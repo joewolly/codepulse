@@ -44,12 +44,17 @@ struct SettingsView: View {
             }
 
             Section("Integrations") {
-                Text("Optional local context enrichment for Codex and OpenCode. CodePulse records only tool/session metadata, timestamps, project directory, and optional model/profile details.")
+                Text("Optional local lifecycle tracking for Codex, Claude Code, and OpenCode. CodePulse records only timing metadata, project directory, and optional model/effort details.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text("Codex lifecycle tracking is timing-only: it uses local Codex hooks to record active, permission-waiting, review-grace, and ended intervals. It never reads prompts, responses, transcripts, commands, tool input/output, or permission decisions. A cloud-only Codex session with no local hook/process is not tracked.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Claude Code tracking uses local hooks configured in your user-level Claude settings. Local sessions, including Remote Control sessions running on this Mac, may be tracked; cloud-only work with no local Claude process or hook is not. CodePulse stores neither transcripts nor prompt, tool, or permission content.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
