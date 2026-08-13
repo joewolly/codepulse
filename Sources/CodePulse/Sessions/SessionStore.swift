@@ -41,6 +41,7 @@ final class SessionStore: ObservableObject {
     let githubContextService: GitHubContextServicing
     let developerToolEventConsumer: DeveloperToolEventConsuming
     let developerEventV2Consumer: DeveloperEventV2Consuming
+    let developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -54,6 +55,7 @@ final class SessionStore: ObservableObject {
         githubContextService: GitHubContextServicing = SystemGitHubContextService(),
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
         developerEventV2Consumer: DeveloperEventV2Consuming = DeveloperEventV2Consumer(),
+        developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating = DeveloperToolLifecycleCoordinator(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
@@ -62,6 +64,7 @@ final class SessionStore: ObservableObject {
         self.githubContextService = githubContextService
         self.developerToolEventConsumer = developerToolEventConsumer
         self.developerEventV2Consumer = developerEventV2Consumer
+        self.developerToolLifecycleCoordinator = developerToolLifecycleCoordinator
         self.calendar = calendar
         self.state = persistence.load()
         self.persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
@@ -775,7 +778,16 @@ final class SessionStore: ObservableObject {
 
         var nextState = state
         let didProcessV1 = developerToolEventConsumer.processPending(state: &nextState, now: scanDate)
-        let didProcessV2 = developerEventV2Consumer.processPending(state: &nextState, now: scanDate)
+        let didProcessV2 = developerEventV2Consumer.processPending(
+            state: &nextState,
+            now: scanDate
+        ) { [developerToolLifecycleCoordinator] event, sessionFingerprint, state in
+            developerToolLifecycleCoordinator.apply(
+                event,
+                sessionFingerprint: sessionFingerprint,
+                to: &state
+            )
+        }
         guard didProcessV1 || didProcessV2 else {
             return
         }
@@ -784,10 +796,7 @@ final class SessionStore: ObservableObject {
 
     private func reconcileAgentRuns() {
         var nextState = state
-        guard ActivityGraphRepository.reconcileAgentRuns(
-            in: &nextState.activityGraph,
-            now: clock.now
-        ) else { return }
+        guard developerToolLifecycleCoordinator.reconcile(state: &nextState, now: clock.now) else { return }
         commit(nextState)
     }
 
