@@ -20,12 +20,12 @@ struct CodePulseControlCLI {
                 writeError(response.message)
                 return exitCode(for: response.result)
             }
-            guard let status = response.status else {
-                writeError("CodePulse returned an incomplete response.")
-                return .internalTransportFailure
-            }
 
             if invocation.command.action == .status {
+                guard let status = response.status else {
+                    writeError("CodePulse returned an incomplete response.")
+                    return .internalTransportFailure
+                }
                 if invocation.wantsJSONStatus {
                     do {
                         print(try CodePulseControlCLIFormatter.jsonStatus(status))
