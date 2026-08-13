@@ -58,6 +58,8 @@ struct SettingsView: View {
                 }
             }
 
+            AutomationSettingsView()
+
             Section("Workflow") {
                 Toggle("Open History with ⌥⌘T", isOn: Binding(
                     get: { store.state.settings.globalShortcutEnabled },

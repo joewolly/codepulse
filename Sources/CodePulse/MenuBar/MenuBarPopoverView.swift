@@ -118,6 +118,18 @@ private struct ActiveSessionView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+            if let session = store.activeSession,
+               let metadata = session.automationMetadata,
+               metadata.controlEnabled {
+                Label(
+                    metadata.statusLabel(contexts: session.developerToolContexts),
+                    systemImage: "bolt.badge.clock"
+                )
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel(metadata.statusLabel(contexts: session.developerToolContexts))
+            }
+
             Text(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
                 .font(.system(size: 34, weight: .medium, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
