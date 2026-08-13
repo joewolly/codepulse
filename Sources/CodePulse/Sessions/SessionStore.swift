@@ -110,6 +110,9 @@ final class SessionStore: ObservableObject {
     var activeSession: ActiveSession? { state.activeSession }
     var activityGraph: ActivityGraph { state.activityGraph }
     var activityGraphDiagnostics: ActivityGraphDiagnostics { ActivityGraphDiagnostics(graph: state.activityGraph) }
+    var concurrentActivityMetrics: ConcurrentActivityMetrics {
+        ConcurrentActivityMetricsCalculator.calculate(in: state.activityGraph, at: now)
+    }
 
     /// Compatibility lookup for existing ProjectRecord-backed UI paths.
     func workspace(forLegacyProjectID projectID: UUID) -> Workspace? {
