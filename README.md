@@ -39,6 +39,9 @@ read-only repository, pull request, and developer-tool metadata.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
+- Exports the currently filtered History as standard UTF-8 CSV.
+- Exports the currently selected Insights timeframe and project as a deterministic
+  local Markdown report.
 - Exports and restores a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -101,6 +104,19 @@ projects remain in CodePulse and are marked **Needs Relink** rather than being
 deleted or silently bound to another folder. Restore is blocked while the
 current installation has a running, paused, or finishing session.
 
+## CSV and Markdown exports
+
+Use **History → Export CSV…** to save exactly the completed sessions matching the
+current History search and filters. The export uses standard UTF-8 CSV and a
+user-selected local destination; an active session is not included.
+
+Use **Insights → Export Report…** to save the currently selected timeframe and
+project as a deterministic Markdown report. The report uses the existing local
+Insights summary and contains no AI-generated commentary or cloud data.
+
+Both exports are created locally at the destination you choose. CodePulse does
+not upload CSV or Markdown exports.
+
 ## External local control
 
 `codepulsectl` is a small local controller. It talks to the running CodePulse
@@ -158,7 +174,8 @@ CodePulse stores its state as JSON under the user's Application Support
 directory. Session notes, project paths, settings, session presets, automation
 rules, configured application bundle identifiers, active automation ownership,
 Git snapshots, GitHub context snapshots, developer-tool session metadata, and
-active session state stay on the Mac unless the user exports or shares a backup.
+active session state stay on the Mac unless the user explicitly exports or
+shares selected data or a backup.
 Developer-tool metadata is limited to the tool name,
 external session identifier, working directory, timestamps, lifecycle event
 count, and optional model/profile labels. When Session Automation is enabled,

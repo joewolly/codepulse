@@ -98,6 +98,21 @@ as potentially sensitive. No backup is uploaded to CodePulse or a cloud
 service. A moved project whose bookmark cannot resolve remains stored and is
 shown as needing relinking; CodePulse does not silently retarget it.
 
+## CSV and Markdown exports
+
+History CSV export contains only completed sessions matching the current History
+filters and uses standard UTF-8 at a destination selected by the user. It does
+not include project bookmark data, raw repository paths, control or replay
+ledgers, automation claims, or external developer-tool session identifiers.
+Developer-tool names, model/profile labels, Git aggregates, GitHub repository
+and pull-request snapshots, and user-authored goals/outcomes are included when
+they are part of the selected session context.
+
+Insights Markdown reports contain the currently selected local timeframe and
+project summary and reuse the existing in-memory Insights calculations. Reports
+are deterministic local files; CodePulse does not use AI or upload CSV or
+Markdown exports to a cloud service.
+
 Application automation does not collect or retain unrelated application
 durations, window titles, document names, file names, browser URLs, terminal
 contents, clipboard contents, keyboard or mouse input, screen contents, or
