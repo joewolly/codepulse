@@ -158,7 +158,7 @@ not exist yet.
 | 12 | @ZacharyRW | `feature/12-pricing-catalog` | [#17](https://github.com/ZacharyRW/codepulse/pull/17) | Merged | 2026-08-13 |
 | 13 | @ZacharyRW | `feature/13-codex-usage` | [#18](https://github.com/ZacharyRW/codepulse/pull/18) | Merged | 2026-08-13 |
 | 14 | @ZacharyRW | `feature/14-claude-usage` | [#19](https://github.com/ZacharyRW/codepulse/pull/19) | Merged | 2026-08-13 |
-| 15 | — | `feature/15-opencode-usage` | — | Not started | — |
+| 15 | @ZacharyRW | `feature/15-opencode-usage` | [#20](https://github.com/ZacharyRW/codepulse/pull/20) | In review | — |
 | 16 | — | `feature/16-usage-attribution` | — | Not started | — |
 | 17 | — | `feature/17-usage-insights` | — | Not started | — |
 | 18 | — | `feature/18-release-hardening` | — | Not started | — |
