@@ -111,12 +111,14 @@ base64 < "$HOME/.config/codepulse/sparkle-private-key" \
 ```
 
 Before adding the secret, configure the `production-signing` environment with
-required reviewers and restrict it to protected `v*` release tags. Protect
-`main` with pull-request review and the `macOS validation` check, while keeping
-the bypass list minimal. The unprivileged prepare job validates the tag, runs
-tests, packages, and uploads a short-lived candidate. Only after the protected
-environment approves the publish job does that job download the candidate,
-re-verify the tagged commit is in `main`, and access the production key.
+an independent reviewer or a solo-maintainer wait timer, then restrict it to
+protected `v*` release tags. This fork uses a 30-minute wait timer while it has
+one maintainer. Protect `main` with pull-request review and the `macOS
+validation` check, while keeping the bypass list minimal. The unprivileged
+prepare job validates the tag, runs tests, packages, and uploads a short-lived
+candidate. Only after the protected environment gate passes does the publish
+job download the candidate, re-verify the tagged commit is in `main`, and
+access the production key.
 
 Each repository that publishes releases needs its own environment secret
 matching the public key embedded in `Resources/Info.plist`.
@@ -140,6 +142,11 @@ git pull --ff-only origin main
 git tag v<version>
 git push origin v<version>
 ```
+
+This repository is an independent release line. Do not use an unqualified tag
+fetch from the peer repository: see
+[`fork-release-line.md`](fork-release-line.md) for safe remote inspection and
+selective feature-port procedures.
 
 The `GitHub Release` workflow then:
 

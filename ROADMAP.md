@@ -54,7 +54,9 @@ Decisions recorded for this phase on 2026-08-13:
   `origin/main` and fork releases are authoritative here; future feature sharing
   is selective and does not imply shared tags, histories, or release channels.
 - GitHub rulesets, protected production signing, and their verification evidence
-  are Phase 0 deliverables, not an out-of-band suggestion.
+  are Phase 0 deliverables, not an out-of-band suggestion. As a solo
+  maintainer, the production environment uses a 30-minute wait timer in place
+  of an independent reviewer until that maintenance model changes.
 
 ### SEC-001 — Make release-preflight inputs data, never shell source
 
@@ -71,8 +73,9 @@ Decisions recorded for this phase on 2026-08-13:
 ### SEC-002 — Separate preflight from production update signing
 
 - Replace the production Sparkle key in preflight with a disposable test key.
-- Create a protected GitHub production-signing environment with required
-  approval and restrict it to reviewed `main`/release refs.
+- Create a protected GitHub production-signing environment with an independent
+  approval or a solo-maintainer wait timer, and restrict it to reviewed
+  `main`/release refs.
 - Require the release workflow to identify an approved immutable commit.
 - Rotate the production Sparkle key if there is evidence the current preflight
   was ever exposed; current GitHub history shows zero preflight runs, so rotation

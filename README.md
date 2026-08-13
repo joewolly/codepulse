@@ -153,6 +153,11 @@ the macOS `open` command. To verify that the process starts:
 For release packaging, use `./script/package_release.sh` and follow
 [`docs/releasing.md`](docs/releasing.md).
 
+This fork has its own release line and treats the historical parent as a peer
+for selective, reviewed feature ports. See
+[`docs/fork-release-line.md`](docs/fork-release-line.md) for the collision-safe
+tag workflow and the reserved `0.9.0` release line.
+
 README screenshots are rendered from the real SwiftUI views with deterministic,
 privacy-safe sample data. Regenerate them with:
 
