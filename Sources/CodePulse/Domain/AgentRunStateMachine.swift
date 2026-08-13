@@ -17,6 +17,7 @@ struct AgentRunMetadata: Codable, Equatable {
     let integration: DeveloperEventIntegration
     let sessionFingerprint: String
     let parentSessionFingerprint: String?
+    var model: String?
     var state: AgentRunState
     var lastEventAt: Date
     var reviewGraceDeadline: Date?
@@ -25,6 +26,7 @@ struct AgentRunMetadata: Codable, Equatable {
         integration: DeveloperEventIntegration,
         sessionFingerprint: String,
         parentSessionFingerprint: String? = nil,
+        model: String? = nil,
         state: AgentRunState = .new,
         lastEventAt: Date,
         reviewGraceDeadline: Date? = nil
@@ -32,6 +34,7 @@ struct AgentRunMetadata: Codable, Equatable {
         self.integration = integration
         self.sessionFingerprint = sessionFingerprint
         self.parentSessionFingerprint = parentSessionFingerprint
+        self.model = model
         self.state = state
         self.lastEventAt = lastEventAt
         self.reviewGraceDeadline = reviewGraceDeadline

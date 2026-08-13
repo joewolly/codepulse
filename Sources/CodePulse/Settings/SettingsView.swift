@@ -109,6 +109,7 @@ struct SettingsView: View {
             }
 
             Section("Activity Measures") {
+                let aggregate = store.concurrentActivityMetrics
                 let activities = store.activityGraph.activities
                     .filter { !store.runs(activityID: $0.id).isEmpty }
                     .sorted { $0.updatedAt > $1.updatedAt }
@@ -130,6 +131,11 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                LabeledContent("Personal wall-active", value: CodePulseFormatting.duration(aggregate.personalWallActive))
+                LabeledContent("All-work wall-active", value: CodePulseFormatting.duration(aggregate.combinedWallActive))
+                LabeledContent("Agent runtime", value: CodePulseFormatting.duration(aggregate.agentRuntime))
+                LabeledContent("Agent waiting", value: CodePulseFormatting.duration(aggregate.agentWaiting))
             }
 
             Section("Workflow") {

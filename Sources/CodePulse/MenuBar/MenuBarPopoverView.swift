@@ -6,6 +6,7 @@ struct MenuBarPopoverView: View {
     @Environment(\.dismiss) private var dismiss
     private let onDismiss: (() -> Void)?
     private let onOpenInsights: (() -> Void)?
+    @State private var selectedActivityID: UUID?
 
     init(onDismiss: (() -> Void)? = nil, onOpenInsights: (() -> Void)? = nil) {
         self.onDismiss = onDismiss
@@ -14,15 +15,15 @@ struct MenuBarPopoverView: View {
 
     var body: some View {
         let dismissPopover = onDismiss ?? { dismiss() }
+        let currentRuns = CurrentActivityProjection.runs(in: store.activityGraph, at: store.now)
 
         VStack(alignment: .leading, spacing: 0) {
-            switch store.phase {
-            case .idle:
-                IdleSessionView()
-            case .running, .paused:
-                ActiveSessionView()
-            case .finishing:
+            if store.phase == .finishing {
                 FinishingSessionView()
+            } else if currentRuns.isEmpty {
+                IdleSessionView()
+            } else {
+                ActiveNowView(runs: currentRuns) { selectedActivityID = $0 }
             }
 
             Divider()
@@ -31,7 +32,148 @@ struct MenuBarPopoverView: View {
             PopoverFooter(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
         }
         .padding(18)
-        .frame(width: 350)
+        .frame(width: 380)
+        .sheet(isPresented: Binding(
+            get: { selectedActivityID != nil },
+            set: { if !$0 { selectedActivityID = nil } }
+        )) {
+            if let selectedActivityID {
+                ActivityDetailView(activityID: selectedActivityID)
+                    .environmentObject(store)
+            }
+        }
+    }
+}
+
+private struct ActiveNowView: View {
+    @EnvironmentObject private var store: SessionStore
+    let runs: [CurrentActivityRun]
+    let showDetails: (UUID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Active Now")
+                .font(.title3.weight(.semibold))
+
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(runs) { run in
+                        ActiveNowRunRow(run: run, showDetails: showDetails)
+                    }
+                }
+            }
+            .frame(maxHeight: 280)
+        }
+    }
+}
+
+private struct ActiveNowRunRow: View {
+    @EnvironmentObject private var store: SessionStore
+    let run: CurrentActivityRun
+    let showDetails: (UUID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(run.workspaceName)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Text(run.statusDescription)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(run.displayState == .waiting ? .orange : .secondary)
+            }
+
+            Text(run.activityTitle)
+                .font(.subheadline)
+                .lineLimit(1)
+
+            HStack(spacing: 6) {
+                Label(run.integration?.title ?? "Manual timer", systemImage: run.integration == nil ? "timer" : "terminal")
+                if let model = run.model { Text(model) }
+                Spacer()
+                Text(CodePulseFormatting.duration(run.activeDuration, includeSeconds: true))
+                    .monospacedDigit()
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button("Details") { showDetails(run.activityID) }
+                    .buttonStyle(.link)
+                if run.isCodePulseOwnedManualRun {
+                    Button("Finish Manual") {
+                        _ = store.finishCodePulseOwnedManualRun(id: run.runID)
+                    }
+                    .buttonStyle(.link)
+                    .accessibilityHint("Finishes only this CodePulse-owned manual session")
+                }
+            }
+            .font(.caption)
+        }
+        .padding(10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(run.accessibilitySummary)
+    }
+}
+
+private struct ActivityDetailView: View {
+    @EnvironmentObject private var store: SessionStore
+    let activityID: UUID
+
+    var body: some View {
+        let activity = store.activityGraph.activities.first(where: { $0.id == activityID })
+        let metrics = store.activityTimingMetrics(for: activityID)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(activity?.title ?? "Activity")
+                .font(.title2.weight(.semibold))
+            LabeledContent("Manual active", value: CodePulseFormatting.duration(metrics.manualActive, includeSeconds: true))
+            LabeledContent("Agent runtime", value: CodePulseFormatting.duration(metrics.agentRuntime, includeSeconds: true))
+            LabeledContent("Agent waiting", value: CodePulseFormatting.duration(metrics.agentWaiting, includeSeconds: true))
+            LabeledContent("Combined wall-active", value: CodePulseFormatting.duration(metrics.combinedWallActive, includeSeconds: true))
+            Divider()
+            ActivityTimelineView(activityID: activityID)
+        }
+        .padding(20)
+        .frame(minWidth: 360)
+    }
+}
+
+private struct ActivityTimelineView: View {
+    @EnvironmentObject private var store: SessionStore
+    let activityID: UUID
+
+    var body: some View {
+        let entries = ActivityTimelineProjection.entries(activityID: activityID, in: store.activityGraph)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Timeline")
+                .font(.headline)
+            if entries.isEmpty {
+                Text("No recorded intervals")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(entries) { entry in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(CodePulseFormatting.time(entry.startedAt))
+                                    .monospacedDigit()
+                                Text(entry.runLabel)
+                                Spacer()
+                                Text(entry.stateLabel)
+                                    .foregroundStyle(entry.state == .waiting ? .orange : .secondary)
+                            }
+                            .font(.caption)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("\(CodePulseFormatting.time(entry.startedAt)), \(entry.runLabel), \(entry.stateLabel)")
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
     }
 }
 

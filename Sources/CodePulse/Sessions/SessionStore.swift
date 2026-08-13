@@ -110,6 +110,9 @@ final class SessionStore: ObservableObject {
     var activeSession: ActiveSession? { state.activeSession }
     var activityGraph: ActivityGraph { state.activityGraph }
     var activityGraphDiagnostics: ActivityGraphDiagnostics { ActivityGraphDiagnostics(graph: state.activityGraph) }
+    var concurrentActivityMetrics: ConcurrentActivityMetrics {
+        ConcurrentActivityMetricsCalculator.calculate(in: state.activityGraph, at: now)
+    }
 
     /// Compatibility lookup for existing ProjectRecord-backed UI paths.
     func workspace(forLegacyProjectID projectID: UUID) -> Workspace? {
@@ -336,6 +339,19 @@ final class SessionStore: ObservableObject {
             in: state.activityGraph,
             at: date ?? now
         )
+    }
+
+    /// A manual stop can only finish the current CodePulse-owned manual run;
+    /// external agent runs never expose a stop action through this facade.
+    @discardableResult
+    func finishCodePulseOwnedManualRun(id runID: UUID, at date: Date? = nil) -> Bool {
+        guard let session = state.activeSession,
+              state.activityGraph.runs.contains(where: {
+                  $0.id == runID && $0.kind == .manual && $0.legacySessionID == session.id && $0.endedAt == nil
+              }) else {
+            return false
+        }
+        return finish(at: date)
     }
 
     func activityGraphDiagnosticsJSON() throws -> Data {

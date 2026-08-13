@@ -43,11 +43,15 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
             $0.agentMetadata?.integration == event.integration &&
             $0.agentMetadata?.sessionFingerprint == sessionFingerprint
         }) {
-            return AgentRunLifecycle.apply(
+            let applied = AgentRunLifecycle.apply(
                 event,
                 to: &state.activityGraph.runs[runIndex],
                 reviewGrace: TimeInterval(state.settings.agentReviewGraceSeconds)
             )
+            if applied, let model = event.model {
+                state.activityGraph.runs[runIndex].agentMetadata?.model = model
+            }
+            return applied
         }
 
         // A terminal event without a previously observed run cannot establish
@@ -90,6 +94,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
                 integration: event.integration,
                 sessionFingerprint: sessionFingerprint,
                 parentSessionFingerprint: parentSessionFingerprint,
+                model: event.model,
                 lastEventAt: event.observedAt
             )
         )
