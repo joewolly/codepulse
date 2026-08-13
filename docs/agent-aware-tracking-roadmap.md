@@ -159,8 +159,8 @@ not exist yet.
 | 13 | @ZacharyRW | `feature/13-codex-usage` | [#18](https://github.com/ZacharyRW/codepulse/pull/18) | Merged | 2026-08-13 |
 | 14 | @ZacharyRW | `feature/14-claude-usage` | [#19](https://github.com/ZacharyRW/codepulse/pull/19) | Merged | 2026-08-13 |
 | 15 | @ZacharyRW | `feature/15-opencode-usage` | [#20](https://github.com/ZacharyRW/codepulse/pull/20) | Merged | 2026-08-13 |
-| 16 | @ZacharyRW | `feature/16-usage-attribution` | [#21](https://github.com/ZacharyRW/codepulse/pull/21) | In review | — |
-| 17 | — | `feature/17-usage-insights` | — | Not started | — |
+| 16 | @ZacharyRW | `feature/16-usage-attribution` | [#21](https://github.com/ZacharyRW/codepulse/pull/21) | Merged | 2026-08-13 |
+| 17 | @ZacharyRW | `feature/17-usage-insights` | — | In review | — |
 | 18 | — | `feature/18-release-hardening` | — | Not started | — |
 
 ---
