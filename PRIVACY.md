@@ -48,7 +48,7 @@ active session:
 
 The integration helper accepts one structured event at a time and normalizes it
 through the v2 receiver. It writes only validated events and content-free
-accepted/duplicate/rejected receipts under
+accepted, duplicate, or rejected receipts under
 `~/Library/Application Support/CodePulse/Integrations/`. CodePulse does not
 need to be running for an event or receipt to wait there. A filesystem failure
 may leave an inbox file locally; the app removes handoffs best-effort after
@@ -77,6 +77,15 @@ repository and branch needed to read repository and pull request metadata.
 CodePulse does not store GitHub credentials, ask for a Personal Access Token, or
 perform GitHub mutations. Downloaded updates are authenticated with an Ed25519
 signature before installation.
+
+Insights in CodePulse 0.7 are derived in memory from the local session records
+already described above. Timeframe totals, counts, project/work-type
+breakdowns, developer-tool participation, Git totals, and GitHub repository/PR
+aggregates are not stored in a separate analytics database or uploaded. GitHub
+context shown for a historical session is the snapshot saved with that session;
+CodePulse does not poll GitHub to rewrite historical analytics. Git Activity is
+descriptive metadata only and is not converted into a productivity or efficiency
+score.
 
 ## Backups
 

@@ -25,8 +25,11 @@ developer-tool metadata.
   optionally their current pull request when the repository has a GitHub remote.
 - Receives optional local lifecycle metadata from Codex and OpenCode through a
   versioned, content-safe event boundary; dedicated per-tool run correlation is
-  introduced incrementally by the agent-tracking roadmap.
-- Summarizes active time by day, project, and work type with native Swift Charts.
+  introduced incrementally by the agent-tracking roadmap. It records redacted
+  receipt diagnostics without starting or controlling a CodePulse session.
+- Provides richer local Insights for active time, sessions, projects, work types,
+  developer-tool participation, Git activity, and GitHub context with native
+  Swift Charts.
 - Exports a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -52,8 +55,8 @@ or allow the automatic update check.
 2. Optionally choose a project and work type, then describe the session goal.
 3. Start the session and pause or resume it as needed.
 4. Finish the session, record an optional outcome, and save it to History.
-5. Open History to search or edit saved sessions, or open Insights to review
-   local activity.
+5. Open History to search, filter, or edit saved sessions, or open Insights to
+   review local activity and context-derived summaries.
 6. If desired, open **Settings → Integrations** to enable Codex or OpenCode
    context enrichment. Integrations are optional and never control the timer.
 
@@ -68,23 +71,23 @@ folder you select, allowing it to read local Git metadata for that project.
 
 ### Insights
 
-![CodePulse Insights showing a weekly activity chart and project totals](docs/images/insights.png)
+![CodePulse Insights showing local summary metrics, activity, work types, and project totals](docs/images/insights.png)
 
 ## Local data and privacy
 
 CodePulse stores its state as JSON under the user's Application Support
 directory. Session notes, project paths, settings, Git snapshots, GitHub context
-snapshots, developer-tool session metadata, and active session state stay on the
-Mac unless the user exports or shares a backup. Developer-tool metadata is
-limited to the tool name, external session identifier, working directory,
-timestamps, lifecycle event count, and optional model/profile labels. CodePulse
-also keeps a local deduplication ledger of processed event identifiers and
-timestamps (up to 2,048 entries; event processing prunes entries older than
+snapshots, developer-tool session metadata, redacted v2 receipt diagnostics,
+and active session state stay on the Mac unless the user exports or shares a
+backup. The v2 diagnostics retain only receipt status, fixed redacted rejection
+codes, parser/integration versions, and installation-salted event fingerprints.
+CodePulse also keeps a local deduplication ledger of processed event identifiers
+and timestamps (up to 2,048 entries; event processing prunes entries older than
 30 days), which may appear in exported backups. Inbox cleanup after processing
 is best effort, so a filesystem failure may leave a local event file. CodePulse
-does not collect prompts, responses, transcripts, source code, terminal command contents, command
-output, tool-call arguments or results, permission decisions, reasoning,
-conversation summaries, or credentials.
+does not collect prompts, responses, transcripts, source code, terminal command
+contents, command output, tool-call arguments or results, permission decisions,
+reasoning, conversation summaries, or credentials.
 
 Sparkle checks CodePulse release assets on GitHub. When `gh` is installed, the
 optional GitHub Context feature uses the user's existing GitHub CLI setup for
@@ -157,9 +160,18 @@ not start or control a manual CodePulse session. See
 [`docs/agent-run-state-machine.md`](docs/agent-run-state-machine.md) for the
 event mapping and timing rules.
 
-History filters before grouping sessions by day. Insights uses the user's local
-calendar and apportions active time across day and week boundaries while
-excluding pauses.
+CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
+metrics from the existing local session history, supports calendar and rolling
+timeframes plus project filtering, and shows participation-based developer-tool
+counts, optional model/profile labels, neutral Git Activity totals, and
+historical GitHub repository and pull-request context. These are local derived
+views only: CodePulse does not add an analytics database, upload analytics, or
+measure productivity.
+
+History filters before grouping sessions by day and searches existing project,
+journal, GitHub, and developer-tool metadata. Insights uses the user's local
+calendar, apportions active time across day and week boundaries while excluding
+pauses, and keeps historical GitHub snapshots unchanged.
 
 ## Tests
 
