@@ -1,0 +1,36 @@
+{
+  "activeSession": null,
+  "completedSessions": [
+    {
+      "developerToolContexts": [],
+      "endedAt": "2023-11-14T22:15:00Z",
+      "goal": "Review a migration",
+      "id": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+      "outcome": "Documented findings",
+      "pauseIntervals": [],
+      "projectID": "11111111-1111-1111-1111-111111111111",
+      "projectName": "Example Project",
+      "startedAt": "2023-11-14T22:00:00Z",
+      "type": "review"
+    }
+  ],
+  "developerToolIntegration": {
+    "processedEvents": []
+  },
+  "projects": [
+    {
+      "createdAt": "2023-11-14T21:00:00Z",
+      "folderPath": "/tmp/example-project",
+      "id": "11111111-1111-1111-1111-111111111111",
+      "lastUsedAt": "2023-11-14T22:15:00Z",
+      "name": "Example Project"
+    }
+  ],
+  "settings": {
+    "defaultProjectBehavior": "lastUsed",
+    "globalShortcutEnabled": true,
+    "idleAppearance": "code",
+    "launchAtLogin": false,
+    "menuBarDisplay": "projectAndTimer"
+  }
+}

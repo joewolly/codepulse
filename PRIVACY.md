@@ -6,9 +6,10 @@ advertising, or activity monitoring.
 
 ## Data stored on the Mac
 
-CodePulse stores its JSON state under
-`~/Library/Application Support/CodePulse`. Depending on how the app is used,
-that state can include:
+CodePulse stores its versioned JSON state under
+`~/Library/Application Support/CodePulse/state.json`. Before a migration or
+replacement write, it retains the last readable state at `state.json.backup`.
+Depending on how the app is used, that state can include:
 
 - Projects, including display names, selected folder paths, and security-scoped
   bookmark data.
