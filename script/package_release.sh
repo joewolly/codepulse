@@ -296,7 +296,7 @@ verify_bundle() {
   [[ "$ls_ui_element" == "true" ]] || die "LSUIElement must remain enabled: $ls_ui_element"
   [[ "$icon_file" == "CodePulse" ]] || die "unexpected icon declaration: $icon_file"
   [[ "$feed_url" == "$UPDATE_FEED_URL" ]] || die "unexpected Sparkle feed URL: $feed_url"
-  [[ "$public_ed_key" == "EX4J6W41dIHFiPsqUhlk6Jp/VsX/2AxoYmCDlsqzuDM=" ]] || die "unexpected Sparkle public EdDSA key"
+  [[ "$public_ed_key" == "+jAzQL9fmsKPC9KfxBQU2NuNMaLfHucplFLk78UgoVo=" ]] || die "unexpected Sparkle public EdDSA key"
 
   architecture_info="$(/usr/bin/lipo -info "$APP_BINARY")"
   [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "final executable is not Universal 2: $architecture_info"
