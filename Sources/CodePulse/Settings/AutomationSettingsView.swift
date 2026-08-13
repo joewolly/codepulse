@@ -103,6 +103,7 @@ private struct AutomationRuleRow: View {
 
             Button("Edit", action: edit)
                 .buttonStyle(.borderless)
+                .accessibilityLabel("Edit \(rule.name)")
             Button {
                 delete()
             } label: {
@@ -113,7 +114,7 @@ private struct AutomationRuleRow: View {
             .accessibilityLabel("Delete \(rule.name)")
         }
         .padding(.vertical, 3)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rule.name), \(triggerSummary), \(preset?.name ?? "missing preset")")
         .accessibilityValue(rule.isEnabled ? (isUsable ? "Enabled" : "Needs attention") : "Disabled")
     }
@@ -287,11 +288,11 @@ private struct AutomationRuleEditorView: View {
         guard let parsedFinish else { return "Finish delay must be a non-negative number." }
         guard parsedFinish >= parsedPause else { return "Finish delay must be at least the pause delay." }
         guard parsedMinimum != nil else { return "Minimum saved duration must be a non-negative number." }
-        if triggerKind == .applications && ApplicationAutomationTrigger(applications: applications).applications.isEmpty {
-            return "Choose at least one installed application."
-        }
         if triggerKind == .applications && applications.contains(where: { !$0.isValid }) {
             return "Each application must have a valid bundle identifier."
+        }
+        if triggerKind == .applications && ApplicationAutomationTrigger(applications: applications).applications.isEmpty {
+            return "Choose at least one installed application."
         }
         guard let presetID, let preset = presets.first(where: { $0.id == presetID }) else {
             return "The selected preset is no longer available."
