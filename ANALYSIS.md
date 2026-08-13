@@ -749,6 +749,9 @@ fork `main`.
   authoritative dependency-CVE inventory was not available. The audit checked
   current direct version/release state but does not claim Sparkle is CVE-free.
 - No production secrets, secret values, or collaborator list were inspected.
+- An independent CodeRabbit change-set review could not run: CLI 0.6.4 is
+  installed, but agent authentication was not completed. No finding in this
+  document is attributed to CodeRabbit.
 - No destructive Git/GitHub action, branch deletion, issue/PR change, ruleset
   mutation, secret change, release, publication, or push was performed.
 - Runtime UI interaction, VoiceOver, keyboard traversal, contrast measurement,
