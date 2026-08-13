@@ -2,9 +2,10 @@
 
 CodePulse is designed as a local-first coding timer and journal. It does not
 require an account and does not include cloud sync, telemetry, product analytics,
-advertising, or application-usage history. Optional Session Automation reacts
-to enabled local developer-tool lifecycle metadata and, when explicitly
-configured, the current frontmost application's bundle identifier.
+advertising, or application-usage history. Optional Session Automation performs
+local workflow detection only when the user enables it: it reacts to supported
+developer-tool lifecycle metadata and, when explicitly configured, the current
+frontmost application's bundle identifier.
 
 ## Data stored on the Mac
 
@@ -30,6 +31,10 @@ that state can include:
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
   prunes entries older than 30 days during event processing.
+- A separate bounded internal ledger of processed `codepulsectl` mutation UUIDs
+  and privacy-minimal responses may be kept in the live state for exactly-once
+  relaunch recovery. It is not a permanent command history and is omitted from
+  exported backups. Raw control commands and response files are transient.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -84,6 +89,22 @@ contents, clipboard contents, keyboard or mouse input, screen contents, or
 accessibility element contents. It does not require Accessibility or Screen
 Recording permission.
 
+## External local control
+
+The optional `codepulsectl` executable communicates only with a running CodePulse
+app through a CodePulse-owned local command/response path under Application
+Support. It sends command metadata needed for the requested action: a version,
+UUID, timestamp, action, and—only for a requested start—the selected preset or
+existing project/type/optional goal. It does not send prompts, transcripts,
+source code, external developer-tool IDs, credentials, GitHub tokens, or
+filesystem locations to a service. There is no cloud or network control path.
+
+Commands expire after a short bounded window, malformed or unexpected fields
+are rejected, pending storage and response storage are capped, and a bounded
+UUID ledger prevents a mutation from executing twice after a relaunch. The
+ledger stores no raw command text, and command/response files are cleaned up on
+processing or timeout on a best-effort basis.
+
 ## Network access
 
 CodePulse does not send session, project, Git, GitHub context, or usage data to
@@ -112,8 +133,10 @@ session text, filesystem paths, session presets, configured application
 identities, optional developer-tool metadata, automation rules, active
 automation ownership needed for recovery, and the processed-event ledger
 containing event identifiers and processing timestamps (up to 2,048 entries;
-event processing prunes entries older than 30 days). Raw inbox event files and
-a separate application activation history are not intentionally added.
+event processing prunes entries older than 30 days). The separate bounded
+`codepulsectl` mutation ledger, raw control commands, response files, transient
+status requests, and application activation history are not intentionally
+added.
 CodePulse does not intentionally add credentials, conversation content, or file
 contents, but user-entered text may itself be sensitive. Protect backup files
 and review them before sharing.

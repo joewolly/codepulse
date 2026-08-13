@@ -34,6 +34,8 @@ read-only repository, pull request, and developer-tool metadata.
   automation rules.
 - Optionally starts and maintains a session while a configured application is
   frontmost, matching by bundle identifier rather than display name.
+- Provides the local `codepulsectl` command for scriptable status, preset/manual
+  start, pause, resume, and finish control while CodePulse is running.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -68,9 +70,51 @@ or allow the automatic update check.
    Quick Start, then open **Settings → Integrations** to enable Codex or OpenCode
    context enrichment. Integrations are optional and separate from **Settings →
    Session Automation**, which is also optional and disabled by default.
+7. For a shell, Shortcuts **Run Shell Script**, Raycast, Alfred, Stream Deck, or
+   IDE task, use the bundled `codepulsectl` command described below.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
+
+## External local control
+
+`codepulsectl` is a small local controller. It talks to the running CodePulse
+app through a versioned, CodePulse-owned local inbox and response path; it does
+not edit `state.json`, execute shell input, contact a service, or require root,
+Accessibility, or Screen Recording permission. The app validates each command,
+rejects commands older than 30 seconds, and records a bounded UUID ledger so a
+replayed command cannot run twice.
+
+The preferred form starts a configured Session Preset by its unique name:
+
+```sh
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl status
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl status --json
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl start --preset "CodePulse Coding"
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl pause
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl resume
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl finish
+```
+
+Direct manual start is also available when the project already exists in
+CodePulse:
+
+```sh
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl start \
+  --project "CodePulse" --type coding --goal "Fix release verification"
+```
+
+CLI starts are manual sessions. CLI pause, resume, and finish behave like the
+corresponding UI actions and take over an automatic session permanently for
+that session. `finish` enters the normal finishing screen and does not save an
+outcome automatically; save or discard it from the CodePulse UI.
+
+`status` prints concise human-readable state. `status --json` prints only a
+privacy-minimal versioned JSON status object. The command exits nonzero for
+invalid arguments, an unavailable app, invalid state transitions, missing or
+ambiguous presets/projects, expired/rejected commands, and local transport
+failures. The embedded tool is not installed into `/usr/local/bin`; add a shell
+alias or use its bundle path explicitly.
 
 ## Screenshots
 
@@ -96,8 +140,11 @@ CodePulse uses only those local lifecycle signals and the working directory to
 match an explicit rule to a configured project. CodePulse also keeps a local
 deduplication ledger of processed event identifiers and timestamps (up to 2,048
 entries; event processing prunes entries older than 30 days), which may appear
-in exported backups. Inbox cleanup after processing is best effort, so a
-filesystem failure may leave a local event file. CodePulse does not collect
+in exported backups. External CLI commands use a separate bounded local
+processing ledger and transient response files; backup export intentionally
+omits that control ledger and all command/response files. Inbox cleanup after
+processing is best effort, so a filesystem failure may leave a local event file.
+CodePulse does not collect
 prompts, messages, responses, transcripts, source code, terminal command
 contents, command output, tool-call arguments or results, permission decisions,
 reasoning, conversation summaries, or credentials. Application automation, when
@@ -182,7 +229,10 @@ locally owned session; later claims can keep it alive, resume an automatic
 pause, and finish and save it after the configured grace periods. Existing
 active sessions are never switched to another project, manual lifecycle actions
 take control immediately, and neither app activation changes nor raw event
-files are retained as an activity history.
+files are retained as an activity history. The global automation setting is off
+by default. `codepulsectl` adds bounded local manual control for status and the
+normal session lifecycle; it does not add a cloud API, webhook, or network
+control path.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

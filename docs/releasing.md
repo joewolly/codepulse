@@ -68,7 +68,11 @@ dist/release/
 
 The app bundle uses the canonical identifier `com.joewolly.CodePulse`, keeps
 `LSUIElement` enabled for menu-bar-only behavior, targets macOS 13.0, contains
-its icon in `Contents/Resources`, and embeds Sparkle in `Contents/Frameworks`.
+its icon in `Contents/Resources`, embeds Sparkle in `Contents/Frameworks`, and
+ships both `codepulse-integration` and the Universal 2 `codepulsectl` in
+`Contents/Helpers`. The CLI is not installed into a system directory; users can
+invoke `/Applications/CodePulse.app/Contents/Helpers/codepulsectl` or create a
+transparent shell alias.
 
 ## Sparkle updates
 
@@ -185,6 +189,24 @@ signing.
 With `--adhoc-sign`, the packaging script runs strict `codesign` verification;
 an ad-hoc signature verifies bundle integrity but still provides no developer
 identity or notarization ticket.
+
+## Staged development-app verification
+
+`script/build_and_run.sh` is a development launcher, not the release signer. It
+performs the required rpath/bundle mutations in a temporary `/private/tmp`
+staging directory outside the checkout, clears extended metadata, applies an
+ad-hoc signature, and runs `codesign --verify --deep --strict` there before
+copying the validated bundle to `dist` for launch. It also compares the copied
+bundle's regular-file hashes and symlink targets with the verified local stage.
+On some macOS File Provider-backed checkouts, Finder may reattach
+`com.apple.FinderInfo` and `com.apple.fileprovider.fpfs#P` to the `dist` copy
+immediately, including after the launcher clears them. That is an environmental
+metadata mutation, not a release-signing change; a subsequent strict check of
+that copied path can therefore report disallowed Finder information even though
+the local stage passed. Repeat the launcher, or reproduce the strict check by
+staging under a local temporary directory outside the File Provider-managed
+checkout. The unsigned release packager remains independent of this
+development-only caveat and does not weaken strict verification.
 
 ## Compatibility notes
 
