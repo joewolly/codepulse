@@ -155,10 +155,19 @@ final class CodePulseControlTests: XCTestCase {
         let transport = CodePulseControlTransport(
             paths: CodePulseControlPaths(applicationSupportDirectory: safeSupport)
         )
+        try FileManager.default.createDirectory(at: transport.paths.commandsURL, withIntermediateDirectories: true)
+        let staleTemporaryFile = transport.paths.commandsURL
+            .appendingPathComponent(".command-abandoned.tmp")
+        try Data("stale".utf8).write(to: staleTemporaryFile)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-CodePulseControlLimits.maximumTemporaryFileAge - 1)],
+            ofItemAtPath: staleTemporaryFile.path
+        )
         for _ in 0..<CodePulseControlLimits.maximumPendingCommands {
             try transport.writeCommand(CodePulseControlCommand(issuedAt: start, action: .status))
         }
         XCTAssertThrowsError(try transport.writeCommand(CodePulseControlCommand(issuedAt: start, action: .status)))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleTemporaryFile.path))
 
         let responseID = UUID()
         try transport.writeResponse(CodePulseControlResponse(

@@ -10,6 +10,7 @@ public enum CodePulseControlLimits {
     public static let maximumCommandAge: TimeInterval = 30
     public static let maximumFutureSkew: TimeInterval = 5
     public static let processedCommandRetention: TimeInterval = 24 * 60 * 60
+    public static let maximumTemporaryFileAge: TimeInterval = 5 * 60
     public static let maximumProcessedCommands = 512
     public static let maximumPresetNameLength = 200
     public static let maximumProjectNameLength = 200
@@ -498,6 +499,7 @@ public final class CodePulseControlTransport {
         if fileManager.fileExists(atPath: target.path) {
             return
         }
+        pruneTemporaryFiles(in: paths.commandsURL, prefix: "command")
         try ensureCapacity(
             in: paths.commandsURL,
             maximumFiles: CodePulseControlLimits.maximumPendingCommands,
@@ -538,6 +540,7 @@ public final class CodePulseControlTransport {
         if fileManager.fileExists(atPath: target.path) {
             return
         }
+        pruneTemporaryFiles(in: paths.responsesURL, prefix: "response")
         try ensureCapacity(
             in: paths.responsesURL,
             maximumFiles: CodePulseControlLimits.maximumResponses,
@@ -645,6 +648,37 @@ public final class CodePulseControlTransport {
               totalBytes <= maximumBytes,
               incomingBytes <= maximumBytes - totalBytes else {
             throw CodePulseControlValidationError.invalidValue("control storage capacity")
+        }
+    }
+
+    private func pruneTemporaryFiles(
+        in directory: URL,
+        prefix: String,
+        now: Date = Date()
+    ) {
+        guard !managedPathContainsSymbolicLink(),
+              let urls = try? fileManager.contentsOfDirectory(
+                  at: directory,
+                  includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey],
+                  options: []
+              ) else {
+            return
+        }
+
+        for url in urls {
+            guard !isSymbolicLink(url),
+                  url.lastPathComponent.hasPrefix(".\(prefix)-"),
+                  url.pathExtension.lowercased() == "tmp",
+                  let values = try? url.resourceValues(
+                      forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]
+                  ),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true,
+                  let modifiedAt = values.contentModificationDate,
+                  now.timeIntervalSince(modifiedAt) > CodePulseControlLimits.maximumTemporaryFileAge else {
+                continue
+            }
+            try? fileManager.removeItem(at: url)
         }
     }
 
