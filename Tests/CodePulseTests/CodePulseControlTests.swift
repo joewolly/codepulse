@@ -572,6 +572,62 @@ final class CodePulseControlTests: XCTestCase {
         _ = transport.removeResponse(for: staleCommand.id)
     }
 
+    func testSameSecondPreRestoreCommandIsRejectedAfterPersistedRelaunch() throws {
+        let root = try makeTemporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let controlSupport = root.appendingPathComponent("support", isDirectory: true)
+        try FileManager.default.createDirectory(at: controlSupport, withIntermediateDirectories: true)
+        let transport = CodePulseControlTransport(paths: CodePulseControlPaths(
+            applicationSupportDirectory: controlSupport
+        ))
+        let second = start.addingTimeInterval(60)
+        let staleTimestamp = second.addingTimeInterval(0.200)
+        let restoreBoundary = second.addingTimeInterval(0.800)
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        persistence.save(AppState())
+
+        let restoredProject = ProjectRecord(name: "Imported", createdAt: second)
+        let staleCommand = CodePulseControlCommand(
+            issuedAt: staleTimestamp,
+            action: .startManual(
+                projectName: restoredProject.name,
+                sessionType: "coding",
+                goal: nil
+            )
+        )
+        try transport.writeCommand(staleCommand)
+
+        persistence.save(AppState(
+            projects: [restoredProject],
+            localInputAcceptanceDate: restoreBoundary
+        ))
+        XCTAssertEqual(transport.pendingCommandURLs().count, 1)
+
+        let persistedBoundary = try XCTUnwrap(
+            JSONFilePersistence(fileURL: stateURL).load().localInputAcceptanceDate
+        )
+        XCTAssertEqual(persistedBoundary, second)
+        XCTAssertNotEqual(persistedBoundary, restoreBoundary)
+        let persistedCommandURL = try XCTUnwrap(transport.pendingCommandURLs().first)
+        XCTAssertEqual(try transport.readCommand(from: persistedCommandURL).issuedAt, second)
+
+        let relaunched = SessionStore(
+            persistence: JSONFilePersistence(fileURL: stateURL),
+            clock: FixedControlClock(second.addingTimeInterval(1)),
+            automaticallyRefresh: false,
+            controlTransport: transport,
+            currentLaunchAtLoginState: { false }
+        )
+        let response = try XCTUnwrap(transport.readResponse(for: staleCommand.id))
+        XCTAssertEqual(response.result, .commandRejected)
+        XCTAssertEqual(response.message, "The command was issued before the most recent CodePulse restore.")
+        XCTAssertTrue(transport.pendingCommandURLs().isEmpty)
+        XCTAssertEqual(relaunched.state.projects, [restoredProject])
+        XCTAssertTrue(relaunched.state.completedSessions.isEmpty)
+        XCTAssertNil(relaunched.state.activeSession)
+        _ = transport.removeResponse(for: staleCommand.id)
+    }
+
     func testClientDistinguishesUnavailableAndBoundedTimeoutWithoutSleeping() throws {
         let temporaryDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
