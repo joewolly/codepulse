@@ -67,7 +67,7 @@ final class ActivityGraphTests: XCTestCase {
             goal: "Repair", outcome: "Done", startedAt: start, endedAt: start.addingTimeInterval(120),
             pauseIntervals: [PauseInterval(startedAt: start.addingTimeInterval(30), endedAt: start.addingTimeInterval(60))]
         )
-        let active = ActiveSession(id: UUID(), projectID: project.id, projectName: project.name, type: .planning, goal: "Next", startedAt: start.addingTimeInterval(180), phase: .paused)
+        let active = ActiveSession(id: UUID(), projectID: project.id, projectName: project.name, type: .planning, goal: "Next", startedAt: start.addingTimeInterval(180))
         var pausedActive = active
         XCTAssertTrue(pausedActive.pause(at: start.addingTimeInterval(200)))
         let legacyPayload = AppState(projects: [project], completedSessions: [completed], activeSession: pausedActive)

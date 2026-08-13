@@ -227,7 +227,7 @@ final class JSONFilePersistence: StatePersisting, StatePersistenceRecoveryProvid
         try writeMigratedEnvelope(migrated, replacing: data)
         envelopeCreatedAt = migrated.createdAt
         migrationHistory = migrated.migrationHistory
-        return legacyState
+        return migrated.payload
     }
 
     private func migrate(_ envelope: StatePersistenceEnvelope) throws -> StatePersistenceEnvelope {

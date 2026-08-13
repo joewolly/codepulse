@@ -83,7 +83,10 @@ final class PersistenceMigrationTests: XCTestCase {
         try encode(future).write(to: stateURL, options: .atomic)
 
         XCTAssertEqual(persistence.load(), existing)
-        XCTAssertEqual(persistence.recoveryIssue?.kind, .unsupportedFutureVersion(3))
+        XCTAssertEqual(
+            persistence.recoveryIssue?.kind,
+            .unsupportedFutureVersion(StatePersistenceEnvelope.currentSchemaVersion + 1)
+        )
         XCTAssertEqual(try Data(contentsOf: stateURL), try encode(future))
     }
 
