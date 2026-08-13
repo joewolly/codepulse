@@ -67,6 +67,10 @@ Before Feature 01 a missing or malformed file silently produced an empty
   prompts, tool data, transcripts, source paths, or OpenCode database records.
   Newly added optional/defaulted fields remain backward decodable and do not
   require a new envelope migration.
+- **Usage attribution (Feature 16):** derives indexes, roll-ups, and
+  reconciliation summaries in memory from existing `usageSamples` and the
+  activity graph. It adds no persistence field, analytics database, raw-source
+  identifier, or migration.
 
 ## v1 fixture policy
 

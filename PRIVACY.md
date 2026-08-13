@@ -53,6 +53,10 @@ Depending on how the app is used, that state can include:
   provenance, and a small adapter-health summary. It never contains an OpenCode
   session or message ID, message body, prompt, response, tool data, command,
   database record, transcript, or source-file text.
+- Usage-attribution views: derived, in-memory totals and privacy-safe
+  reconciliation rows. They use existing sample, workspace, activity, and run
+  data; they do not add a raw-identifier index, a new analytics database, or a
+  new external data source.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -130,6 +134,12 @@ records immediately; existing privacy-safe local usage history remains until the
 user deletes CodePulse data. A missing, malformed, or future-version plugin
 record updates only the optional usage adapter-health state and never changes
 lifecycle timing.
+
+Usage attribution does not collect or persist new source data. Its
+reconciliation rows display only an ordinal local sample label and safe
+dimensions such as workspace/activity names, tool, model, provider, and token
+or cost totals. They never display raw session fingerprints, paths, prompts,
+transcripts, or source-event identifiers.
 
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and
