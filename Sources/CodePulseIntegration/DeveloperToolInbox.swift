@@ -163,7 +163,7 @@ public final class DeveloperEventV2Inbox {
     }
 
     public func pendingReceiptURLs() -> [URL] {
-        managedJSONFiles(in: paths.eventV2ReceiptURL)
+        managedJSONFiles(in: paths.eventV2ReceiptURL, limit: DeveloperToolIntegrationLimits.maximumPendingEventsPerScan)
     }
 
     public func readEvent(from url: URL, now: Date = Date()) throws -> DeveloperEventV2 {
@@ -213,16 +213,22 @@ public final class DeveloperEventV2Inbox {
     private func writeReceipt(_ receipt: DeveloperEventReceiptV2) throws {
         guard !managedPathContainsSymbolicLink(paths.eventV2ReceiptURL) else { throw DeveloperEventV2InboxError.unsafePath }
         try fileManager.createDirectory(at: paths.eventV2ReceiptURL, withIntermediateDirectories: true)
-        let existing = managedJSONFiles(in: paths.eventV2ReceiptURL)
-        if existing.count >= DeveloperToolIntegrationLimits.maximumInboxFiles {
-            for url in existing.prefix(existing.count - DeveloperToolIntegrationLimits.maximumInboxFiles + 1) {
-                try? fileManager.removeItem(at: url)
-            }
-        }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(receipt)
+        guard data.count <= DeveloperToolIntegrationLimits.maximumReceiptBytes else {
+            throw DeveloperEventV2InboxError.eventTooLarge
+        }
+        var existing = receiptFiles()
+        var totalBytes = existing.reduce(0) { $0 + $1.byteCount }
+        while existing.count >= DeveloperToolIntegrationLimits.maximumReceiptFiles ||
+            totalBytes + data.count > DeveloperToolIntegrationLimits.maximumReceiptBytes {
+            guard let oldest = existing.first else { throw DeveloperEventV2InboxError.inboxFull }
+            try? fileManager.removeItem(at: oldest.url)
+            totalBytes -= oldest.byteCount
+            existing.removeFirst()
+        }
         let target = paths.eventV2ReceiptURL.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
         try data.write(to: target, options: .atomic)
     }
@@ -260,7 +266,7 @@ public final class DeveloperEventV2Inbox {
         DeveloperEventV2Fingerprint.make(for: idempotencyKey, salt: fingerprintSalt)
     }
 
-    private func managedJSONFiles(in directory: URL) -> [URL] {
+    private func managedJSONFiles(in directory: URL, limit: Int?) -> [URL] {
         guard !managedPathContainsSymbolicLink(directory),
               let urls = try? fileManager.contentsOfDirectory(
                 at: directory,
@@ -273,8 +279,34 @@ public final class DeveloperEventV2Inbox {
             return values?.isRegularFile == true && values?.isSymbolicLink != true
         }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        .prefix(DeveloperToolIntegrationLimits.maximumPendingEventsPerScan)
+        .prefix(limit ?? Int.max)
         .map { $0 }
+    }
+
+    private func receiptFiles() -> [ManagedReceiptFile] {
+        guard !managedPathContainsSymbolicLink(paths.eventV2ReceiptURL),
+              let urls = try? fileManager.contentsOfDirectory(
+                at: paths.eventV2ReceiptURL,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+              ) else { return [] }
+        return urls.compactMap { url in
+            guard url.pathExtension.lowercased() == "json",
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .contentModificationDateKey]),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true,
+                  let byteCount = values.fileSize else { return nil }
+            return ManagedReceiptFile(
+                url: url,
+                byteCount: byteCount,
+                modifiedAt: values.contentModificationDate ?? .distantPast
+            )
+        }
+        .sorted { lhs, rhs in
+            lhs.modifiedAt == rhs.modifiedAt
+                ? lhs.url.lastPathComponent < rhs.url.lastPathComponent
+                : lhs.modifiedAt < rhs.modifiedAt
+        }
     }
 
     private func managedPathContainsSymbolicLink(_ target: URL? = nil) -> Bool {
@@ -324,6 +356,12 @@ public final class DeveloperEventV2Inbox {
             return nil
         }
     }
+}
+
+private struct ManagedReceiptFile {
+    let url: URL
+    let byteCount: Int
+    let modifiedAt: Date
 }
 
 public enum DeveloperToolInboxError: Error, Equatable {
