@@ -1,4 +1,5 @@
 import XCTest
+import CodePulseIntegration
 @testable import CodePulse
 
 private final class TestClock: SessionClock {
@@ -437,6 +438,106 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.todayTotal(), 60, accuracy: 0.001)
     }
 
+    func testCodexLifecycleEventsCreateAndAdvanceAnAgentRunForMatchingWorkspace() throws {
+        let clock = TestClock(start)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-v2-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperEventV2Inbox(paths: paths, fingerprintSalt: Data(repeating: 9, count: 32))
+        let store = SessionStore(
+            persistence: InMemoryPersistence(),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            developerEventV2Consumer: DeveloperEventV2Consumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        let workspacePath = "/tmp/codepulse-workspace"
+        let workspaceID = try XCTUnwrap(store.addWorkspace(
+            name: "CodePulse",
+            roots: [WorkspaceRoot(path: workspacePath, addedAt: start)],
+            at: start
+        ))
+
+        let started = codexEvent(kind: .sessionStarted, at: start, key: "codex-start-0123456789abcdef", path: workspacePath)
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(started), now: start), .accepted)
+        clock.advance(5)
+        store.refresh()
+
+        let run = try XCTUnwrap(store.runs(workspaceID: workspaceID).first)
+        XCTAssertEqual(run.agentMetadata?.integration, .codex)
+        XCTAssertEqual(run.agentMetadata?.state, .active)
+        XCTAssertEqual(run.intervals.map(\.state), [.active])
+        let persistedText = try XCTUnwrap(String(data: JSONEncoder().encode(store.state), encoding: .utf8))
+        XCTAssertFalse(persistedText.contains("codex-session"))
+
+        let permission = codexEvent(
+            kind: .permissionRequested,
+            at: start.addingTimeInterval(10),
+            key: "codex-permission-0123456789",
+            path: workspacePath
+        )
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(permission), now: start.addingTimeInterval(10)), .accepted)
+        clock.advance(5)
+        store.refresh()
+
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).first?.agentMetadata?.state, .awaitingPermission)
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).first?.intervals.map(\.state), [.active, .waiting])
+    }
+
+    func testCodexCorrelationKeepsConcurrentRunsSeparateAndResumesAfterStop() throws {
+        let clock = TestClock(start)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-v2-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperEventV2Inbox(paths: paths, fingerprintSalt: Data(repeating: 8, count: 32))
+        let store = SessionStore(
+            persistence: InMemoryPersistence(),
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            developerEventV2Consumer: DeveloperEventV2Consumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        let workspacePath = "/tmp/codepulse-concurrent"
+        let workspaceID = try XCTUnwrap(store.addWorkspace(
+            name: "CodePulse",
+            roots: [WorkspaceRoot(path: workspacePath, addedAt: start)],
+            at: start
+        ))
+
+        for (session, key) in [("codex-a", "codex-a-start-0123456789abcdef"), ("codex-b", "codex-b-start-0123456789abcdef")] {
+            let event = codexEvent(kind: .sessionStarted, at: start, key: key, path: workspacePath, session: session)
+            XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(event), now: start), .accepted)
+        }
+        clock.advance(5)
+        store.refresh()
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).count, 2)
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).map { $0.agentMetadata?.state }, [.active, .active])
+
+        let stoppedAt = start.addingTimeInterval(10)
+        let stop = codexEvent(kind: .sessionStopped, at: stoppedAt, key: "codex-a-stop-0123456789abcdef", path: workspacePath, session: "codex-a")
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(stop), now: stoppedAt), .accepted)
+        clock.advance(5)
+        store.refresh()
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).filter { $0.agentMetadata?.state == .reviewGrace }.count, 1)
+
+        let resumedAt = start.addingTimeInterval(20)
+        let resumed = codexEvent(kind: .activityObserved, at: resumedAt, key: "codex-a-resume-0123456789abcdef", path: workspacePath, session: "codex-a")
+        XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(resumed), now: resumedAt), .accepted)
+        clock.advance(5)
+        store.refresh()
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).filter { $0.agentMetadata?.state == .active }.count, 2)
+
+        // Replaying a lifecycle event uses the same session fingerprint and
+        // never creates a third run.
+        try DeveloperEventV2Codec.encode(resumed).write(
+            to: paths.eventV2InboxURL.appendingPathComponent("replayed-event.json"),
+            options: .atomic
+        )
+        clock.advance(5)
+        store.refresh()
+        XCTAssertEqual(store.runs(workspaceID: workspaceID).count, 2)
+    }
+
     private func makeStore(
         clock: TestClock,
         persistence: InMemoryPersistence = InMemoryPersistence(),
@@ -447,6 +548,26 @@ final class SessionStoreTests: XCTestCase {
             clock: clock,
             calendar: calendar ?? Calendar(identifier: .gregorian),
             automaticallyRefresh: false
+        )
+    }
+
+    private func codexEvent(
+        kind: DeveloperEventKindV2,
+        at date: Date,
+        key: String,
+        path: String,
+        session: String = "codex-session"
+    ) -> DeveloperEventV2 {
+        DeveloperEventV2(
+            integration: .codex,
+            eventKind: kind,
+            observedAt: date,
+            idempotencyKey: key,
+            externalSessionKey: session,
+            workingDirectory: path,
+            model: "gpt-5.6",
+            parserVersion: "codex-hooks-v1",
+            integrationVersion: "test"
         )
     }
 }

@@ -4,7 +4,6 @@ import Foundation
 struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
     static let managedMarker = "CodePulse developer integration (managed)"
     private static let managedFeatureMarker = "CodePulse managed developer integration"
-
     let hooksURL: URL
     let configURL: URL
     private let fileManager: FileManager
@@ -66,7 +65,10 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
                 "matcher": "startup|resume|clear|compact",
                 "hooks": [backgroundHandler]
             ])
-            hooks["Stop", default: []].append(["hooks": [backgroundHandler]])
+            for eventName in ["UserPromptSubmit", "PostToolUse", "Stop"] {
+                hooks[eventName, default: []].append(["hooks": [backgroundHandler]])
+            }
+            hooks["PermissionRequest", default: []].append(["hooks": [handler]])
             hooks["SessionEnd", default: []].append(["hooks": [handler]])
             root["hooks"] = hooks
             try writeHooksConfiguration(root)

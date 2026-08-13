@@ -506,8 +506,9 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         let stopGroups = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
         XCTAssertEqual(stopGroups.count, 2)
         XCTAssertEqual(object["other"] as? String, "preserve me")
-        XCTAssertTrue(hooks["SessionStart"] != nil)
-        XCTAssertTrue(hooks["SessionEnd"] != nil)
+        for eventName in ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"] {
+            XCTAssertTrue(hooks[eventName] != nil, "Missing managed \(eventName) hook")
+        }
         XCTAssertTrue(String(data: try Data(contentsOf: configURL), encoding: .utf8)?.contains("CodePulse managed") == true)
 
         try installer.disable()
@@ -517,8 +518,9 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         let disabledHooks = try XCTUnwrap(disabledObject["hooks"] as? [String: Any])
         let remainingStopGroups = try XCTUnwrap(disabledHooks["Stop"] as? [[String: Any]])
         XCTAssertEqual(remainingStopGroups.count, 1)
-        XCTAssertNil(disabledHooks["SessionStart"])
-        XCTAssertNil(disabledHooks["SessionEnd"])
+        for eventName in ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "SessionEnd"] {
+            XCTAssertNil(disabledHooks[eventName], "Retained managed \(eventName) hook")
+        }
         XCTAssertFalse(String(data: try Data(contentsOf: configURL), encoding: .utf8)?.contains("CodePulse managed") == true)
     }
 
@@ -564,8 +566,9 @@ final class DeveloperToolIntegrationTests: XCTestCase {
                 $0["statusMessage"] as? String == CodexIntegrationInstaller.managedMarker
             } == true
         }.count, 1)
-        XCTAssertNotNil(enabledHooks["SessionStart"])
-        XCTAssertNotNil(enabledHooks["SessionEnd"])
+        for eventName in ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUse", "SessionEnd"] {
+            XCTAssertNotNil(enabledHooks[eventName], "Missing managed \(eventName) hook")
+        }
 
         try installer.disable()
         let disabledObject = try XCTUnwrap(

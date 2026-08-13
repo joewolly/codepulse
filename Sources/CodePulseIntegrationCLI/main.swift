@@ -26,12 +26,12 @@ struct CodePulseIntegrationCLI {
             }
             receiveLegacy(sanitized, using: inbox)
         case "--codex-hook":
-            guard let event = makeCodexEvent(from: input),
-                  let sanitized = try? DeveloperToolEventValidator.sanitized(event) else {
-                inbox.recordRejected(code: "legacy-schema-rejected")
+            guard let event = CodexLifecycleEventMapper.map(input),
+                  let encoded = try? DeveloperEventV2Codec.encode(event) else {
+                inbox.recordRejected(code: "codex-hook-rejected")
                 return
             }
-            receiveLegacy(sanitized, using: inbox)
+            _ = try? inbox.receive(encoded)
         default:
             return
         }
@@ -98,66 +98,5 @@ struct CodePulseIntegrationCLI {
             return
         }
         _ = try? inbox.receive(data)
-    }
-
-    private static func makeCodexEvent(from data: Data) -> DeveloperToolEvent? {
-        guard let payload = try? JSONDecoder().decode(CodexHookPayload.self, from: data),
-              let eventType = payload.eventType,
-              let workingDirectory = DeveloperToolProjectPathMatcher.canonicalPath(for: payload.cwd) else {
-            return nil
-        }
-
-        let discriminator = [
-            payload.hookEventName,
-            payload.source ?? "",
-            payload.turnID ?? ""
-        ].joined(separator: "\u{1F}")
-        let id = DeveloperToolEventID.stable(
-            tool: .codex,
-            externalSessionID: payload.sessionID,
-            eventType: eventType,
-            workingDirectory: workingDirectory,
-            discriminator: discriminator
-        )
-        return DeveloperToolEvent(
-            id: id,
-            tool: .codex,
-            externalSessionID: payload.sessionID,
-            eventType: eventType,
-            timestamp: Date(),
-            workingDirectory: workingDirectory,
-            model: payload.model
-        )
-    }
-}
-
-private struct CodexHookPayload: Decodable {
-    let sessionID: String
-    let cwd: String
-    let model: String?
-    let hookEventName: String
-    let source: String?
-    let turnID: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case sessionID = "session_id"
-        case cwd
-        case model
-        case hookEventName = "hook_event_name"
-        case source
-        case turnID = "turn_id"
-    }
-
-    var eventType: DeveloperToolEventType? {
-        switch hookEventName {
-        case "SessionStart":
-            return source == "compact" ? .activity : .sessionStarted
-        case "Stop":
-            return .activity
-        case "SessionEnd":
-            return .sessionEnded
-        default:
-            return nil
-        }
     }
 }

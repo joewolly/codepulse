@@ -49,9 +49,15 @@ later events do not reopen them.
 | `session.idle` | Explicit local idle/wait | Explicit local idle/wait | `session.idle` or idle status |
 | `session.ended` | Session end | Session end | `session.deleted` |
 
-This table is the canonical reducer contract, not a claim that all adapters are
-implemented. Codex, Claude Code, and OpenCode mapping/correlation work remains
-in Features 05–07.
+This table is the canonical reducer contract. Feature 05 implements the Codex
+mapping through local hooks: `SessionStart`, `UserPromptSubmit`,
+`PostToolUse`, `PermissionRequest`, `Stop`, and `SessionEnd`. The mapper reads
+only whitelisted metadata and discards prompt, transcript, command, tool, and
+permission-decision fields. Claude Code and OpenCode remain later features.
+
+Codex correlation creates or resumes a run only for a matching local workspace
+root. Feature 08 will add Git workspace discovery; cloud-only sessions that
+have no local hook/process remain out of scope.
 
 ## Review grace and relaunch recovery
 
