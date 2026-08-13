@@ -143,7 +143,7 @@ not exist yet.
 | 01 | @ZacharyRW | `feature/01-persistence-migrations` | [#3](https://github.com/ZacharyRW/codepulse/pull/3) | Merged | 2026-08-12 |
 | 02 | @ZacharyRW | `feature/02-activity-domain-model` | [#4](https://github.com/ZacharyRW/codepulse/pull/4) | Merged | 2026-08-12 |
 | 03 | @ZacharyRW | `feature/03-developer-event-v2` | [#5](https://github.com/ZacharyRW/codepulse/pull/5) | Merged | 2026-08-12 |
-| 04 | — | `feature/04-agent-aware-timing` | — | Not started | — |
+| 04 | @ZacharyRW | `feature/04-agent-aware-timing` | [#7](https://github.com/ZacharyRW/codepulse/pull/7) | Merged | 2026-08-12 |
 | 05 | — | `feature/05-codex-lifecycle` | — | Not started | — |
 | 06 | — | `feature/06-claude-lifecycle` | — | Not started | — |
 | 07 | — | `feature/07-opencode-lifecycle` | — | Not started | — |

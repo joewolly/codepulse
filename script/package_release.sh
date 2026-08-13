@@ -139,7 +139,7 @@ determine_version() {
 }
 
 determine_update_feed() {
-  UPDATE_REPOSITORY="${CODEPULSE_RELEASE_REPOSITORY:-joewolly/codepulse}"
+  UPDATE_REPOSITORY="${CODEPULSE_RELEASE_REPOSITORY:-ZacharyRW/codepulse}"
   [[ "$UPDATE_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "CODEPULSE_RELEASE_REPOSITORY must use owner/repository form"
   UPDATE_FEED_URL="https://github.com/$UPDATE_REPOSITORY/releases/latest/download/appcast.xml"
 }

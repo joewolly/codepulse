@@ -1,6 +1,6 @@
 # CodePulse
 
-[![macOS validation](https://github.com/joewolly/codepulse/actions/workflows/validation.yml/badge.svg?branch=main)](https://github.com/joewolly/codepulse/actions/workflows/validation.yml)
+[![macOS validation](https://github.com/ZacharyRW/codepulse/actions/workflows/validation.yml/badge.svg?branch=main)](https://github.com/ZacharyRW/codepulse/actions/workflows/validation.yml)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
 [![Sparkle 2.9.2](https://img.shields.io/badge/Sparkle-2.9.2-blue)](https://github.com/sparkle-project/Sparkle)
 
@@ -38,7 +38,7 @@ CodePulse requires macOS 13 or later and is distributed as a Universal 2 app
 for Apple silicon and Intel Macs.
 
 Download the latest DMG from
-[GitHub Releases](https://github.com/joewolly/codepulse/releases/latest), open
+[GitHub Releases](https://github.com/ZacharyRW/codepulse/releases/latest), open
 it, and drag CodePulse to Applications. The current build is intentionally not
 Developer ID signed or notarized, so macOS may require an explicit first-launch
 approval. Follow the safe first-launch instructions in
