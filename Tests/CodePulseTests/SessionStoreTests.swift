@@ -36,6 +36,31 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.elapsedDuration, 0, accuracy: 0.001)
     }
 
+    func testLegacySessionControlsMaintainCompatibleManualActivityRun() throws {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+
+        XCTAssertTrue(store.startSession(projectID: nil, goal: "Ship", type: .review))
+        let activity = try XCTUnwrap(store.activityGraph.activities.first)
+        let run = try XCTUnwrap(store.activityGraph.runs.first)
+        XCTAssertEqual(activity.workType, .review)
+        XCTAssertEqual(run.kind, .manual)
+        XCTAssertEqual(run.intervals.last?.state, .active)
+
+        clock.advance(60)
+        XCTAssertTrue(store.pause())
+        XCTAssertEqual(store.activityGraph.runs.first?.intervals.map(\.state), [.active, .waiting])
+
+        clock.advance(30)
+        XCTAssertTrue(store.resume())
+        XCTAssertEqual(store.activityGraph.runs.first?.intervals.map(\.state), [.active, .waiting, .active])
+
+        clock.advance(60)
+        XCTAssertTrue(store.finish())
+        XCTAssertTrue(store.activityGraph.runs.first?.intervals.allSatisfy { !$0.isOpen } == true)
+        XCTAssertNotNil(store.activity(forLegacySessionID: try XCTUnwrap(store.activeSession?.id)))
+    }
+
     func testRunningDurationUsesTimestamps() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)
