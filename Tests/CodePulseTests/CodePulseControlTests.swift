@@ -190,6 +190,44 @@ final class CodePulseControlTests: XCTestCase {
         XCTAssertNil(try transport.readResponse(for: responseID))
     }
 
+    func testTransportUsesPrivateControlDirectoriesAndFiles() throws {
+        let temporaryDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        let transport = CodePulseControlTransport(
+            paths: CodePulseControlPaths(
+                applicationSupportDirectory: temporaryDirectory.appendingPathComponent("support", isDirectory: true)
+            )
+        )
+        let command = CodePulseControlCommand(issuedAt: start, action: .status)
+        try transport.writeCommand(command)
+
+        let commandDirectoryAttributes = try FileManager.default.attributesOfItem(atPath: transport.paths.commandsURL.path)
+        let commandDirectoryPermissions = try XCTUnwrap(commandDirectoryAttributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(commandDirectoryPermissions.intValue, 0o700)
+
+        let commandURL = transport.paths.commandsURL
+            .appendingPathComponent("\(command.id.uuidString.lowercased()).json")
+        let commandAttributes = try FileManager.default.attributesOfItem(atPath: commandURL.path)
+        let commandPermissions = try XCTUnwrap(commandAttributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(commandPermissions.intValue, 0o600)
+
+        try transport.writeResponse(CodePulseControlResponse(
+            commandID: command.id,
+            result: .success,
+            message: "done"
+        ))
+        let responseDirectoryAttributes = try FileManager.default.attributesOfItem(atPath: transport.paths.responsesURL.path)
+        let responseDirectoryPermissions = try XCTUnwrap(responseDirectoryAttributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(responseDirectoryPermissions.intValue, 0o700)
+
+        let responseURL = transport.paths.responsesURL
+            .appendingPathComponent("\(command.id.uuidString.lowercased()).json")
+        let responseAttributes = try FileManager.default.attributesOfItem(atPath: responseURL.path)
+        let responsePermissions = try XCTUnwrap(responseAttributes[.posixPermissions] as? NSNumber)
+        XCTAssertEqual(responsePermissions.intValue, 0o600)
+    }
+
     func testManualPresetLifecycleAndStatusJSONRemainPrivacyMinimal() throws {
         let (store, transport, persistence, clock) = makeStore()
         let projectID = persistence.state.projects.first!.id

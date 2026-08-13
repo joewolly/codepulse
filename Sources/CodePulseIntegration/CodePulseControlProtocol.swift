@@ -491,6 +491,7 @@ public final class CodePulseControlTransport {
 
     public func writeCommand(_ command: CodePulseControlCommand) throws {
         let data = try CodePulseControlCommandCodec.encode(command)
+        try ensureDirectory(paths.rootURL)
         try ensureDirectory(paths.commandsURL)
         let target = commandURL(for: command.id)
         guard !isSymbolicLink(target) else {
@@ -532,6 +533,7 @@ public final class CodePulseControlTransport {
 
     public func writeResponse(_ response: CodePulseControlResponse) throws {
         let data = try CodePulseControlResponseCodec.encode(response)
+        try ensureDirectory(paths.rootURL)
         try ensureDirectory(paths.responsesURL)
         let target = responseURL(for: response.commandID)
         guard !isSymbolicLink(target) else {
@@ -616,7 +618,15 @@ public final class CodePulseControlTransport {
         guard !isSymbolicLink(url), !managedPathContainsSymbolicLink() else {
             throw CodePulseControlValidationError.invalidValue("control path")
         }
-        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: url,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: url.path
+        )
     }
 
     private func ensureCapacity(
@@ -689,6 +699,10 @@ public final class CodePulseControlTransport {
         )
         do {
             try data.write(to: temporary, options: .atomic)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: temporary.path
+            )
             do {
                 try fileManager.moveItem(at: temporary, to: target)
             } catch {
