@@ -255,6 +255,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     var gitContext: GitSessionContext?
     var githubContext: GitHubSessionContext?
     var developerToolContexts: [DeveloperToolSessionContext]
+    var automationMetadata: SessionAutomationMetadata?
 
     init(
         id: UUID = UUID(),
@@ -265,7 +266,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         startedAt: Date,
         phase: SessionPhase = .running,
         githubContext: GitHubSessionContext? = nil,
-        developerToolContexts: [DeveloperToolSessionContext] = []
+        developerToolContexts: [DeveloperToolSessionContext] = [],
+        automationMetadata: SessionAutomationMetadata? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -280,11 +282,12 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.gitContext = nil
         self.githubContext = githubContext
         self.developerToolContexts = developerToolContexts
+        self.automationMetadata = automationMetadata
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, projectName, type, goal, startedAt, endedAt, phase
-        case pauseIntervals, outcome, gitContext, githubContext, developerToolContexts
+        case pauseIntervals, outcome, gitContext, githubContext, developerToolContexts, automationMetadata
     }
 
     init(from decoder: Decoder) throws {
@@ -305,6 +308,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             [DeveloperToolSessionContext].self,
             forKey: .developerToolContexts
         ) ?? []
+        automationMetadata = try container.decodeIfPresent(SessionAutomationMetadata.self, forKey: .automationMetadata)
     }
 
     var pausedAt: Date? {
@@ -595,6 +599,7 @@ struct CodePulseSettings: Codable, Equatable {
     var defaultProjectBehavior: DefaultProjectBehavior
     var specificProjectID: UUID?
     var globalShortcutEnabled: Bool
+    var automationEnabled: Bool
 
     init(
         launchAtLogin: Bool = false,
@@ -602,7 +607,8 @@ struct CodePulseSettings: Codable, Equatable {
         idleAppearance: IdleAppearance = .code,
         defaultProjectBehavior: DefaultProjectBehavior = .lastUsed,
         specificProjectID: UUID? = nil,
-        globalShortcutEnabled: Bool = true
+        globalShortcutEnabled: Bool = true,
+        automationEnabled: Bool = false
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -610,11 +616,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.defaultProjectBehavior = defaultProjectBehavior
         self.specificProjectID = specificProjectID
         self.globalShortcutEnabled = globalShortcutEnabled
+        self.automationEnabled = automationEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, automationEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -625,15 +632,51 @@ struct CodePulseSettings: Codable, Equatable {
         defaultProjectBehavior = try container.decodeIfPresent(DefaultProjectBehavior.self, forKey: .defaultProjectBehavior) ?? .lastUsed
         specificProjectID = try container.decodeIfPresent(UUID.self, forKey: .specificProjectID)
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
+        automationEnabled = try container.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
     }
 }
 
 struct AppState: Codable, Equatable {
-    var projects: [ProjectRecord] = []
-    var completedSessions: [CompletedSession] = []
-    var activeSession: ActiveSession? = nil
-    var settings = CodePulseSettings()
-    var developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil
+    var projects: [ProjectRecord]
+    var completedSessions: [CompletedSession]
+    var activeSession: ActiveSession?
+    var settings: CodePulseSettings
+    var developerToolIntegration: DeveloperToolIntegrationProcessingState?
+    var automationRules: [SessionAutomationRule]
+
+    init(
+        projects: [ProjectRecord] = [],
+        completedSessions: [CompletedSession] = [],
+        activeSession: ActiveSession? = nil,
+        settings: CodePulseSettings = CodePulseSettings(),
+        developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
+        automationRules: [SessionAutomationRule] = []
+    ) {
+        self.projects = projects
+        self.completedSessions = completedSessions
+        self.activeSession = activeSession
+        self.settings = settings
+        self.developerToolIntegration = developerToolIntegration
+        self.automationRules = automationRules
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects, completedSessions, activeSession, settings
+        case developerToolIntegration, automationRules
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try container.decodeIfPresent([ProjectRecord].self, forKey: .projects) ?? []
+        completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
+        activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
+        settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
+        developerToolIntegration = try container.decodeIfPresent(
+            DeveloperToolIntegrationProcessingState.self,
+            forKey: .developerToolIntegration
+        )
+        automationRules = try container.decodeIfPresent([SessionAutomationRule].self, forKey: .automationRules) ?? []
+    }
 }
 
 struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
