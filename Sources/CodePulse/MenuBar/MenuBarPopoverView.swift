@@ -56,10 +56,16 @@ private struct IdleSessionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    if store.sessionPresetsAvailableForManualStart.isEmpty {
+                        Label("Saved presets are unavailable until their projects are restored or repaired.", systemImage: "archivebox")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
                     HStack {
                         Picker("Session preset", selection: $selectedPresetID) {
                             Text("Choose a preset").tag(UUID?.none)
-                            ForEach(store.sessionPresetsSorted) { preset in
+                            ForEach(store.sessionPresetsAvailableForManualStart) { preset in
                                 Text(preset.name).tag(Optional(preset.id))
                             }
                         }
@@ -74,14 +80,16 @@ private struct IdleSessionView: View {
                             Label("Start", systemImage: "play.fill")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(selectedPresetID.flatMap { store.sessionPreset(id: $0) } == nil)
+                        .disabled(selectedPresetID.flatMap { store.sessionPreset(id: $0) }
+                            .map { !store.isSessionPresetAvailableForManualStart($0) } ?? true)
                         .accessibilityLabel("Start selected session preset")
                         .accessibilityHint("Starts a manual session using the selected preset, when it is still available")
                     }
 
                     if let selectedPresetID,
-                       store.sessionPreset(id: selectedPresetID) == nil {
-                        Label("The selected preset is no longer available.", systemImage: "exclamationmark.triangle")
+                       let selectedPreset = store.sessionPreset(id: selectedPresetID),
+                       !store.isSessionPresetAvailableForManualStart(selectedPreset) {
+                        Label("The selected preset uses an archived or unavailable project. Restore the project before starting it.", systemImage: "exclamationmark.triangle")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
@@ -412,7 +420,7 @@ private struct ProjectSelectionRow: View {
 
                 if !store.state.projects.isEmpty {
                     Divider()
-                    ForEach(store.projectsSortedByRecentUse) { project in
+                    ForEach(store.selectableProjectsSortedByRecentUse) { project in
                         Button {
                             selectedProjectID = project.id
                         } label: {

@@ -10,7 +10,9 @@ struct SettingsView: View {
     @EnvironmentObject private var integrationManager: DeveloperToolIntegrationManager
     @State private var projectToRename: ProjectRecord?
     @State private var renameText = ""
+    @State private var projectToArchive: ProjectRecord?
     @State private var projectToDelete: ProjectRecord?
+    @State private var projectArchiveError: String?
     @State private var loginItemError: String?
     @State private var backupError: String?
     @State private var restoreCandidate: BackupRestoreCandidate?
@@ -131,7 +133,7 @@ struct SettingsView: View {
                         set: { value in store.updateSettings { $0.specificProjectID = value } }
                     )) {
                         Text("No project").tag(UUID?.none)
-                        ForEach(store.projectsSortedByRecentUse) { project in
+                        ForEach(store.selectableProjectsSortedByRecentUse) { project in
                             Text(project.name).tag(Optional(project.id))
                         }
                     }
@@ -144,53 +146,42 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(store.projectsSortedByRecentUse) { project in
-                        HStack {
-                            Image(systemName: "folder")
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading) {
-                                Text(project.name)
-                                if let path = project.folderPath {
-                                    Text(path)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                            }
-                            Spacer()
-                            if let path = project.folderPath, !project.requiresRelink {
-                                Button {
-                                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                                } label: {
-                                    Image(systemName: "arrow.up.forward.app")
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("Reveal \(project.name) in Finder")
-                            }
-                            if project.requiresRelink {
-                                Label("Needs Relink", systemImage: "exclamationmark.triangle")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .accessibilityLabel("\(project.name) needs relinking")
-                            }
-                            Button("Relink") {
-                                relinkProject(project)
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Relink \(project.name) folder")
-                            Button("Rename") {
-                                projectToRename = project
-                                renameText = project.name
-                            }
-                            .buttonStyle(.borderless)
-                            Button {
-                                projectToDelete = project
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Delete \(project.name)")
+                    if !store.activeProjectsSortedByRecentUse.isEmpty {
+                        Text("Active")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(store.activeProjectsSortedByRecentUse) { project in
+                            ProjectSettingsRow(
+                                project: project,
+                                archive: { projectToArchive = project },
+                                restore: nil,
+                                relink: { relinkProject(project) },
+                                rename: {
+                                    projectToRename = project
+                                    renameText = project.name
+                                },
+                                delete: { projectToDelete = project }
+                            )
+                        }
+                    }
+
+                    if !store.archivedProjectsSortedByRecentUse.isEmpty {
+                        Text("Archived")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 6)
+                        ForEach(store.archivedProjectsSortedByRecentUse) { project in
+                            ProjectSettingsRow(
+                                project: project,
+                                archive: nil,
+                                restore: { restoreProject(project) },
+                                relink: { relinkProject(project) },
+                                rename: {
+                                    projectToRename = project
+                                    renameText = project.name
+                                },
+                                delete: { projectToDelete = project }
+                            )
                         }
                     }
                 }
@@ -241,6 +232,35 @@ struct SettingsView: View {
             }
         } message: {
             Text("Saved sessions keep their project name, but this project will no longer be available for new sessions.")
+        }
+        .alert("Archive \(projectToArchive?.name ?? "Project")?", isPresented: Binding(
+            get: { projectToArchive != nil },
+            set: { if !$0 { projectToArchive = nil } }
+        )) {
+            Button("Archive", role: .destructive) {
+                guard let project = projectToArchive else { return }
+                projectToArchive = nil
+                do {
+                    _ = try store.archiveProject(id: project.id)
+                } catch {
+                    projectArchiveError = error.localizedDescription
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                projectToArchive = nil
+            }
+        } message: {
+            Text("This project will no longer appear when starting sessions or running automation. Its saved sessions and Insights will remain available.")
+        }
+        .alert("Project Archive Failed", isPresented: Binding(
+            get: { projectArchiveError != nil },
+            set: { if !$0 { projectArchiveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                projectArchiveError = nil
+            }
+        } message: {
+            Text(projectArchiveError ?? "CodePulse could not change this project's archive state.")
         }
         .alert("Backup Export Failed", isPresented: Binding(
             get: { backupError != nil },
@@ -325,6 +345,14 @@ struct SettingsView: View {
         _ = store.updateProjectFolder(id: project.id, folderURL: url)
     }
 
+    private func restoreProject(_ project: ProjectRecord) {
+        do {
+            _ = try store.restoreProject(id: project.id)
+        } catch {
+            projectArchiveError = error.localizedDescription
+        }
+    }
+
     private func exportBackup() {
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
@@ -399,6 +427,80 @@ struct SettingsView: View {
         lines.append("Recovery backup:")
         lines.append(result.recoveryBackupURL.path)
         return lines.joined(separator: "\n")
+    }
+}
+
+private struct ProjectSettingsRow: View {
+    let project: ProjectRecord
+    let archive: (() -> Void)?
+    let restore: (() -> Void)?
+    let relink: () -> Void
+    let rename: () -> Void
+    let delete: () -> Void
+
+    var body: some View {
+        HStack {
+            Image(systemName: project.isArchived ? "archivebox" : "folder")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading) {
+                HStack(spacing: 6) {
+                    Text(project.name)
+                    if project.isArchived {
+                        Label("Archived", systemImage: "archivebox")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("\(project.name) is archived")
+                    }
+                }
+                if let path = project.folderPath {
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer()
+            if let path = project.folderPath, !project.requiresRelink {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                } label: {
+                    Image(systemName: "arrow.up.forward.app")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Reveal \(project.name) in Finder")
+            }
+            if project.requiresRelink {
+                Label("Needs Relink", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("\(project.name) needs relinking")
+            }
+            Button("Relink", action: relink)
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Relink \(project.name) folder")
+            Button("Rename", action: rename)
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Rename \(project.name)")
+            if let archive {
+                Button("Archive", action: archive)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Archive \(project.name)")
+                    .accessibilityHint("Removes this project from future session and automation workflows while keeping its history")
+            } else if let restore {
+                Button("Restore", action: restore)
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Restore \(project.name)")
+                    .accessibilityHint("Makes this project available for future sessions and automation again")
+            }
+            Button {
+                delete()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Delete \(project.name)")
+        }
     }
 }
 
