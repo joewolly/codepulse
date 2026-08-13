@@ -35,9 +35,12 @@ Depending on how the app is used, that state can include:
 - Pricing-catalog state: only signed provider-published rate metadata (model
   aliases, token-unit rates, effective/expiry dates, source URLs, catalog
   version, key identifier, and signature) plus an optional verified cached
-  catalog. A future usage sample may retain token counters, provider-reported
-  cost when locally available, and immutable calculation provenance; it never
-  contains prompt, transcript, command, source, or raw external-session text.
+  catalog.
+- Optional Codex usage state: installation-salted session and source
+  fingerprints, bounded byte offsets/checkpoints, model labels, token deltas,
+  unassigned-or-conservatively-matched run/workspace identifiers, and immutable
+  pricing provenance. It never contains a raw Codex session ID, path, JSONL
+  record, prompt, transcript, command, or source-file text.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -69,14 +72,21 @@ CodePulse does **not** inspect or persist prompts, user messages, assistant mess
 conversation transcripts, source-file contents, terminal command contents,
 command output, tool-call arguments, tool-call results, permission decisions,
 reasoning, conversation summaries, credentials, or API keys. The Codex adapter
-does not parse transcript files. The OpenCode adapter does not scrape
-conversation storage or subscribe to content/tool events. Prompt classification
-is not implemented: no integration sends prompt text to CodePulse, and the v2
-event schema rejects prompt-bearing fields.
+does not retain or parse transcript content. When **Track Codex token usage** is
+separately enabled, it reads only `session_meta`, `turn_context`, and
+`event_msg` records with `token_count` totals from current local
+`~/.codex/sessions` JSONL files; it skips all other record types and does not
+read archived-session data. The OpenCode adapter does not scrape conversation
+storage or subscribe to content/tool events. Prompt classification is not
+implemented: no integration sends prompt text to CodePulse, and the v2 event
+schema rejects prompt-bearing fields.
 
-Feature 12 adds pricing infrastructure only; it does not enable any token
-reader. Later per-tool usage tracking requires a separate explicit consent
-toggle and must remain independent from lifecycle timing.
+Codex token tracking is off by default and independent from lifecycle timing.
+Turning it off immediately stops CodePulse from enumerating or opening Codex
+usage files; it retains already stored local, privacy-safe usage metadata until
+the user deletes CodePulse data. Token totals use cumulative deltas to avoid
+double-counting repeated records. A sample is attached only to one matching
+Codex run; ambiguous or delayed samples remain unassigned.
 
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and

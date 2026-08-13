@@ -1,8 +1,8 @@
 # Pricing catalog and cost provenance
 
-Feature 12 provides the local foundation for later Codex, Claude Code, and
-OpenCode usage readers. It does not itself enable a usage reader or collect
-tokens. Timing continues to work without token usage or price data.
+Feature 12 provides the local pricing foundation. Feature 13 uses it for the
+separately opt-in Codex usage reader; Claude Code and OpenCode readers remain
+future work. Timing continues to work without token usage or price data.
 
 ## Catalog trust and offline behavior
 
@@ -20,12 +20,14 @@ catalog. If a remote cache is unavailable or expired, CodePulse uses the
 bundled catalog; an expired bundled catalog remains explicitly labeled as
 expired rather than silently presenting its rates as current.
 
-The initial bundled catalog intentionally contains only the published GPT-5
-standard API rates and aliases, with its source link:
-[OpenAI GPT-5 model pricing](https://developers.openai.com/api/docs/models/gpt-5).
-It does not infer prices from reasoning effort or subscription plans. Future
-catalog entries must include a provider-published source URL, effective date,
-currency, model aliases, and only the token-unit rates the provider publishes.
+The bundled catalog includes published GPT-5 standard API rates and the
+official Codex rate-card mappings used by Feature 13 for `gpt-5.3-codex` and
+`gpt-5.2-codex`. Sources are linked in each catalog entry, including the
+[GPT-5.3 Codex model page](https://developers.openai.com/api/docs/models/gpt-5.3-codex).
+It does not infer prices from reasoning effort, subscription plans, or account
+balances. Future catalog entries must include a provider-published source URL,
+effective date, currency, model aliases, and only the token-unit rates the
+provider publishes.
 
 ## Cost representations
 
@@ -50,9 +52,9 @@ Users can choose the primary representation per developer integration in
 
 ## Pricing calculation
 
-The pure calculator multiplies each available input, output, cached-input, and
-reasoning counter by the published per-million-token rate, preserving six
-decimal places for storage. It resolves a model alias to a catalog entry. A
+The pure calculator multiplies each available input, output, cached-input,
+cache-write-input, and reasoning counter by the published per-million-token
+rate, preserving six decimal places for storage. It resolves a model alias to a catalog entry. A
 service-mode-specific rate is used only when that exact mode exists in the
 catalog; otherwise it uses the model's default rate. Effort is recorded as an
 analytical dimension and never becomes an invented multiplier.

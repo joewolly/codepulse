@@ -73,6 +73,15 @@ struct SettingsView: View {
                     )
                 }
 
+                Toggle("Track Codex token usage", isOn: Binding(
+                    get: { store.state.settings.codexUsageTrackingEnabled },
+                    set: { enabled in store.updateSettings { $0.codexUsageTrackingEnabled = enabled } }
+                ))
+                Text("Off by default. When enabled, CodePulse reads only local Codex session metadata under ~/.codex/sessions: session identity (salted before storage), timestamps, model labels, and cumulative token counters. It never stores prompts, responses, commands, tool data, or transcript text. Turn it off to stop reads immediately; it keeps existing local usage history.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 ForEach(DeveloperTool.allCases) { tool in
                     Picker("\(tool.title) primary cost display", selection: Binding(
                         get: { store.state.settings.primaryCostDisplay(for: tool) },
