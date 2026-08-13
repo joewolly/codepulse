@@ -35,6 +35,34 @@ final class SessionAutomationTests: XCTestCase {
         stateObject.removeValue(forKey: "automationRules")
     }
 
+    func testMalformedAutomationStateKeepsSessionsAndProjects() throws {
+        let project = ProjectRecord(name: "Recoverable", folderPath: "/tmp/recoverable", createdAt: start)
+        let active = ActiveSession(
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: start
+        )
+        let state = AppState(projects: [project], activeSession: active)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded(state)) as? [String: Any])
+        object["sessionPresets"] = [["id": "not-a-uuid"]]
+        object["automationRules"] = [["id": "not-a-uuid"]]
+        var activeObject = try XCTUnwrap(object["activeSession"] as? [String: Any])
+        activeObject["automationMetadata"] = ["controlEnabled": true]
+        object["activeSession"] = activeObject
+
+        let decoded = try JSONDecoder.iso8601.decode(
+            AppState.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertEqual(decoded.projects, state.projects)
+        XCTAssertEqual(decoded.activeSession?.id, active.id)
+        XCTAssertEqual(decoded.activeSession?.projectID, project.id)
+        XCTAssertNil(decoded.activeSession?.automationMetadata)
+        XCTAssertTrue(decoded.sessionPresets.isEmpty)
+        XCTAssertTrue(decoded.automationRules.isEmpty)
+    }
+
     func testAutomationRuleRoundTripsWithSafeDefaultsAndTaggedTrigger() throws {
         let projectID = UUID()
         let rule = SessionAutomationRule(
@@ -693,7 +721,7 @@ final class SessionAutomationTests: XCTestCase {
 
     private func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CodePulseAutomationTests-(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("CodePulseAutomationTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }

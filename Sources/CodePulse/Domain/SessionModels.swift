@@ -308,7 +308,10 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             [DeveloperToolSessionContext].self,
             forKey: .developerToolContexts
         ) ?? []
-        automationMetadata = try container.decodeIfPresent(SessionAutomationMetadata.self, forKey: .automationMetadata)
+        // Automation ownership is recoverable metadata. If it is damaged or
+        // from a newer schema, preserve the active session itself and restore
+        // it without automatic control rather than discarding the session.
+        automationMetadata = try? container.decodeIfPresent(SessionAutomationMetadata.self, forKey: .automationMetadata)
     }
 
     var pausedAt: Date? {
@@ -677,12 +680,15 @@ struct AppState: Codable, Equatable {
         let completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
         let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
         let settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
-        let sessionPresets = try container.decodeIfPresent([SessionPreset].self, forKey: .sessionPresets) ?? []
+        // Presets and automation rules are configuration, not irreplaceable
+        // history. A malformed or forward-incompatible collection must not
+        // make the whole state file unreadable.
+        let sessionPresets = (try? container.decode([SessionPreset].self, forKey: .sessionPresets)) ?? []
         let developerToolIntegration = try container.decodeIfPresent(
             DeveloperToolIntegrationProcessingState.self,
             forKey: .developerToolIntegration
         )
-        let automationRules = try container.decodeIfPresent([SessionAutomationRule].self, forKey: .automationRules) ?? []
+        let automationRules = (try? container.decode([SessionAutomationRule].self, forKey: .automationRules)) ?? []
         // Control bookkeeping is auxiliary recovery state. If it is damaged,
         // keep the user's sessions and configuration and start with an empty
         // ledger rather than treating the whole state file as corrupt.
