@@ -37,7 +37,8 @@ public enum ClaudeCodeLifecycleEventMapper {
             integrationVersion: payload.claudeCodeVersion ?? "unknown",
             metadata: DeveloperEventMetadataV2(
                 sourceKind: payload.hookEventName,
-                transcriptAvailable: payload.transcriptPath != nil
+                transcriptAvailable: payload.transcriptPath != nil,
+                actionCategory: payload.actionCategory
             )
         )
     }
@@ -74,6 +75,13 @@ public enum ClaudeCodeLifecycleEventMapper {
             case "PermissionRequest": return .permissionRequested
             case "Stop", "SubagentStop": return .sessionStopped
             case "SessionEnd": return .sessionEnded
+            default: return nil
+            }
+        }
+
+        var actionCategory: DeveloperEventActionCategory? {
+            switch hookEventName {
+            case "PostToolUse": return .codeChange
             default: return nil
             }
         }

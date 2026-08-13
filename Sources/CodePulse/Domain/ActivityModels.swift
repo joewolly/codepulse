@@ -151,6 +151,7 @@ struct Activity: Codable, Equatable, Identifiable {
     let createdAt: Date
     var updatedAt: Date
     var legacySessionID: UUID?
+    var classifications: [ActivityClassification]
 
     init(
         id: UUID = UUID(),
@@ -160,7 +161,8 @@ struct Activity: Codable, Equatable, Identifiable {
         domain: ActivityDomain = .development,
         createdAt: Date,
         updatedAt: Date? = nil,
-        legacySessionID: UUID? = nil
+        legacySessionID: UUID? = nil,
+        classifications: [ActivityClassification] = []
     ) {
         self.id = id
         self.workspaceID = workspaceID
@@ -170,6 +172,24 @@ struct Activity: Codable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt ?? createdAt
         self.legacySessionID = legacySessionID
+        self.classifications = classifications
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, workspaceID, title, workType, domain, createdAt, updatedAt, legacySessionID, classifications
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        workspaceID = try container.decode(UUID.self, forKey: .workspaceID)
+        title = try container.decode(String.self, forKey: .title)
+        workType = try container.decode(SessionType.self, forKey: .workType)
+        domain = try container.decode(ActivityDomain.self, forKey: .domain)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        legacySessionID = try container.decodeIfPresent(UUID.self, forKey: .legacySessionID)
+        classifications = try container.decodeIfPresent([ActivityClassification].self, forKey: .classifications) ?? []
     }
 }
 

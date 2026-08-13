@@ -85,6 +85,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
             }
 
             Section("Workspace Discovery") {

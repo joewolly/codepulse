@@ -37,7 +37,10 @@ public enum CodexLifecycleEventMapper {
             serviceMode: payload.permissionMode,
             parserVersion: parserVersion,
             integrationVersion: payload.codexVersion ?? "unknown",
-            metadata: DeveloperEventMetadataV2(sourceKind: payload.hookEventName)
+            metadata: DeveloperEventMetadataV2(
+                sourceKind: payload.hookEventName,
+                actionCategory: payload.actionCategory
+            )
         )
     }
 
@@ -69,6 +72,13 @@ public enum CodexLifecycleEventMapper {
             case "PermissionRequest": return .permissionRequested
             case "Stop": return .sessionStopped
             case "SessionEnd": return .sessionEnded
+            default: return nil
+            }
+        }
+
+        var actionCategory: DeveloperEventActionCategory? {
+            switch hookEventName {
+            case "PostToolUse": return .codeChange
             default: return nil
             }
         }

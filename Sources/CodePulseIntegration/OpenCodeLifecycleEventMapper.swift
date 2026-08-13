@@ -34,7 +34,8 @@ public enum OpenCodeLifecycleEventMapper {
             integrationVersion: payload.pluginVersion,
             metadata: DeveloperEventMetadataV2(
                 eventSequence: payload.sequence,
-                sourceKind: payload.eventType
+                sourceKind: payload.eventType,
+                actionCategory: payload.eventType == "activity.observed" ? .codeChange : nil
             )
         )
     }
