@@ -8,6 +8,17 @@ public enum DeveloperEventIntegration: String, Codable, CaseIterable, Equatable,
     case codex
     case claudeCode = "claude-code"
     case openCode = "opencode"
+
+    public var title: String {
+        switch self {
+        case .codex:
+            return "Codex"
+        case .claudeCode:
+            return "Claude Code"
+        case .openCode:
+            return "OpenCode"
+        }
+    }
 }
 
 public enum DeveloperEventKindV2: String, Codable, CaseIterable, Equatable, Sendable {
@@ -63,11 +74,18 @@ public struct DeveloperEventMetadataV2: Codable, Equatable, Sendable {
     public let adapterVersion: String?
     public let eventSequence: Int?
     public let sourceKind: String?
+    public let transcriptAvailable: Bool?
 
-    public init(adapterVersion: String? = nil, eventSequence: Int? = nil, sourceKind: String? = nil) {
+    public init(
+        adapterVersion: String? = nil,
+        eventSequence: Int? = nil,
+        sourceKind: String? = nil,
+        transcriptAvailable: Bool? = nil
+    ) {
         self.adapterVersion = adapterVersion
         self.eventSequence = eventSequence
         self.sourceKind = sourceKind
+        self.transcriptAvailable = transcriptAvailable
     }
 }
 
