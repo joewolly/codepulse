@@ -57,6 +57,16 @@ Before Feature 01 a missing or malformed file silently produced an empty
   raw JSONL paths, session IDs, transcript paths, or transcript content.
   Newly added optional/defaulted fields remain backward decodable and do not
   require a new envelope migration.
+- **OpenCode usage adapter (Feature 15):** the `AppState` payload contains a
+  separate off-by-default consent, privacy-safe OpenCode usage samples, and a
+  small optional adapter-health state. A transient app-owned inbox under
+  `CodePulse/Integrations/OpenCodeUsageInbox/` contains only validated,
+  allowlisted plugin handoffs and is deleted after processing. Persisted samples
+  retain salted session fingerprints, metadata counters, provider-reported cost,
+  and calculation provenance—not raw session/message IDs, message content,
+  prompts, tool data, transcripts, source paths, or OpenCode database records.
+  Newly added optional/defaulted fields remain backward decodable and do not
+  require a new envelope migration.
 
 ## v1 fixture policy
 

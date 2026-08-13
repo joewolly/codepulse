@@ -16,12 +16,27 @@ event sequence. `session.status` values `busy` and `retry` become activity;
 `idle` becomes waiting. A deleted session ends a run. Error and unknown state
 are diagnostics only.
 
-The plugin intentionally does not subscribe to message, tool, command, or file
-events and never forwards prompts, messages, content, tool arguments/results,
-commands, transcripts, or source files. There is no local database fallback in
-this feature: if the plugin API is unavailable or OpenCode is not installed,
-CodePulse reports the integration as unavailable rather than guessing from
-stored data.
+The lifecycle path does not subscribe to tool, command, or file events. Feature
+15 adds one separate, opt-in `message.updated` subscription solely to emit a
+content-safe assistant usage record; it does not forward message text or any
+other message field. Prompts, messages, content, tool arguments/results,
+commands, transcripts, and source files are never forwarded. There is no local
+database fallback: if the plugin API is unavailable or OpenCode is not
+installed, CodePulse reports the integration as unavailable rather than guessing
+from stored data.
+
+## Optional token usage
+
+Lifecycle timing does not enable token tracking. **Track OpenCode token usage**
+is a second, off-by-default consent in Settings. When it is enabled, the same
+managed plugin sends a bounded, allowlisted assistant usage record through a
+local helper. It includes only identity needed for salted correlation, working
+directory, timestamp, model/provider, service mode, numeric token counters, and
+available reported cost. The helper checks consent before it decodes or writes
+the handoff. An unsupported plugin version, malformed handoff, or absent plugin
+degrades token usage only; lifecycle timing continues normally. See
+[`opencode-usage-tracking.md`](opencode-usage-tracking.md) for the full source,
+storage, cost, and health contract.
 
 ## Validation harness
 

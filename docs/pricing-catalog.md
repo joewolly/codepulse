@@ -1,8 +1,8 @@
 # Pricing catalog and cost provenance
 
-Feature 12 provides the local pricing foundation. Features 13 and 14 use it for
-the separately opt-in Codex and Claude Code usage readers; OpenCode remains
-future work. Timing continues to work without token usage or price data.
+Feature 12 provides the local pricing foundation. Features 13–15 use it for the
+separately opt-in Codex, Claude Code, and OpenCode usage adapters. Timing
+continues to work without token usage or price data.
 
 ## Catalog trust and offline behavior
 
@@ -33,8 +33,11 @@ The current bundled catalog does not yet contain a signed Claude model entry.
 Claude Code samples therefore preserve a provider-reported cost when local
 metadata supplies one, can show the selected subscription/actual-charge-unknown
 state, and remain unpriced for an API-equivalent estimate until a verified
-catalog update publishes a matching Claude rate. A later catalog can enable
-that estimate without re-reading old transcript content.
+catalog update publishes a matching Claude rate. OpenCode samples similarly
+preserve any supplied provider-reported USD cost separately. Their normalized
+model labels can resolve to the existing catalog regardless of provider label;
+unknown model/rate combinations remain unpriced. A later catalog can enable an
+estimate without rereading any source data.
 
 ## Cost representations
 

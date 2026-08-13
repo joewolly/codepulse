@@ -121,6 +121,7 @@ enum OpenCodePluginSource {
         // CodePulse developer integration (managed)
         const CODEPULSE_HELPER = \(helperLiteral);
         const CODEPULSE_PLUGIN_VERSION = "opencode-plugin-v1";
+        const CODEPULSE_USAGE_PLUGIN_VERSION = "opencode-usage-plugin-v1";
         const sessions = new Map();
 
         function text(value) {
@@ -138,6 +139,24 @@ enum OpenCodePluginSource {
 
         function sessionID(properties) {
           return text(properties && properties.sessionID) || text(properties && properties.info && properties.info.id);
+        }
+
+        function finiteToken(value) {
+          return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+        }
+
+        function usageTokens(info) {
+          const usage = info && (info.tokens || info.usage);
+          if (!usage || typeof usage !== "object") return undefined;
+          const cache = usage.cache && typeof usage.cache === "object" ? usage.cache : {};
+          const tokens = {
+            input: finiteToken(usage.input ?? usage.inputTokens),
+            output: finiteToken(usage.output ?? usage.outputTokens),
+            cache_read: finiteToken(cache.read ?? usage.cacheRead ?? usage.cache_read),
+            cache_write: finiteToken(cache.write ?? usage.cacheWrite ?? usage.cache_write),
+            reasoning: finiteToken(usage.reasoning ?? usage.reasoningTokens)
+          };
+          return Object.values(tokens).some((value) => value !== undefined && value > 0) ? tokens : undefined;
         }
 
         function workingDirectory(record, fallback) {
@@ -170,6 +189,44 @@ enum OpenCodePluginSource {
           }
         }
 
+        async function emitUsage(info, fallbackDirectory) {
+          if (!info || text(info.role) !== "assistant") return;
+          const id = text(info.sessionID);
+          const messageID = text(info.id);
+          const tokens = usageTokens(info);
+          const record = id ? recordFor({ id, model: info.model }, fallbackDirectory) : undefined;
+          const cwd = workingDirectory(record, fallbackDirectory);
+          if (!id || !messageID || !cwd || !tokens) return;
+          const model = info.model && typeof info.model === "object" ? text(info.model.id) : text(info.model) || text(record && record.model);
+          const provider = info.model && typeof info.model === "object" ? text(info.model.providerID) : undefined;
+          const cost = typeof info.cost === "number" && Number.isFinite(info.cost) && info.cost >= 0 ? info.cost : undefined;
+          try {
+            const event = {
+              event_type: "usage.recorded",
+              session_id: id,
+              cwd,
+              message_id: messageID,
+              observed_at: new Date().toISOString(),
+              model,
+              provider,
+              service_mode: text(info.agent) || text(record && record.profile),
+              tokens,
+              cost_usd: cost,
+              plugin_version: CODEPULSE_USAGE_PLUGIN_VERSION
+            };
+            const child = Bun.spawn([CODEPULSE_HELPER, "--opencode-usage-hook"], {
+              stdin: "pipe",
+              stdout: "ignore",
+              stderr: "ignore"
+            });
+            child.stdin.write(JSON.stringify(event));
+            await child.stdin.end();
+            await child.exited;
+          } catch (_) {
+            // Usage tracking is optional and must not affect OpenCode.
+          }
+        }
+
         function recordFor(info, fallbackDirectory) {
           const id = text(info && info.id);
           if (!id) return undefined;
@@ -194,6 +251,11 @@ enum OpenCodePluginSource {
             event: async ({ event }) => {
               if (!event || typeof event.type !== "string") return;
               const properties = event.properties || {};
+
+              if (event.type === "message.updated") {
+                await emitUsage(properties.info, fallbackDirectory);
+                return;
+              }
 
               if (event.type === "session.created") {
                 const info = properties.info || {};

@@ -43,83 +43,7 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section("Integrations") {
-                Text("Optional local lifecycle tracking for Codex, Claude Code, and OpenCode. CodePulse records only timing metadata, project directory, and optional model/effort details.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("Codex lifecycle tracking is timing-only: it uses local Codex hooks to record active, permission-waiting, review-grace, and ended intervals. It never reads prompts, responses, transcripts, commands, tool input/output, or permission decisions. A cloud-only Codex session with no local hook/process is not tracked.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("Claude Code tracking uses local hooks configured in your user-level Claude settings. Local sessions, including Remote Control sessions running on this Mac, may be tracked; cloud-only work with no local Claude process or hook is not. CodePulse stores neither transcripts nor prompt, tool, or permission content.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("OpenCode tracking uses a CodePulse-owned global plugin in its documented plugin directory. It reads local plugin session events only; no OpenCode database, project configuration, prompts, messages, tool data, or transcripts are read. Restart OpenCode after changing this integration.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(DeveloperTool.allCases) { tool in
-                    DeveloperToolIntegrationRow(
-                        tool: tool,
-                        status: integrationManager.status(for: tool),
-                        enable: { _ = integrationManager.enable(tool) },
-                        disable: { _ = integrationManager.disable(tool) }
-                    )
-                }
-
-                Toggle("Track Codex token usage", isOn: Binding(
-                    get: { store.state.settings.codexUsageTrackingEnabled },
-                    set: { enabled in store.updateSettings { $0.codexUsageTrackingEnabled = enabled } }
-                ))
-                Text("Off by default. When enabled, CodePulse reads only local Codex session metadata under ~/.codex/sessions: session identity (salted before storage), timestamps, model labels, and cumulative token counters. It never stores prompts, responses, commands, tool data, or transcript text. Turn it off to stop reads immediately; it keeps existing local usage history.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Track Claude Code token usage", isOn: Binding(
-                    get: { store.state.settings.claudeUsageTrackingEnabled },
-                    set: { enabled in store.updateSettings { $0.claudeUsageTrackingEnabled = enabled } }
-                ))
-                Text("Off by default. When enabled, CodePulse reads only supported usage metadata in local Claude session JSONL records under ~/.claude/projects: salted session identity, timestamps, model, effort/service mode, token counters, and reported cost when available. Message and transcript content are never stored or exported. Turn it off to stop reads immediately; it keeps existing local usage history.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(DeveloperTool.allCases) { tool in
-                    Picker("\(tool.title) primary cost display", selection: Binding(
-                        get: { store.state.settings.primaryCostDisplay(for: tool) },
-                        set: { display in store.updateSettings { $0.setPrimaryCostDisplay(display, for: tool) } }
-                    )) {
-                        ForEach(UsageCostRepresentation.allCases) { display in
-                            Text(display.displayLabel).tag(display)
-                        }
-                    }
-                }
-                Text("This preference changes only which preserved cost representation is shown first. API-equivalent and Codex-credit values are always labeled estimates, never bills or account balances.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Stepper(
-                    "Agent review grace: \(store.state.settings.agentReviewGraceSeconds / 60) minutes",
-                    value: Binding(
-                        get: { store.state.settings.agentReviewGraceSeconds / 60 },
-                        set: { minutes in store.updateSettings { $0.agentReviewGraceSeconds = minutes * 60 } }
-                    ),
-                    in: 0...15
-                )
-                Text("After an agent stop, CodePulse counts this limited review period before marking the run waiting. A new activity, permission request, or session end cancels it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-            }
+            integrationSection
 
             Section("Workspace Discovery") {
                 Toggle("Automatically create Git workspaces from agent events", isOn: Binding(
@@ -368,6 +292,88 @@ struct SettingsView: View {
         }
     }
 
+    private var integrationSection: some View {
+        Section("Integrations") {
+            UsageTrackingDisclosure(message: "Optional local lifecycle tracking for Codex, Claude Code, and OpenCode. CodePulse records only timing metadata, project directory, and optional model/effort details.")
+            UsageTrackingDisclosure(message: "Codex lifecycle tracking is timing-only: it uses local Codex hooks to record active, permission-waiting, review-grace, and ended intervals. It never reads prompts, responses, transcripts, commands, tool input/output, or permission decisions. A cloud-only Codex session with no local hook/process is not tracked.")
+            UsageTrackingDisclosure(message: "Claude Code tracking uses local hooks configured in your user-level Claude settings. Local sessions, including Remote Control sessions running on this Mac, may be tracked; cloud-only work with no local Claude process or hook is not. CodePulse stores neither transcripts nor prompt, tool, or permission content.")
+            UsageTrackingDisclosure(message: "OpenCode lifecycle tracking uses a CodePulse-owned global plugin in its documented plugin directory. Its optional usage handoff contains only assistant-message usage metadata; it never reads an OpenCode database, project configuration, prompts, messages, tool data, or transcripts. Restart OpenCode after changing this integration.")
+
+            integrationRows
+            usageTrackingControls
+            costDisplayControls
+            reviewGraceControl
+        }
+    }
+
+    @ViewBuilder
+    private var integrationRows: some View {
+        ForEach(DeveloperTool.allCases) { tool in
+            DeveloperToolIntegrationRow(
+                tool: tool,
+                status: integrationManager.status(for: tool),
+                enable: { _ = integrationManager.enable(tool) },
+                disable: { _ = integrationManager.disable(tool) }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var usageTrackingControls: some View {
+        Toggle("Track Codex token usage", isOn: Binding(
+            get: { store.state.settings.codexUsageTrackingEnabled },
+            set: { enabled in store.updateSettings { $0.codexUsageTrackingEnabled = enabled } }
+        ))
+        UsageTrackingDisclosure(message: "Off by default. When enabled, CodePulse reads only local Codex session metadata under ~/.codex/sessions: session identity (salted before storage), timestamps, model labels, and cumulative token counters. It never stores prompts, responses, commands, tool data, or transcript text. Turn it off to stop reads immediately; it keeps existing local usage history.")
+
+        Toggle("Track Claude Code token usage", isOn: Binding(
+            get: { store.state.settings.claudeUsageTrackingEnabled },
+            set: { enabled in store.updateSettings { $0.claudeUsageTrackingEnabled = enabled } }
+        ))
+        UsageTrackingDisclosure(message: "Off by default. When enabled, CodePulse reads only supported usage metadata in local Claude session JSONL records under ~/.claude/projects: salted session identity, timestamps, model, effort/service mode, token counters, and reported cost when available. Message and transcript content are never stored or exported. Turn it off to stop reads immediately; it keeps existing local usage history.")
+
+        Toggle("Track OpenCode token usage", isOn: Binding(
+            get: { store.state.settings.openCodeUsageTrackingEnabled },
+            set: { enabled in store.updateSettings { $0.openCodeUsageTrackingEnabled = enabled } }
+        ))
+        UsageTrackingDisclosure(message: "Off by default. When enabled, the CodePulse-owned OpenCode plugin hands off only assistant usage metadata: salted session identity, timestamp, model/provider, service mode, token counters, and reported USD cost when available. It never stores messages, prompts, tools, or transcripts. Turn it off to stop accepting usage handoffs immediately; existing local usage history remains.")
+
+        if let processing = store.state.openCodeUsageProcessing {
+            LabeledContent("OpenCode usage adapter", value: processing.status.rawValue)
+                .font(.caption)
+                .foregroundStyle(processing.status == .healthy ? Color.secondary : Color.orange)
+        }
+    }
+
+    @ViewBuilder
+    private var costDisplayControls: some View {
+        ForEach(DeveloperTool.allCases) { tool in
+            Picker("\(tool.title) primary cost display", selection: Binding(
+                get: { store.state.settings.primaryCostDisplay(for: tool) },
+                set: { display in store.updateSettings { $0.setPrimaryCostDisplay(display, for: tool) } }
+            )) {
+                ForEach(UsageCostRepresentation.allCases) { display in
+                    Text(display.displayLabel).tag(display)
+                }
+            }
+        }
+        UsageTrackingDisclosure(message: "This preference changes only which preserved cost representation is shown first. API-equivalent and Codex-credit values are always labeled estimates, never bills or account balances.")
+    }
+
+    private var reviewGraceControl: some View {
+        Group {
+            Stepper(
+                "Agent review grace: \(store.state.settings.agentReviewGraceSeconds / 60) minutes",
+                value: Binding(
+                    get: { store.state.settings.agentReviewGraceSeconds / 60 },
+                    set: { minutes in store.updateSettings { $0.agentReviewGraceSeconds = minutes * 60 } }
+                ),
+                in: 0...15
+            )
+            UsageTrackingDisclosure(message: "After an agent stop, CodePulse counts this limited review period before marking the run waiting. A new activity, permission request, or session end cancels it.")
+        }
+    }
+
     private func addProject() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -430,6 +436,17 @@ struct SettingsView: View {
         } catch {
             recoveryExportError = error.localizedDescription
         }
+    }
+}
+
+private struct UsageTrackingDisclosure: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

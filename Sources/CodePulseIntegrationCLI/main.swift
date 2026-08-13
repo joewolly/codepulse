@@ -46,6 +46,10 @@ struct CodePulseIntegrationCLI {
                 return
             }
             _ = try? inbox.receive(encoded)
+        case "--opencode-usage-hook":
+            guard OpenCodeUsageConsent.isEnabled(),
+                  let event = OpenCodeUsageEventMapper.map(input) else { return }
+            try? OpenCodeUsageInbox().write(event)
         default:
             return
         }
