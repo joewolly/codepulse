@@ -39,6 +39,7 @@ final class SessionStore: ObservableObject {
     let gitService: GitServicing
     let githubContextService: GitHubContextServicing
     let developerToolEventConsumer: DeveloperToolEventConsuming
+    let sessionAutomationCoordinator: SessionAutomationCoordinator
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -58,6 +59,7 @@ final class SessionStore: ObservableObject {
         self.gitService = gitService
         self.githubContextService = githubContextService
         self.developerToolEventConsumer = developerToolEventConsumer
+        self.sessionAutomationCoordinator = SessionAutomationCoordinator()
         self.calendar = calendar
         self.state = persistence.load()
         self.now = clock.now
@@ -69,6 +71,8 @@ final class SessionStore: ObservableObject {
         }
 
         processPendingIntegrationEvents(force: true)
+        restoreAutomaticFinishingState()
+        evaluateAutomaticLifecycle(at: clock.now)
 
         if automaticallyRefresh {
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -78,11 +82,6 @@ final class SessionStore: ObservableObject {
             }
         }
 
-        if let session = state.activeSession,
-           session.phase == .finishing,
-           session.gitContext != nil {
-            scheduleFinalGitCapture(for: session.id)
-        }
     }
 
     deinit {
@@ -142,6 +141,7 @@ final class SessionStore: ObservableObject {
     func refresh() {
         now = clock.now
         processPendingIntegrationEvents()
+        evaluateAutomaticLifecycle(at: now)
     }
 
     @discardableResult
@@ -151,9 +151,69 @@ final class SessionStore: ObservableObject {
         type: SessionType = .coding,
         at date: Date? = nil
     ) -> Bool {
+        let didStart = startSessionInternal(
+            projectID: projectID,
+            goal: goal,
+            type: type,
+            at: date ?? clock.now,
+            automationMetadata: nil
+        )
+        if didStart {
+            processPendingIntegrationEvents(force: true)
+        }
+        return didStart
+    }
+
+    @discardableResult
+    func startAutomatedSession(
+        with rule: SessionAutomationRule,
+        event: DeveloperToolEvent,
+        at startDate: Date,
+        signalAt: Date
+    ) -> Bool {
+        guard state.activeSession == nil,
+              let project = state.projects.first(where: { $0.id == rule.projectID }),
+              DeveloperToolProjectResolver.isUsableFolder(for: project),
+              let tool = rule.developerTool else {
+            return false
+        }
+
+        let metadata = SessionAutomationMetadata(
+            startedByRuleID: rule.id,
+            startedByRuleName: rule.name,
+            startedByTool: tool,
+            lastMatchingSignalAt: signalAt,
+            pauseEligibleAt: signalAt.addingTimeInterval(rule.pauseDelay),
+            finishEligibleAt: signalAt.addingTimeInterval(rule.finishDelay),
+            pauseDelay: rule.pauseDelay,
+            finishDelay: rule.finishDelay,
+            minimumSavedDuration: rule.minimumSavedDuration,
+            claims: [SessionAutomationClaim(
+                tool: event.tool,
+                externalSessionID: event.externalSessionID,
+                isActive: true,
+                lastSignalAt: signalAt
+            )]
+        )
+
+        return startSessionInternal(
+            projectID: rule.projectID,
+            goal: rule.goal,
+            type: rule.sessionType,
+            at: startDate,
+            automationMetadata: metadata
+        )
+    }
+
+    private func startSessionInternal(
+        projectID: UUID?,
+        goal: String?,
+        type: SessionType,
+        at startDate: Date,
+        automationMetadata: SessionAutomationMetadata?
+    ) -> Bool {
         guard state.activeSession == nil else { return false }
 
-        let startDate = date ?? clock.now
         let project = projectID.flatMap { id in state.projects.first(where: { $0.id == id }) }
         let folderURL = project.flatMap { projectFolderURL(for: $0) }
         let session = ActiveSession(
@@ -161,7 +221,8 @@ final class SessionStore: ObservableObject {
             projectName: project?.name,
             type: type,
             goal: ActiveSession.cleanOptionalText(goal),
-            startedAt: startDate
+            startedAt: startDate,
+            automationMetadata: automationMetadata
         )
 
         var nextState = state
@@ -171,8 +232,7 @@ final class SessionStore: ObservableObject {
             nextState.projects[index].lastUsedAt = startDate
         }
         commit(nextState)
-        now = startDate
-        processPendingIntegrationEvents(force: true)
+        now = clock.now
         if let folderURL,
            FileManager.default.fileExists(atPath: folderURL.path) {
             scheduleStartGitCapture(for: session.id, folderURL: folderURL)
@@ -185,6 +245,7 @@ final class SessionStore: ObservableObject {
         guard var session = state.activeSession else { return false }
         let changed = session.pause(at: date ?? clock.now)
         guard changed else { return false }
+        relinquishManualAutomationControl(in: &session)
 
         var nextState = state
         nextState.activeSession = session
@@ -198,6 +259,7 @@ final class SessionStore: ObservableObject {
         guard var session = state.activeSession else { return false }
         let changed = session.resume(at: date ?? clock.now)
         guard changed else { return false }
+        relinquishManualAutomationControl(in: &session)
 
         var nextState = state
         nextState.activeSession = session
@@ -211,6 +273,7 @@ final class SessionStore: ObservableObject {
         guard var session = state.activeSession else { return false }
         let changed = session.finish(at: date ?? clock.now)
         guard changed else { return false }
+        relinquishManualAutomationControl(in: &session)
 
         var nextState = state
         nextState.activeSession = session
@@ -227,24 +290,23 @@ final class SessionStore: ObservableObject {
     func saveFinishedSession(outcome: String?) -> Bool {
         processPendingIntegrationEvents(force: true)
         guard !gitCaptureInProgress else { return false }
-        guard let session = state.activeSession,
-              let completed = session.completedSnapshot(outcome: outcome) else {
-            return false
-        }
-
+        guard var session = state.activeSession,
+              session.phase == .finishing else { return false }
+        relinquishManualAutomationControl(in: &session)
         var nextState = state
-        nextState.completedSessions.append(completed)
-        nextState.completedSessions.sort { $0.startedAt > $1.startedAt }
-        nextState.activeSession = nil
+        nextState.activeSession = session
         commit(nextState)
-        refresh()
-        return true
+        return completeFinishedSession(outcome: outcome)
     }
 
     @discardableResult
     func discardSession() -> Bool {
         guard state.activeSession?.phase == .finishing else { return false }
         var nextState = state
+        if var session = nextState.activeSession {
+            relinquishManualAutomationControl(in: &session)
+            nextState.activeSession = session
+        }
         nextState.activeSession = nil
         commit(nextState)
         gitCaptureSessionID = nil
@@ -432,6 +494,7 @@ final class SessionStore: ObservableObject {
         var nextState = state
         nextState.projects[index].folderPath = folderURL.path
         nextState.projects[index].bookmarkData = bookmarkData
+        relinquishInvalidAutomation(in: &nextState)
         commit(nextState)
         return true
     }
@@ -443,12 +506,53 @@ final class SessionStore: ObservableObject {
             nextState.settings.specificProjectID = nil
             nextState.settings.defaultProjectBehavior = .noProject
         }
+        relinquishInvalidAutomation(in: &nextState)
         commit(nextState)
     }
 
     func updateSettings(_ update: (inout CodePulseSettings) -> Void) {
         var nextState = state
         update(&nextState.settings)
+        relinquishInvalidAutomation(in: &nextState)
+        commit(nextState)
+    }
+
+    var automationRulesSorted: [SessionAutomationRule] {
+        state.automationRules.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    func isAutomationRuleUsable(_ rule: SessionAutomationRule) -> Bool {
+        guard state.projects.contains(where: { $0.id == rule.projectID }),
+              let project = state.projects.first(where: { $0.id == rule.projectID }),
+              let folderPath = DeveloperToolProjectResolver.folderPath(for: project),
+              DeveloperToolProjectResolver.isUsableFolder(for: project) else {
+            return false
+        }
+        return !folderPath.isEmpty
+    }
+
+    @discardableResult
+    func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
+        guard state.projects.contains(where: { $0.id == rule.projectID }) else { return false }
+        var nextState = state
+        if let index = nextState.automationRules.firstIndex(where: { $0.id == rule.id }) {
+            nextState.automationRules[index] = rule
+        } else {
+            nextState.automationRules.append(rule)
+        }
+        relinquishInvalidAutomation(in: &nextState)
+        commit(nextState)
+        return true
+    }
+
+    func deleteAutomationRule(id: UUID) {
+        var nextState = state
+        nextState.automationRules.removeAll { $0.id == id }
+        relinquishInvalidAutomation(in: &nextState)
         commit(nextState)
     }
 
@@ -531,11 +635,280 @@ final class SessionStore: ObservableObject {
         }
         lastIntegrationScanAt = scanDate
 
-        var nextState = state
-        guard developerToolEventConsumer.processPending(state: &nextState, now: scanDate) else {
+        var drainedState = state
+        let pending = developerToolEventConsumer.drainPending(state: &drainedState, now: scanDate)
+            .sorted { lhs, rhs in
+                if lhs.event.timestamp != rhs.event.timestamp {
+                    return lhs.event.timestamp < rhs.event.timestamp
+                }
+                return lhs.event.id.uuidString < rhs.event.id.uuidString
+            }
+        if drainedState != state {
+            commit(drainedState)
+        }
+
+        for item in pending {
+            if let action = sessionAutomationCoordinator.action(
+                for: item.event,
+                in: state,
+                now: scanDate
+            ) {
+                applyAutomationAction(action, for: item.event, at: scanDate)
+            }
+
+            var attachedState = state
+            if developerToolEventConsumer.attach(item.event, to: &attachedState, now: scanDate) {
+                commit(attachedState)
+            }
+
+            var acknowledgedState = state
+            _ = developerToolEventConsumer.markProcessed(item, in: &acknowledgedState, at: scanDate)
+            if acknowledgedState != state {
+                commit(acknowledgedState)
+            }
+            developerToolEventConsumer.cleanup(item)
+        }
+    }
+
+    private func applyAutomationAction(
+        _ action: SessionAutomationAction,
+        for event: DeveloperToolEvent,
+        at date: Date
+    ) {
+        switch action {
+        case .start(let rule, let startDate):
+            _ = startAutomatedSession(with: rule, event: event, at: startDate, signalAt: event.timestamp)
+        case .signal(let rule, let tool, let externalSessionID, let isActive):
+            applyAutomationSignal(
+                rule: rule,
+                tool: tool,
+                externalSessionID: externalSessionID,
+                isActive: isActive,
+                signalAt: event.timestamp,
+                transitionAt: date
+            )
+        case .relinquish:
+            var nextState = state
+            relinquishInvalidAutomation(in: &nextState)
+            if nextState != state {
+                commit(nextState)
+            }
+        }
+    }
+
+    private func applyAutomationSignal(
+        rule: SessionAutomationRule,
+        tool: DeveloperTool,
+        externalSessionID: String,
+        isActive: Bool,
+        signalAt eventDate: Date,
+        transitionAt date: Date
+    ) {
+        guard var session = state.activeSession,
+              var metadata = session.automationMetadata,
+              metadata.controlEnabled,
+              session.phase == .running || session.phase == .paused else {
             return
         }
+
+        let signalDate = max(metadata.lastMatchingSignalAt, eventDate)
+        if let index = metadata.claims.firstIndex(where: {
+            $0.tool == tool && $0.externalSessionID == externalSessionID
+        }) {
+            metadata.claims[index].isActive = isActive
+            metadata.claims[index].lastSignalAt = max(metadata.claims[index].lastSignalAt, signalDate)
+        } else if metadata.claims.count < DeveloperToolIntegrationLimits.maximumContextsPerSession {
+            metadata.claims.append(SessionAutomationClaim(
+                tool: tool,
+                externalSessionID: externalSessionID,
+                isActive: isActive,
+                lastSignalAt: signalDate
+            ))
+        }
+
+        if isActive {
+            metadata.lastMatchingSignalAt = signalDate
+            metadata.pauseEligibleAt = signalDate.addingTimeInterval(metadata.pauseDelay)
+            metadata.finishEligibleAt = signalDate.addingTimeInterval(metadata.finishDelay)
+        }
+        if isActive, session.phase == .paused {
+            _ = session.resume(at: date)
+        }
+        session.automationMetadata = metadata
+
+        var nextState = state
+        nextState.activeSession = session
         commit(nextState)
+    }
+
+    private func evaluateAutomaticLifecycle(at date: Date) {
+        guard state.settings.automationEnabled,
+              var session = state.activeSession,
+              (session.phase == .running || session.phase == .paused),
+              var metadata = session.automationMetadata,
+              metadata.controlEnabled,
+              !metadata.pendingAutomaticSave else {
+            return
+        }
+
+        guard let rule = state.automationRules.first(where: { $0.id == metadata.startedByRuleID }),
+              rule.isEnabled,
+                  let project = state.projects.first(where: { $0.id == session.projectID }),
+                  DeveloperToolProjectResolver.isUsableFolder(for: project) else {
+            var nextState = state
+            relinquishInvalidAutomation(in: &nextState)
+            if nextState != state { commit(nextState) }
+            return
+        }
+
+        let pauseEligibleAt = metadata.pauseEligibleAt
+            ?? metadata.lastMatchingSignalAt.addingTimeInterval(metadata.pauseDelay)
+        let finishEligibleAt = metadata.finishEligibleAt
+            ?? metadata.lastMatchingSignalAt.addingTimeInterval(metadata.finishDelay)
+        metadata.pauseEligibleAt = pauseEligibleAt
+        metadata.finishEligibleAt = finishEligibleAt
+
+        let hasRecentActiveClaim = metadata.claims.contains { claim in
+            claim.isActive && date < claim.lastSignalAt.addingTimeInterval(metadata.pauseDelay)
+        }
+        guard !hasRecentActiveClaim else { return }
+
+        if session.phase == .running, date >= pauseEligibleAt {
+            if session.pause(at: pauseEligibleAt) {
+                session.automationMetadata = metadata
+                var nextState = state
+                nextState.activeSession = session
+                commit(nextState)
+            }
+        }
+
+        guard let refreshedSession = state.activeSession,
+              refreshedSession.phase == .paused,
+              refreshedSession.automationMetadata?.controlEnabled == true,
+              date >= finishEligibleAt else {
+            return
+        }
+        finishAutomatically(at: min(date, finishEligibleAt))
+    }
+
+    private func finishAutomatically(at date: Date) {
+        guard var session = state.activeSession,
+              var metadata = session.automationMetadata,
+              metadata.controlEnabled,
+              !metadata.pendingAutomaticSave,
+              (session.phase == .running || session.phase == .paused),
+              session.finish(at: date) else {
+            return
+        }
+
+        metadata.pendingAutomaticSave = true
+        session.automationMetadata = metadata
+        var nextState = state
+        nextState.activeSession = session
+        commit(nextState)
+        now = clock.now
+
+        if session.gitContext != nil {
+            scheduleFinalGitCapture(for: session.id)
+        } else if !gitCaptureInProgress {
+            attemptAutomaticSaveIfReady(for: session.id)
+        }
+    }
+
+    private func restoreAutomaticFinishingState() {
+        guard let session = state.activeSession, session.phase == .finishing else { return }
+
+        if session.automationMetadata?.pendingAutomaticSave == true {
+            if session.gitContext != nil {
+                scheduleFinalGitCapture(for: session.id)
+            } else if let project = session.projectID.flatMap({ id in
+                state.projects.first(where: { $0.id == id })
+            }),
+                      let folderURL = projectFolderURL(for: project),
+                      FileManager.default.fileExists(atPath: folderURL.path) {
+                // A relaunch can interrupt the initial Git capture. Recreate
+                // that boundary before attempting the final capture/save.
+                scheduleStartGitCapture(for: session.id, folderURL: folderURL)
+            } else {
+                attemptAutomaticSaveIfReady(for: session.id)
+            }
+        } else if session.gitContext != nil {
+            scheduleFinalGitCapture(for: session.id)
+        }
+    }
+
+    private func attemptAutomaticSaveIfReady(for sessionID: UUID) {
+        guard !gitCaptureInProgress,
+              let session = state.activeSession,
+              session.id == sessionID,
+              session.phase == .finishing,
+              let metadata = session.automationMetadata,
+              metadata.pendingAutomaticSave else {
+            return
+        }
+
+        let endedAt = session.endedAt ?? clock.now
+        if session.activeDuration(at: endedAt) < metadata.minimumSavedDuration {
+            var nextState = state
+            nextState.activeSession = nil
+            commit(nextState)
+            gitCaptureSessionID = nil
+            gitCaptureInProgress = false
+            now = clock.now
+            return
+        }
+
+        _ = completeFinishedSession(outcome: nil, refreshAfter: false)
+    }
+
+    private func completeFinishedSession(outcome: String?, refreshAfter: Bool = true) -> Bool {
+        guard !gitCaptureInProgress,
+              let session = state.activeSession,
+              let completed = session.completedSnapshot(outcome: outcome) else {
+            return false
+        }
+
+        var nextState = state
+        nextState.completedSessions.append(completed)
+        nextState.completedSessions.sort { $0.startedAt > $1.startedAt }
+        nextState.activeSession = nil
+        commit(nextState)
+        gitCaptureSessionID = nil
+        gitCaptureInProgress = false
+        now = clock.now
+        if refreshAfter { refresh() }
+        return true
+    }
+
+    private func relinquishManualAutomationControl(in session: inout ActiveSession) {
+        guard var metadata = session.automationMetadata else { return }
+        metadata.controlEnabled = false
+        metadata.pendingAutomaticSave = false
+        session.automationMetadata = metadata
+    }
+
+    private func relinquishInvalidAutomation(in state: inout AppState) {
+        guard var session = state.activeSession,
+              var metadata = session.automationMetadata else {
+            return
+        }
+
+        let ruleIsValid: Bool = {
+            guard state.settings.automationEnabled,
+                  let rule = state.automationRules.first(where: { $0.id == metadata.startedByRuleID }),
+                  rule.isEnabled,
+                  let project = state.projects.first(where: { $0.id == session.projectID }),
+                  DeveloperToolProjectResolver.folderPath(for: project) != nil else {
+                return false
+            }
+            return true
+        }()
+
+        guard !ruleIsValid else { return }
+        metadata.controlEnabled = false
+        metadata.pendingAutomaticSave = false
+        session.automationMetadata = metadata
+        state.activeSession = session
     }
 
     private func scheduleStartGitCapture(for sessionID: UUID, folderURL: URL) {
@@ -558,6 +931,7 @@ final class SessionStore: ObservableObject {
 
         guard let snapshot else {
             clearGitCapture(for: sessionID)
+            attemptAutomaticSaveIfReady(for: sessionID)
             return
         }
 
@@ -577,6 +951,7 @@ final class SessionStore: ObservableObject {
         } else {
             clearGitCapture(for: sessionID)
         }
+        attemptAutomaticSaveIfReady(for: sessionID)
 
         scheduleGitHubCapture(for: sessionID, snapshot: snapshot)
     }
@@ -653,6 +1028,7 @@ final class SessionStore: ObservableObject {
               let gitContext = session.gitContext,
               let startSnapshot = gitStartSnapshot(from: gitContext) else {
             clearGitCapture(for: sessionID)
+            attemptAutomaticSaveIfReady(for: sessionID)
             return
         }
 
@@ -690,6 +1066,7 @@ final class SessionStore: ObservableObject {
             commit(nextState)
         }
         clearGitCapture(for: sessionID)
+        attemptAutomaticSaveIfReady(for: sessionID)
     }
 
     private func clearGitCapture(for sessionID: UUID) {

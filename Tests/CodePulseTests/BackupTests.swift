@@ -37,6 +37,59 @@ final class BackupTests: XCTestCase {
         XCTAssertEqual(backup.state, state)
     }
 
+    func testAutomationConfigurationAndActiveOwnershipAreIncludedInBackup() throws {
+        let project = ProjectRecord(
+            name: "CodePulse",
+            folderPath: "/tmp/codepulse",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let rule = SessionAutomationRule(
+            name: "Codex",
+            trigger: .developerTool(.codex),
+            projectID: project.id,
+            pauseDelay: 10,
+            finishDelay: 20,
+            minimumSavedDuration: 60
+        )
+        let metadata = SessionAutomationMetadata(
+            startedByRuleID: rule.id,
+            startedByRuleName: rule.name,
+            startedByTool: .codex,
+            lastMatchingSignalAt: Date(timeIntervalSince1970: 1_700_000_000),
+            pauseDelay: 10,
+            finishDelay: 20,
+            minimumSavedDuration: 60,
+            claims: [SessionAutomationClaim(
+                tool: .codex,
+                externalSessionID: "thread-1",
+                isActive: true,
+                lastSignalAt: Date(timeIntervalSince1970: 1_700_000_000)
+            )]
+        )
+        let active = ActiveSession(
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            automationMetadata: metadata
+        )
+        let state = AppState(
+            projects: [project],
+            activeSession: active,
+            settings: CodePulseSettings(automationEnabled: true),
+            automationRules: [rule]
+        )
+
+        let data = try CodePulseBackupCodec.encode(
+            state: state,
+            exportedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let backup = try CodePulseBackupCodec.decode(data)
+
+        XCTAssertTrue(backup.state.settings.automationEnabled)
+        XCTAssertEqual(backup.state.automationRules, [rule])
+        XCTAssertEqual(backup.state.activeSession?.automationMetadata, metadata)
+    }
+
     func testBackupDecoderRejectsWrongFormatAndVersion() throws {
         let data = try CodePulseBackupCodec.encode(state: AppState(), exportedAt: Date())
         var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]

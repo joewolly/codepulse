@@ -2,69 +2,34 @@ import CodePulseIntegration
 import Foundation
 
 protocol DeveloperToolEventConsuming: AnyObject {
+    func drainPending(state: inout AppState, now: Date) -> [ValidatedDeveloperToolEvent]
+    func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool
+    func markProcessed(
+        _ pending: ValidatedDeveloperToolEvent,
+        in state: inout AppState,
+        at date: Date
+    ) -> Bool
+    func cleanup(_ pending: ValidatedDeveloperToolEvent)
     func processPending(state: inout AppState, now: Date) -> Bool
 }
 
 final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
-    private let inbox: DeveloperToolInbox
+    private let reader: DeveloperToolEventReader
 
     init(inbox: DeveloperToolInbox = DeveloperToolInbox()) {
-        self.inbox = inbox
+        self.reader = DeveloperToolEventReader(inbox: inbox)
+    }
+
+    func drainPending(state: inout AppState, now: Date) -> [ValidatedDeveloperToolEvent] {
+        reader.drainPending(state: &state, now: now)
     }
 
     @discardableResult
-    func processPending(state: inout AppState, now: Date) -> Bool {
-        var changed = pruneProcessedEvents(in: &state, now: now)
-        var processing = state.developerToolIntegration ?? DeveloperToolIntegrationProcessingState()
-        var processedIDs = Set(processing.processedEvents.map(\.id))
-
-        for url in inbox.pendingEventURLs() {
-            guard let event = try? inbox.readEvent(from: url, now: now) else {
-                // Do not quarantine malformed input: it may contain data that
-                // is outside CodePulse's privacy boundary. Best-effort cleanup
-                // keeps it out of CodePulse state without interrupting timing.
-                inbox.remove(url)
-                continue
-            }
-
-            if processedIDs.contains(event.id) {
-                inbox.remove(url)
-                continue
-            }
-
-            if attach(event, to: &state, now: now) {
-                changed = true
-            }
-
-            processing.processedEvents.append(
-                DeveloperToolProcessedEvent(id: event.id, processedAt: now)
-            )
-            processedIDs.insert(event.id)
-            changed = true
-            inbox.remove(url)
-        }
-
-        if processing.processedEvents.isEmpty {
-            if state.developerToolIntegration != nil {
-                state.developerToolIntegration = nil
-                changed = true
-            }
-        } else if state.developerToolIntegration != processing {
-            state.developerToolIntegration = processing
-            changed = true
-        }
-        return changed
-    }
-
-    private func attach(
-        _ event: DeveloperToolEvent,
-        to state: inout AppState,
-        now: Date
-    ) -> Bool {
+    func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool {
         guard var session = state.activeSession,
               session.projectID != nil,
               let project = state.projects.first(where: { $0.id == session.projectID }),
-              let projectPath = projectFolderPath(for: project),
+              let projectPath = DeveloperToolProjectResolver.folderPath(for: project),
               DeveloperToolProjectPathMatcher.matches(
                 projectPath: projectPath,
                 workingDirectory: event.workingDirectory
@@ -119,33 +84,31 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
         return true
     }
 
-    private func pruneProcessedEvents(in state: inout AppState, now: Date) -> Bool {
-        guard var processing = state.developerToolIntegration else { return false }
-        let cutoff = now.addingTimeInterval(-30 * 24 * 60 * 60)
-        processing.processedEvents.removeAll { $0.processedAt < cutoff }
-        if processing.processedEvents.count > 2_048 {
-            processing.processedEvents.sort { $0.processedAt > $1.processedAt }
-            processing.processedEvents.removeLast(processing.processedEvents.count - 2_048)
-        }
-        guard processing != state.developerToolIntegration else { return false }
-        state.developerToolIntegration = processing
-        return true
+    @discardableResult
+    func markProcessed(
+        _ pending: ValidatedDeveloperToolEvent,
+        in state: inout AppState,
+        at date: Date
+    ) -> Bool {
+        reader.markProcessed(pending, in: &state, at: date)
     }
 
-    private func projectFolderPath(for project: ProjectRecord) -> String? {
-        #if os(macOS)
-        if let bookmarkData = project.bookmarkData {
-            var isStale = false
-            if let bookmarkedURL = try? URL(
-                resolvingBookmarkData: bookmarkData,
-                options: [.withSecurityScope, .withoutUI],
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) {
-                return bookmarkedURL.path
-            }
+    func cleanup(_ pending: ValidatedDeveloperToolEvent) {
+        reader.cleanup(pending)
+    }
+
+    /// Compatibility path for callers that only need the original context
+    /// enrichment behavior. SessionStore uses the staged methods above so
+    /// automation runs before the event is acknowledged.
+    @discardableResult
+    func processPending(state: inout AppState, now: Date) -> Bool {
+        let original = state
+        let pending = drainPending(state: &state, now: now)
+        for item in pending {
+            _ = attach(item.event, to: &state, now: now)
+            _ = markProcessed(item, in: &state, at: now)
+            cleanup(item)
         }
-        #endif
-        return project.folderPath
+        return state != original
     }
 }
