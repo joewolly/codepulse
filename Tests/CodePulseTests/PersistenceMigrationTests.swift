@@ -66,7 +66,10 @@ final class PersistenceMigrationTests: XCTestCase {
         let stateURL = directory.appendingPathComponent("state.json")
         let persistence = JSONFilePersistence(fileURL: stateURL)
         var existing = AppState()
-        existing.projects = [ProjectRecord(name: "Keep me")]
+        existing.projects = [ProjectRecord(
+            name: "Keep me",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )]
         persistence.save(existing)
         XCTAssertEqual(persistence.load(), existing)
 
@@ -133,9 +136,11 @@ final class PersistenceMigrationTests: XCTestCase {
     }
 
     private func fixtureData(named name: String) throws -> Data {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/persistence/\(name).json")
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: name,
+            withExtension: "json",
+            subdirectory: "persistence"
+        ))
         return try Data(contentsOf: url)
     }
 
