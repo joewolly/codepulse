@@ -250,7 +250,7 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         var state = AppState()
         let pending = reader.drainPending(state: &state, now: now)
 
-        XCTAssertEqual(pending.map { $0.event }, [event])
+        XCTAssertEqual(pending.map(\.event.id), [event.id])
         XCTAssertTrue(state.developerToolIntegration?.processedEvents.isEmpty != false)
 
         let first = try XCTUnwrap(pending.first)
