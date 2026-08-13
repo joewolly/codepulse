@@ -22,7 +22,7 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
         parentSessionFingerprint: String?,
         to state: inout AppState
     ) -> Bool {
-        guard [.codex, .claudeCode].contains(event.integration),
+        guard [.codex, .claudeCode, .openCode].contains(event.integration),
               event.eventKind != .integrationError else {
             return false
         }
