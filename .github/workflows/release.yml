@@ -6,16 +6,18 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     runs-on: macos-14
     timeout-minutes: 45
+    permissions:
+      contents: read
 
     steps:
       - name: Check out tagged source
@@ -99,6 +101,60 @@ jobs:
 
           echo "Verified SHA-256: $ACTUAL_SHA"
 
+      - name: Upload validated release candidate
+        # v4.3.3; pin prevents a mutable action tag from accessing artifacts.
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: codepulse-release-candidate-${{ github.sha }}
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: prepare
+    runs-on: macos-14
+    timeout-minutes: 30
+    environment: production-signing
+    permissions:
+      contents: write
+    steps:
+      - name: Check out approved tagged source
+        # v4.1.7; the protected environment is entered before this checkout.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Download validated release candidate
+        # v4.3.0; pin prevents a mutable action tag from accessing release artifacts.
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: codepulse-release-candidate-${{ github.sha }}
+          path: dist/release/
+
+      - name: Load approved release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "error: release tag must use vMAJOR.MINOR.PATCH: $TAG" >&2
+            exit 1
+          }
+          VERSION="${TAG#v}"
+          BUILD_NUMBER="$(/usr/bin/plutil -extract CFBundleVersion raw Resources/Info.plist)"
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "error: tagged commit $GITHUB_SHA is not contained in main" >&2
+            exit 1
+          }
+          {
+            echo "VERSION=$VERSION"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+          } >> "$GITHUB_ENV"
+
+      - name: Resolve Sparkle signing tools
+        run: swift build --configuration release
+
       - name: Create Sparkle appcast
         env:
           SPARKLE_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
@@ -113,8 +169,9 @@ jobs:
 
           DMG="dist/release/CodePulse-${VERSION}.dmg"
           APPCAST="dist/release/appcast.xml"
-          SIGN_UPDATE="$(find .build -type f -name sign_update -perm -111 -print -quit 2>/dev/null || true)"
-          GENERATE_KEYS="$(find .build -type f -name generate_keys -perm -111 -print -quit 2>/dev/null || true)"
+          SPARKLE_TOOL_DIR=".build/artifacts/sparkle/Sparkle/bin"
+          SIGN_UPDATE="$SPARKLE_TOOL_DIR/sign_update"
+          GENERATE_KEYS="$SPARKLE_TOOL_DIR/generate_keys"
           [[ -x "$SIGN_UPDATE" ]] || {
             echo "error: Sparkle sign_update tool was not resolved by SwiftPM" >&2
             exit 1
