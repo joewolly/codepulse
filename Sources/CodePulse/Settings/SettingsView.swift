@@ -13,6 +13,9 @@ struct SettingsView: View {
     @State private var projectToDelete: ProjectRecord?
     @State private var loginItemError: String?
     @State private var backupError: String?
+    @State private var restoreCandidate: BackupRestoreCandidate?
+    @State private var restoreResult: BackupRestoreResult?
+    @State private var restoreError: String?
 
     var body: some View {
         Form {
@@ -37,6 +40,29 @@ struct SettingsView: View {
                 .accessibilityHint("Checks GitHub Releases for a newer CodePulse version")
 
                 Text("CodePulse checks for updates automatically and verifies downloaded updates with Sparkle before installation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Data") {
+                Button {
+                    exportBackup()
+                } label: {
+                    Label("Export Backup…", systemImage: "arrow.down.doc")
+                }
+                .accessibilityLabel("Export CodePulse Backup")
+                .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
+
+                Button {
+                    chooseBackupForRestore()
+                } label: {
+                    Label("Restore Backup…", systemImage: "arrow.up.doc")
+                }
+                .accessibilityLabel("Restore CodePulse Backup")
+                .accessibilityHint("Reviews and replaces local CodePulse data with a selected JSON backup")
+
+                Text("Backups contain your local CodePulse projects, sessions, settings, presets, and automation configuration. Restore replaces current local data after creating a recovery backup. Automation stays disabled after restore, and moved project folders may need relinking. No cloud service is involved.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -68,19 +94,6 @@ struct SettingsView: View {
                 ))
                 .accessibilityLabel("Global History shortcut")
                 .accessibilityHint("Opens the CodePulse History window without starting or stopping a session")
-
-                Button {
-                    exportBackup()
-                } label: {
-                    Label("Export Backup…", systemImage: "arrow.down.doc")
-                }
-                .accessibilityLabel("Export CodePulse Backup")
-                .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
-
-                Text("Backups include local projects, presets, settings, saved sessions, automation rules, and any active session. No secrets, app-activation history, or external data are included.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Menu Bar") {
@@ -146,7 +159,7 @@ struct SettingsView: View {
                                 }
                             }
                             Spacer()
-                            if let path = project.folderPath {
+                            if let path = project.folderPath, !project.requiresRelink {
                                 Button {
                                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                                 } label: {
@@ -154,6 +167,12 @@ struct SettingsView: View {
                                 }
                                 .buttonStyle(.borderless)
                                 .accessibilityLabel("Reveal \(project.name) in Finder")
+                            }
+                            if project.requiresRelink {
+                                Label("Needs Relink", systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityLabel("\(project.name) needs relinking")
                             }
                             Button("Relink") {
                                 relinkProject(project)
@@ -231,6 +250,45 @@ struct SettingsView: View {
         } message: {
             Text(backupError ?? "CodePulse could not create the backup.")
         }
+        .alert("Restore CodePulse Backup?", isPresented: Binding(
+            get: { restoreCandidate != nil },
+            set: { if !$0 { restoreCandidate = nil } }
+        )) {
+            Button("Restore Backup", role: .destructive) {
+                guard let candidate = restoreCandidate else { return }
+                restoreCandidate = nil
+                do {
+                    restoreResult = try store.restoreBackup(candidate)
+                } catch {
+                    restoreError = error.localizedDescription
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                restoreCandidate = nil
+            }
+        } message: {
+            Text(restoreConfirmationMessage)
+        }
+        .alert("Backup Restored", isPresented: Binding(
+            get: { restoreResult != nil },
+            set: { if !$0 { restoreResult = nil } }
+        )) {
+            Button("Done", role: .cancel) {
+                restoreResult = nil
+            }
+        } message: {
+            Text(restoreCompletionMessage)
+        }
+        .alert("Backup Restore Failed", isPresented: Binding(
+            get: { restoreError != nil },
+            set: { if !$0 { restoreError = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                restoreError = nil
+            }
+        } message: {
+            Text(restoreError ?? "CodePulse could not restore the selected backup.")
+        }
     }
 
     private func addProject() {
@@ -280,6 +338,67 @@ struct SettingsView: View {
         } catch {
             backupError = error.localizedDescription
         }
+    }
+
+    private func chooseBackupForRestore() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json]
+        panel.prompt = "Review Backup"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            restoreCandidate = try store.inspectBackup(at: url)
+        } catch {
+            restoreError = error.localizedDescription
+        }
+    }
+
+    private var restoreConfirmationMessage: String {
+        guard let candidate = restoreCandidate else {
+            return "Select a CodePulse backup to review."
+        }
+
+        let preview = candidate.preview
+        var lines = [
+            "Format: \(preview.format) v\(preview.version)",
+            "Exported: \(preview.exportedAt.formatted(date: .abbreviated, time: .shortened))",
+            "\(preview.projectCount) \(preview.projectCount == 1 ? "project" : "projects")",
+            "\(preview.completedSessionCount) \(preview.completedSessionCount == 1 ? "saved session" : "saved sessions")",
+            "\(preview.presetCount) \(preview.presetCount == 1 ? "preset" : "presets")",
+            "\(preview.automationRuleCount) \(preview.automationRuleCount == 1 ? "automation rule" : "automation rules")"
+        ]
+        if preview.includesActiveSession {
+            lines.append("1 active session")
+        }
+        if let earliest = preview.earliestSavedSessionAt,
+           let latest = preview.latestSavedSessionAt {
+            lines.append("History: \(earliest.formatted(date: .abbreviated, time: .omitted)) – \(latest.formatted(date: .abbreviated, time: .omitted))")
+        }
+        if preview.projectsNeedingRelinkCount > 0 {
+            lines.append("\(preview.projectsNeedingRelinkCount) project folder\(preview.projectsNeedingRelinkCount == 1 ? "" : "s") may need relinking")
+        }
+        lines.append("This will replace your current CodePulse data.")
+        lines.append("A recovery backup of your current data will be created first.")
+        lines.append("Session Automation will be restored but left disabled.")
+        return lines.joined(separator: "\n")
+    }
+
+    private var restoreCompletionMessage: String {
+        guard let result = restoreResult else { return "Backup restored." }
+        let preview = result.preview
+        var lines = [
+            "\(preview.completedSessionCount) \(preview.completedSessionCount == 1 ? "session" : "sessions") and \(preview.projectCount) \(preview.projectCount == 1 ? "project" : "projects") were restored.",
+            "Session Automation was restored but left disabled."
+        ]
+        if preview.projectsNeedingRelinkCount > 0 {
+            lines.append("Some project folders may need to be relinked.")
+        }
+        lines.append("Recovery backup:")
+        lines.append(result.recoveryBackupURL.path)
+        return lines.joined(separator: "\n")
     }
 }
 
