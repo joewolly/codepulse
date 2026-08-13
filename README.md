@@ -23,8 +23,9 @@ developer-tool metadata.
 - Captures best-effort local Git context without changing the repository.
 - GitHub context — associates local sessions with their GitHub repository and
   optionally their current pull request when the repository has a GitHub remote.
-- Optionally records that Codex and/or OpenCode participated in a selected
-  project's session using only local lifecycle metadata.
+- Receives optional local lifecycle metadata from Codex and OpenCode through a
+  versioned, content-safe event boundary; dedicated per-tool run correlation is
+  introduced incrementally by the agent-tracking roadmap.
 - Summarizes active time by day, project, and work type with native Swift Charts.
 - Exports a versioned JSON backup of local CodePulse state.
 
@@ -144,13 +145,17 @@ To inspect the optional CLI status yourself, use:
 gh auth status
 ```
 
-CodePulse 0.6 adds optional Developer Integrations for Codex and OpenCode. A
-small local helper writes validated, versioned events to the CodePulse-owned
-inbox at `~/Library/Application Support/CodePulse/Integrations/Inbox/`.
-CodePulse associates an event only with the currently active, selected project
-when the canonical working directory is that project's folder or a child
-directory. No Project sessions and unrelated projects are ignored. Integration
-events never start, pause, resume, or finish a CodePulse session.
+CodePulse's optional Developer Integrations use a small local helper to
+normalize lifecycle metadata into `DeveloperEventV2`. The receiver validates
+event size, schema, timestamp, integration, and idempotency before passing it
+through CodePulse-owned v2 inboxes. It keeps bounded, redacted diagnostics and
+never persists prompts, transcripts, source content, commands, or raw hook
+bodies. The shared agent-run state machine defines active, waiting, review-
+grace, ended, and orphaned timing for explicitly correlated agent runs;
+dedicated per-tool correlation arrives in the next roadmap features. It does
+not start or control a manual CodePulse session. See
+[`docs/agent-run-state-machine.md`](docs/agent-run-state-machine.md) for the
+event mapping and timing rules.
 
 History filters before grouping sessions by day. Insights uses the user's local
 calendar and apportions active time across day and week boundaries while
