@@ -45,7 +45,7 @@ struct StateMigrationRecord: Codable, Equatable {
 }
 
 struct StatePersistenceEnvelope: Codable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     let schemaVersion: Int
     let createdAt: Date
@@ -227,7 +227,7 @@ final class JSONFilePersistence: StatePersisting, StatePersistenceRecoveryProvid
         try writeMigratedEnvelope(migrated, replacing: data)
         envelopeCreatedAt = migrated.createdAt
         migrationHistory = migrated.migrationHistory
-        return legacyState
+        return migrated.payload
     }
 
     private func migrate(_ envelope: StatePersistenceEnvelope) throws -> StatePersistenceEnvelope {
@@ -236,6 +236,8 @@ final class JSONFilePersistence: StatePersisting, StatePersistenceRecoveryProvid
             switch migrated.schemaVersion {
             case 1:
                 migrated = migrateVersion1ToVersion2(migrated)
+            case 2:
+                migrated = migrateVersion2ToVersion3(migrated)
             default:
                 throw StatePersistenceError.unreadableState
             }
@@ -262,6 +264,29 @@ final class JSONFilePersistence: StatePersisting, StatePersistenceRecoveryProvid
             createdAt: envelope.createdAt,
             migrationHistory: history,
             payload: envelope.payload
+        )
+    }
+
+    private func migrateVersion2ToVersion3(_ envelope: StatePersistenceEnvelope) -> StatePersistenceEnvelope {
+        precondition(envelope.schemaVersion == 2)
+        var payload = envelope.payload
+        if payload.activityGraph.isEmpty {
+            payload.activityGraph = ActivityGraph.migratedLegacyState(payload)
+        }
+        var history = envelope.migrationHistory
+        if !history.contains(where: { $0.identifier == "legacy-sessions-to-activity-graph" }) {
+            history.append(StateMigrationRecord(
+                identifier: "legacy-sessions-to-activity-graph",
+                fromVersion: 2,
+                toVersion: 3,
+                migratedAt: now()
+            ))
+        }
+        return StatePersistenceEnvelope(
+            schemaVersion: 3,
+            createdAt: envelope.createdAt,
+            migrationHistory: history,
+            payload: payload
         )
     }
 

@@ -629,11 +629,42 @@ struct CodePulseSettings: Codable, Equatable {
 }
 
 struct AppState: Codable, Equatable {
-    var projects: [ProjectRecord] = []
-    var completedSessions: [CompletedSession] = []
-    var activeSession: ActiveSession? = nil
-    var settings = CodePulseSettings()
-    var developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil
+    var projects: [ProjectRecord]
+    var completedSessions: [CompletedSession]
+    var activeSession: ActiveSession?
+    var settings: CodePulseSettings
+    var developerToolIntegration: DeveloperToolIntegrationProcessingState?
+    var activityGraph: ActivityGraph
+
+    init(
+        projects: [ProjectRecord] = [],
+        completedSessions: [CompletedSession] = [],
+        activeSession: ActiveSession? = nil,
+        settings: CodePulseSettings = CodePulseSettings(),
+        developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
+        activityGraph: ActivityGraph = ActivityGraph()
+    ) {
+        self.projects = projects
+        self.completedSessions = completedSessions
+        self.activeSession = activeSession
+        self.settings = settings
+        self.developerToolIntegration = developerToolIntegration
+        self.activityGraph = activityGraph
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects, completedSessions, activeSession, settings, developerToolIntegration, activityGraph
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projects = try container.decodeIfPresent([ProjectRecord].self, forKey: .projects) ?? []
+        completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
+        activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
+        settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
+        developerToolIntegration = try container.decodeIfPresent(DeveloperToolIntegrationProcessingState.self, forKey: .developerToolIntegration)
+        activityGraph = try container.decodeIfPresent(ActivityGraph.self, forKey: .activityGraph) ?? ActivityGraph()
+    }
 }
 
 struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {

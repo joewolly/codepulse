@@ -46,11 +46,14 @@ anonymized fixture based on the v1 state shape. It contains no user paths,
 notes, repository identities, external session identifiers, credentials, or
 transcript content.
 
-## Feature 01 schema
+## Versioned schema evolution
 
 Schema v2 wraps `AppState` in `StatePersistenceEnvelope` with
 `schemaVersion`, `createdAt`, `migrationHistory`, and `payload`. The explicit
 `v1 → v2` migration transforms legacy raw state once, after an atomic `.backup`
 copy has been made. Each subsequent save first preserves the last readable file
-as that backup. Unknown future versions are left in place and presented as a
-non-destructive recovery condition.
+as that backup. Schema v3 adds the activity graph and migrates legacy projects
+and sessions into workspaces, activities, manual runs, and active/waiting
+intervals while retaining the legacy payload for compatibility views. Unknown
+future versions are left in place and presented as a non-destructive recovery
+condition.

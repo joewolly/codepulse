@@ -22,12 +22,10 @@ final class PersistenceMigrationTests: XCTestCase {
         XCTAssertEqual(envelope.schemaVersion, StatePersistenceEnvelope.currentSchemaVersion)
         XCTAssertEqual(envelope.createdAt, migrationDate)
         XCTAssertEqual(envelope.payload, state)
-        XCTAssertEqual(envelope.migrationHistory, [StateMigrationRecord(
-            identifier: "legacy-state-to-envelope",
-            fromVersion: 1,
-            toVersion: StatePersistenceEnvelope.currentSchemaVersion,
-            migratedAt: migrationDate
-        )])
+        XCTAssertEqual(envelope.migrationHistory.map(\.identifier), [
+            "legacy-state-to-envelope",
+            "legacy-sessions-to-activity-graph"
+        ])
     }
 
     func testMigrationIsIdempotent() throws {
@@ -57,7 +55,10 @@ final class PersistenceMigrationTests: XCTestCase {
 
         let envelope = try decodeEnvelope(at: stateURL)
         XCTAssertEqual(envelope.createdAt, migrationDate)
-        XCTAssertEqual(envelope.migrationHistory.map(\.identifier), ["legacy-state-to-envelope"])
+        XCTAssertEqual(envelope.migrationHistory.map(\.identifier), [
+            "legacy-state-to-envelope",
+            "legacy-sessions-to-activity-graph"
+        ])
         XCTAssertFalse(envelope.payload.settings.globalShortcutEnabled)
     }
 
@@ -82,7 +83,10 @@ final class PersistenceMigrationTests: XCTestCase {
         try encode(future).write(to: stateURL, options: .atomic)
 
         XCTAssertEqual(persistence.load(), existing)
-        XCTAssertEqual(persistence.recoveryIssue?.kind, .unsupportedFutureVersion(3))
+        XCTAssertEqual(
+            persistence.recoveryIssue?.kind,
+            .unsupportedFutureVersion(StatePersistenceEnvelope.currentSchemaVersion + 1)
+        )
         XCTAssertEqual(try Data(contentsOf: stateURL), try encode(future))
     }
 

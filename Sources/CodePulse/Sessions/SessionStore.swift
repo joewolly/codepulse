@@ -101,6 +101,18 @@ final class SessionStore: ObservableObject {
     }
 
     var activeSession: ActiveSession? { state.activeSession }
+    var activityGraph: ActivityGraph { state.activityGraph }
+    var activityGraphDiagnostics: ActivityGraphDiagnostics { ActivityGraphDiagnostics(graph: state.activityGraph) }
+
+    /// Compatibility lookup for existing ProjectRecord-backed UI paths.
+    func workspace(forLegacyProjectID projectID: UUID) -> Workspace? {
+        state.activityGraph.workspaces.first(where: { $0.legacyProjectID == projectID })
+    }
+
+    /// Compatibility lookup for existing ActiveSession/CompletedSession UI paths.
+    func activity(forLegacySessionID sessionID: UUID) -> Activity? {
+        state.activityGraph.activities.first(where: { $0.legacySessionID == sessionID })
+    }
 
     var phase: SessionPhase {
         state.activeSession?.phase ?? .idle
@@ -147,6 +159,130 @@ final class SessionStore: ObservableObject {
     }
 
     @discardableResult
+    func addWorkspace(name: String, roots: [WorkspaceRoot] = [], at date: Date? = nil) -> UUID? {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        let timestamp = date ?? clock.now
+        let workspace = Workspace(name: cleaned, roots: roots, createdAt: timestamp, source: .manual)
+        var nextState = state
+        nextState.activityGraph.workspaces.append(workspace)
+        commit(nextState)
+        return workspace.id
+    }
+
+    @discardableResult
+    func createActivity(
+        workspaceID: UUID,
+        title: String,
+        workType: SessionType = .coding,
+        domain: ActivityDomain = .development,
+        at date: Date? = nil
+    ) -> UUID? {
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        var nextState = state
+        do {
+            let activity = try ActivityGraphRepository.createActivity(
+                in: &nextState.activityGraph,
+                workspaceID: workspaceID,
+                title: cleaned,
+                workType: workType,
+                domain: domain,
+                at: date ?? clock.now
+            )
+            commit(nextState)
+            return activity.id
+        } catch {
+            return nil
+        }
+    }
+
+    @discardableResult
+    func updateActivity(
+        id: UUID,
+        title: String? = nil,
+        workType: SessionType? = nil,
+        domain: ActivityDomain? = nil,
+        at date: Date? = nil
+    ) -> Bool {
+        if let title, title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+        var nextState = state
+        do {
+            try ActivityGraphRepository.updateActivity(
+                in: &nextState.activityGraph,
+                id: id,
+                title: title?.trimmingCharacters(in: .whitespacesAndNewlines),
+                workType: workType,
+                domain: domain,
+                at: date ?? clock.now
+            )
+            commit(nextState)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    func startRun(activityID: UUID, kind: RunKind = .manual, at date: Date? = nil) -> UUID? {
+        var nextState = state
+        do {
+            let run = try ActivityGraphRepository.startRun(in: &nextState.activityGraph, activityID: activityID, kind: kind, at: date ?? clock.now)
+            commit(nextState)
+            return run.id
+        } catch {
+            return nil
+        }
+    }
+
+    @discardableResult
+    func closeRunInterval(id runID: UUID, at date: Date? = nil) -> Bool {
+        var nextState = state
+        do {
+            try ActivityGraphRepository.closeOpenInterval(in: &nextState.activityGraph, runID: runID, at: date ?? clock.now)
+            commit(nextState)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    func beginRunInterval(id runID: UUID, state intervalState: IntervalState, at date: Date? = nil, reason: String? = nil) -> Bool {
+        var nextState = state
+        do {
+            try ActivityGraphRepository.beginInterval(in: &nextState.activityGraph, runID: runID, state: intervalState, at: date ?? clock.now, reason: reason)
+            commit(nextState)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @discardableResult
+    func endRun(id runID: UUID, at date: Date? = nil) -> Bool {
+        var nextState = state
+        do {
+            try ActivityGraphRepository.endRun(in: &nextState.activityGraph, runID: runID, at: date ?? clock.now)
+            commit(nextState)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    func runs(workspaceID: UUID? = nil, activityID: UUID? = nil) -> [Run] {
+        ActivityGraphRepository.runs(in: state.activityGraph, workspaceID: workspaceID, activityID: activityID)
+    }
+
+    func activityGraphDiagnosticsJSON() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(activityGraphDiagnostics)
+    }
+
+    @discardableResult
     func startSession(
         projectID: UUID?,
         goal: String?,
@@ -172,6 +308,7 @@ final class SessionStore: ObservableObject {
            let index = nextState.projects.firstIndex(where: { $0.id == projectID }) {
             nextState.projects[index].lastUsedAt = startDate
         }
+        attachCompatibilityRun(for: session, to: &nextState)
         commit(nextState)
         now = startDate
         processPendingIntegrationEvents(force: true)
@@ -190,6 +327,7 @@ final class SessionStore: ObservableObject {
 
         var nextState = state
         nextState.activeSession = session
+        transitionCompatibilityRun(for: session.id, to: .waiting, at: session.pausedAt ?? date ?? clock.now, in: &nextState)
         commit(nextState)
         refresh()
         return true
@@ -203,6 +341,7 @@ final class SessionStore: ObservableObject {
 
         var nextState = state
         nextState.activeSession = session
+        transitionCompatibilityRun(for: session.id, to: .active, at: session.pauseIntervals.last?.endedAt ?? date ?? clock.now, in: &nextState)
         commit(nextState)
         refresh()
         return true
@@ -216,6 +355,7 @@ final class SessionStore: ObservableObject {
 
         var nextState = state
         nextState.activeSession = session
+        endCompatibilityRun(for: session.id, at: session.endedAt ?? date ?? clock.now, in: &nextState)
         commit(nextState)
         refresh()
 
@@ -464,6 +604,50 @@ final class SessionStore: ObservableObject {
         state = nextState
         persistence.save(nextState)
         persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
+    }
+
+    private func attachCompatibilityRun(for session: ActiveSession, to state: inout AppState) {
+        let workspaceID: UUID
+        if let projectID = session.projectID,
+           let workspace = state.activityGraph.workspaces.first(where: { $0.legacyProjectID == projectID || $0.id == projectID }) {
+            workspaceID = workspace.id
+        } else {
+            let workspace = Workspace(
+                id: session.projectID ?? UUID(),
+                name: session.projectName ?? "No Project",
+                createdAt: session.startedAt,
+                source: session.projectID == nil ? .legacySession : .legacyProject,
+                legacyProjectID: session.projectID
+            )
+            state.activityGraph.workspaces.append(workspace)
+            workspaceID = workspace.id
+        }
+        let activity = Activity(
+            workspaceID: workspaceID,
+            title: session.goal ?? session.projectName ?? "Manual session",
+            workType: session.type,
+            createdAt: session.startedAt,
+            legacySessionID: session.id
+        )
+        state.activityGraph.activities.append(activity)
+        state.activityGraph.runs.append(Run(
+            activityID: activity.id,
+            kind: .manual,
+            startedAt: session.startedAt,
+            intervals: [Interval(state: .active, startedAt: session.startedAt, reason: "manualSession")],
+            legacySessionID: session.id
+        ))
+    }
+
+    private func transitionCompatibilityRun(for sessionID: UUID, to intervalState: IntervalState, at date: Date, in state: inout AppState) {
+        guard let run = state.activityGraph.runs.last(where: { $0.legacySessionID == sessionID && $0.endedAt == nil }) else { return }
+        try? ActivityGraphRepository.closeOpenInterval(in: &state.activityGraph, runID: run.id, at: date)
+        try? ActivityGraphRepository.beginInterval(in: &state.activityGraph, runID: run.id, state: intervalState, at: date, reason: "manualSession")
+    }
+
+    private func endCompatibilityRun(for sessionID: UUID, at date: Date, in state: inout AppState) {
+        guard let run = state.activityGraph.runs.last(where: { $0.legacySessionID == sessionID && $0.endedAt == nil }) else { return }
+        try? ActivityGraphRepository.endRun(in: &state.activityGraph, runID: run.id, at: date)
     }
 
     private func processPendingIntegrationEvents(force: Bool = false) {
