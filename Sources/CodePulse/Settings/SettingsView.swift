@@ -120,7 +120,7 @@ struct SettingsView: View {
             Section("Sessions") {
                 Picker("Default project", selection: Binding(
                     get: { store.state.settings.defaultProjectBehavior },
-                    set: { value in store.updateSettings { $0.defaultProjectBehavior = value } }
+                    set: setDefaultProjectBehavior
                 )) {
                     Text("Last used").tag(DefaultProjectBehavior.lastUsed)
                     Text("No project").tag(DefaultProjectBehavior.noProject)
@@ -240,10 +240,12 @@ struct SettingsView: View {
             Button("Archive", role: .destructive) {
                 guard let project = projectToArchive else { return }
                 projectToArchive = nil
-                do {
-                    _ = try store.archiveProject(id: project.id)
-                } catch {
-                    projectArchiveError = error.localizedDescription
+                DispatchQueue.main.async {
+                    do {
+                        _ = try store.archiveProject(id: project.id)
+                    } catch {
+                        projectArchiveError = error.localizedDescription
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {
@@ -277,10 +279,12 @@ struct SettingsView: View {
             Button("Restore Backup", role: .destructive) {
                 guard let candidate = restoreCandidate else { return }
                 restoreCandidate = nil
-                do {
-                    restoreResult = try store.restoreBackup(candidate)
-                } catch {
-                    restoreError = error.localizedDescription
+                DispatchQueue.main.async {
+                    do {
+                        restoreResult = try store.restoreBackup(candidate)
+                    } catch {
+                        restoreError = error.localizedDescription
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {
@@ -332,6 +336,22 @@ struct SettingsView: View {
             store.updateSettings { $0.launchAtLogin = enabled }
         } catch {
             loginItemError = error.localizedDescription
+        }
+    }
+
+    private func setDefaultProjectBehavior(_ behavior: DefaultProjectBehavior) {
+        let specificProjectID: UUID?
+        if behavior == .specificProject {
+            specificProjectID = store.state.settings.specificProjectID.flatMap { id in
+                store.state.projects.contains(where: { $0.id == id && $0.isActive }) ? id : nil
+            } ?? store.selectableProjectsSortedByRecentUse.first?.id
+        } else {
+            specificProjectID = nil
+        }
+
+        store.updateSettings {
+            $0.defaultProjectBehavior = behavior
+            $0.specificProjectID = specificProjectID
         }
     }
 

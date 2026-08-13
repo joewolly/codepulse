@@ -81,6 +81,29 @@ enum StatePersistenceError: LocalizedError {
             return "restore failed after live replacement (\(error.localizedDescription)); rollback from \(url.path) failed: \(rollbackError.localizedDescription)"
         }
     }
+
+    var logIdentifier: String {
+        switch self {
+        case .unsafeStoragePath:
+            return "unsafe-storage-path"
+        case .recoveryBackupWriteFailed:
+            return "recovery-backup-write-failed"
+        case .recoveryBackupVerificationFailed:
+            return "recovery-backup-verification-failed"
+        case .candidateWriteFailed:
+            return "candidate-write-failed"
+        case .candidateVerificationFailed:
+            return "candidate-verification-failed"
+        case .liveReplacementFailed:
+            return "live-replacement-failed"
+        case .liveVerificationFailed:
+            return "live-verification-failed"
+        case .restoreFailedRollbackSucceeded:
+            return "rollback-succeeded"
+        case .restoreFailedRollbackFailed:
+            return "rollback-failed"
+        }
+    }
 }
 
 final class JSONFilePersistence: StatePersisting, StateRestoring {
@@ -259,28 +282,28 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
                     error,
                     rollbackError
                 )
-            } catch {
+            } catch let rollbackError {
                 throw StatePersistenceError.restoreFailedRollbackFailed(
                     recoveryURL,
                     error,
-                    error
+                    rollbackError
                 )
             }
             throw StatePersistenceError.restoreFailedRollbackSucceeded(recoveryURL, error)
-        } catch {
+        } catch let restoreError {
             if liveReplacementStarted {
                 do {
                     try rollbackState(to: recoverySnapshot, in: storageDirectory)
                 } catch let rollbackError {
                     throw StatePersistenceError.restoreFailedRollbackFailed(
                         recoveryURL,
-                        error,
+                        restoreError,
                         rollbackError
                     )
                 }
-                throw StatePersistenceError.restoreFailedRollbackSucceeded(recoveryURL, error)
+                throw StatePersistenceError.restoreFailedRollbackSucceeded(recoveryURL, restoreError)
             }
-            throw StatePersistenceError.candidateWriteFailed(error)
+            throw StatePersistenceError.candidateWriteFailed(restoreError)
         }
 
         return StateRestoreReceipt(recoveryBackupURL: recoveryURL)

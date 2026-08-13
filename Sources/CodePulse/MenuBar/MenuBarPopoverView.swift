@@ -118,12 +118,17 @@ private struct IdleSessionView: View {
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(!store.isProjectAvailableForManualStart(selectedProjectID))
             .accessibilityLabel("Start Session")
             .accessibilityValue("Start Session")
             .accessibilityHint("Starts a coding session")
         }
         .onAppear {
             selectedProjectID = store.defaultProjectID
+        }
+        .onChange(of: store.state.projects) { _ in
+            guard !store.isProjectAvailableForManualStart(selectedProjectID) else { return }
+            selectedProjectID = nil
         }
     }
 }
@@ -449,7 +454,9 @@ private struct ProjectSelectionRow: View {
     }
 
     private var selectedProjectName: String {
-        selectedProjectID.flatMap { id in store.state.projects.first(where: { $0.id == id })?.name } ?? "No Project"
+        selectedProjectID.flatMap { id in
+            store.state.projects.first(where: { $0.id == id && $0.isActive })?.name
+        } ?? "No Project"
     }
 
     private func chooseFolder() {

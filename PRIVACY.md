@@ -158,12 +158,13 @@ score.
 ## Backups
 
 Backup export creates a versioned JSON file at a location chosen by the user.
-The backup can contain the same local state described above, including freeform
-session text, filesystem paths, session presets, configured application
-identities, optional developer-tool metadata, automation rules, active
-automation ownership needed for recovery, and the processed-event ledger
-containing event identifiers and processing timestamps (up to 2,048 entries;
-event processing prunes entries older than 30 days). The separate bounded
+The backup can contain the same portable local state described above, including
+freeform session text, filesystem paths, session presets, configured application
+identities, attached developer-tool metadata, automation rules, and active
+automation ownership needed for recovery. The machine-local processed-event
+ledger, containing event identifiers and processing timestamps (up to 2,048
+entries; event processing prunes entries older than 30 days), is omitted. The
+separate bounded
 `codepulsectl` mutation ledger, raw control commands, response files, transient
 status requests, and application activation history are not intentionally
 added.

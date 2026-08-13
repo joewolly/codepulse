@@ -122,8 +122,8 @@ not upload CSV or Markdown exports.
 ## Project archiving
 
 Use **Settings → Projects → Archive** when you want to retire a project without
-deleting its CodePulse data. Archived projects leave new-session pickers,
-Quick Start, default-project selection, Session Automation, and direct
+deleting its CodePulse data. Archived projects are excluded from new-session
+pickers, Quick Start, default-project selection, Session Automation, and direct
 `codepulsectl` starts. CodePulse keeps the project record and does not rewrite
 completed sessions.
 

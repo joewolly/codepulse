@@ -97,7 +97,7 @@ struct InsightsView: View {
             project: project
         )
         let filenameProject = project == .allProjects ? nil : selectedProjectTitle
-        let markdownType = UTType(filenameExtension: "md") ?? .plainText
+        let markdownType = UTType(importedAs: "net.daringfireball.markdown")
 
         guard let url = ExportSavePanel.chooseURL(
             defaultName: ExportFilename.report(

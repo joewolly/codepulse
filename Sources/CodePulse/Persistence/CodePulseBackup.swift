@@ -196,7 +196,7 @@ enum CodePulseBackupCodec {
         var identifiers = Set<String>()
         for record in records {
             guard let id = record["id"] as? String, UUID(uuidString: id) != nil else {
-                throw CodePulseBackupError.malformedHistoryField(historyField(for: key))
+                throw CodePulseBackupError.malformedHistoryField(label)
             }
             guard identifiers.insert(id.lowercased()).inserted else {
                 throw CodePulseBackupError.duplicateIdentifier(label)

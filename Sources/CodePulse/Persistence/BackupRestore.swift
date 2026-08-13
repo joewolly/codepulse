@@ -68,8 +68,14 @@ enum CodePulseBackupValidator {
     ) throws {
         try validateUniqueIDs(intervals.map(\.id), field: "pause interval")
         var openCount = 0
-        for interval in intervals {
+        var previousEnd: Date?
+        var previousIntervalIsOpen = false
+        for interval in intervals.sorted(by: { $0.startedAt < $1.startedAt }) {
             guard interval.startedAt >= start else {
+                throw CodePulseBackupError.invalidTimeline
+            }
+            guard !previousIntervalIsOpen,
+                  previousEnd.map({ interval.startedAt >= $0 }) ?? true else {
                 throw CodePulseBackupError.invalidTimeline
             }
             if let endedAt = interval.endedAt {
@@ -77,11 +83,15 @@ enum CodePulseBackupValidator {
                       end.map({ endedAt <= $0 }) ?? true else {
                     throw CodePulseBackupError.invalidTimeline
                 }
+                previousEnd = endedAt
+                previousIntervalIsOpen = false
             } else {
                 openCount += 1
                 guard allowsOpenInterval else {
                     throw CodePulseBackupError.invalidTimeline
                 }
+                previousEnd = nil
+                previousIntervalIsOpen = true
             }
             if let end, interval.startedAt > end {
                 throw CodePulseBackupError.invalidTimeline

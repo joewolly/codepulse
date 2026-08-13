@@ -140,6 +140,42 @@ final class BackupRestoreTests: XCTestCase {
         _ = timelineObject
     }
 
+    func testBackupCodecRejectsOverlappingAndFollowingOpenPauseIntervals() throws {
+        let overlappingSession = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            goal: nil,
+            outcome: nil,
+            startedAt: now,
+            endedAt: now.addingTimeInterval(60),
+            pauseIntervals: [
+                PauseInterval(startedAt: now.addingTimeInterval(20), endedAt: now.addingTimeInterval(40)),
+                PauseInterval(startedAt: now.addingTimeInterval(10), endedAt: now.addingTimeInterval(30))
+            ]
+        )
+        let overlappingData = try CodePulseBackupCodec.encode(
+            state: AppState(completedSessions: [overlappingSession]),
+            exportedAt: now
+        )
+        XCTAssertThrowsError(try CodePulseBackupCodec.decode(overlappingData)) { error in
+            XCTAssertEqual(error as? CodePulseBackupError, .invalidTimeline)
+        }
+
+        var activeSession = ActiveSession(startedAt: now, phase: .paused)
+        activeSession.pauseIntervals = [
+            PauseInterval(startedAt: now.addingTimeInterval(20)),
+            PauseInterval(startedAt: now.addingTimeInterval(30), endedAt: now.addingTimeInterval(40))
+        ]
+        let openIntervalData = try CodePulseBackupCodec.encode(
+            state: AppState(activeSession: activeSession),
+            exportedAt: now
+        )
+        XCTAssertThrowsError(try CodePulseBackupCodec.decode(openIntervalData)) { error in
+            XCTAssertEqual(error as? CodePulseBackupError, .invalidTimeline)
+        }
+    }
+
     func testPreviewContainsDeterministicCountsDatesAndRelinkSignal() throws {
         let existing = try temporaryDirectory().appendingPathComponent("existing", isDirectory: true)
         try FileManager.default.createDirectory(at: existing, withIntermediateDirectories: true)

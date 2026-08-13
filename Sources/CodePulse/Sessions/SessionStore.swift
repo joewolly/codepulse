@@ -1239,7 +1239,10 @@ final class SessionStore: ObservableObject {
             nextState.settings.specificProjectID = nil
         }
         commit(nextState)
-        return state.projects[index]
+        guard let archivedProject = state.projects.first(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        return archivedProject
     }
 
     @discardableResult
@@ -1254,7 +1257,10 @@ final class SessionStore: ObservableObject {
         var nextState = state
         nextState.projects[index].archivedAt = nil
         commit(nextState)
-        return state.projects[index]
+        guard let restoredProject = state.projects.first(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        return restoredProject
     }
 
     @discardableResult
@@ -1526,10 +1532,10 @@ final class SessionStore: ObservableObject {
                 recoveryBackupURL: receipt.recoveryBackupURL
             )
         } catch let error as StatePersistenceError {
-            NSLog("CodePulse restore failed: %@", error.technicalDescription)
+            NSLog("CodePulse restore failed (%@).", error.logIdentifier)
             throw BackupRestoreError.persistence(error)
         } catch {
-            NSLog("CodePulse restore failed: %@", error.localizedDescription)
+            NSLog("CodePulse restore failed (persistence-unavailable).")
             throw BackupRestoreError.persistenceUnavailable
         }
     }
