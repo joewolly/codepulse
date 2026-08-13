@@ -4,6 +4,23 @@ import XCTest
 @testable import CodePulse
 
 final class OpenCodeUsageTrackingTests: XCTestCase {
+    func testUsageInboxRejectsQuotaOverflowBeforeWritingAnotherHandoff() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codepulse-opencode-quota-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = directory.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: directory)
+        let inbox = OpenCodeUsageInbox(paths: paths, maximumFiles: 1, maximumBytes: 128 * 1024)
+        let event = OpenCodeUsageEvent(
+            sessionID: "session", workingDirectory: project.path, messageID: "message",
+            observedAt: Date(), inputTokens: 1, pluginVersion: OpenCodeUsageEventMapper.parserVersion
+        )
+        try inbox.write(event)
+        XCTAssertThrowsError(try inbox.write(event)) { error in
+            XCTAssertEqual(error as? OpenCodeUsageInboxError, .eventTooLarge)
+        }
+        XCTAssertEqual(inbox.pendingEventURLs().count, 1)
+    }
     func testConsentDefaultsOffRoundTripsAndDisabledServiceNeverReadsPluginHandoffs() throws {
         XCTAssertFalse(try JSONDecoder().decode(CodePulseSettings.self, from: Data("{}".utf8)).openCodeUsageTrackingEnabled)
         let enabled = try JSONDecoder().decode(
