@@ -562,6 +562,13 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
     }
+
+    /// A project remains persisted when a moved or stale bookmark cannot be
+    /// resolved. This derived flag keeps that state visible to restore/UI
+    /// callers without adding machine-specific portability data to the schema.
+    var requiresRelink: Bool {
+        !DeveloperToolProjectResolver.isUsableFolder(for: self)
+    }
 }
 
 enum DefaultProjectBehavior: String, Codable, CaseIterable, Identifiable {
@@ -684,7 +691,10 @@ struct AppState: Codable, Equatable {
         // history. A malformed or forward-incompatible collection must not
         // make the whole state file unreadable.
         let sessionPresets = (try? container.decode([SessionPreset].self, forKey: .sessionPresets)) ?? []
-        let developerToolIntegration = try container.decodeIfPresent(
+        // Processed developer-tool IDs are local replay bookkeeping. Preserve
+        // the existing fail-soft behavior if an old ledger is malformed; the
+        // restore path resets it regardless.
+        let developerToolIntegration = try? container.decodeIfPresent(
             DeveloperToolIntegrationProcessingState.self,
             forKey: .developerToolIntegration
         )

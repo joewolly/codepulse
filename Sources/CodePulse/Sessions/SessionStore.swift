@@ -1268,6 +1268,80 @@ final class SessionStore: ObservableObject {
         try data.write(to: fileURL, options: .atomic)
     }
 
+    func inspectBackup(at fileURL: URL) throws -> BackupRestoreCandidate {
+        let data: Data
+        do {
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
+                  let size = attributes[.size] as? NSNumber,
+                  size.uint64Value <= UInt64(CodePulseBackupError.maximumInputBytes) else {
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    throw CodePulseBackupError.inputTooLarge
+                }
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard let readData = try? Data(contentsOf: fileURL) else {
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard readData.count <= CodePulseBackupError.maximumInputBytes else {
+                throw CodePulseBackupError.inputTooLarge
+            }
+            data = readData
+        } catch let error as CodePulseBackupError {
+            throw error
+        } catch let error as BackupRestoreError {
+            throw error
+        } catch {
+            throw BackupRestoreError.fileUnreadable
+        }
+
+        let backup = try CodePulseBackupCodec.decode(data)
+        let normalizedState = try BackupRestoreNormalizer.normalize(
+            backup.state,
+            preservingLaunchAtLogin: state.settings.launchAtLogin
+        )
+        return BackupRestoreCandidate(
+            backup: backup,
+            state: normalizedState,
+            preview: CodePulseBackupPreview(backup: backup, state: normalizedState)
+        )
+    }
+
+    func restoreBackup(_ candidate: BackupRestoreCandidate) throws -> BackupRestoreResult {
+        guard state.activeSession == nil, !gitCaptureInProgress else {
+            throw BackupRestoreError.activeSession
+        }
+        guard let restoringPersistence = persistence as? StateRestoring else {
+            throw BackupRestoreError.persistenceUnavailable
+        }
+
+        do {
+            let receipt = try restoringPersistence.replaceStateTransactionally(
+                with: candidate.state,
+                recoverySnapshot: state,
+                exportedAt: clock.now
+            )
+            // The durable replacement and its readback have completed. This is
+            // the first point where the live in-memory store may change.
+            state = candidate.state
+            now = clock.now
+            configureApplicationMonitoring()
+            return BackupRestoreResult(
+                preview: candidate.preview,
+                recoveryBackupURL: receipt.recoveryBackupURL
+            )
+        } catch let error as StatePersistenceError {
+            NSLog("CodePulse restore failed: %@", error.technicalDescription)
+            throw BackupRestoreError.persistence(error)
+        } catch {
+            NSLog("CodePulse restore failed: %@", error.localizedDescription)
+            throw BackupRestoreError.persistenceUnavailable
+        }
+    }
+
+    func restoreBackup(from fileURL: URL) throws -> BackupRestoreResult {
+        try restoreBackup(inspectBackup(at: fileURL))
+    }
+
     private func commit(_ nextState: AppState) {
         state = nextState
         persistence.save(nextState)
