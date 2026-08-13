@@ -37,6 +37,50 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.elapsedDuration, 0, accuracy: 0.001)
     }
 
+    func testDeleteIntegrationDataRemovesOnlySelectedAgentMetadataAndUsage() throws {
+        let clock = TestClock(start)
+        let workspace = Workspace(name: "Automatic", createdAt: start, source: .automatic)
+        let activity = Activity(workspaceID: workspace.id, title: "Agent", createdAt: start)
+        let codexRun = Run(
+            activityID: activity.id,
+            kind: .agent,
+            startedAt: start,
+            agentMetadata: AgentRunMetadata(integration: .codex, sessionFingerprint: "codex", lastEventAt: start)
+        )
+        let claudeRun = Run(
+            activityID: activity.id,
+            kind: .agent,
+            startedAt: start,
+            agentMetadata: AgentRunMetadata(integration: .claudeCode, sessionFingerprint: "claude", lastEventAt: start)
+        )
+        let state = AppState(
+            settings: CodePulseSettings(),
+            developerEventDiagnostics: DeveloperEventDiagnosticsJournal(entries: [
+                DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "codex"),
+                DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "claude-code"),
+                DeveloperEventDiagnostic(receivedAt: start, status: .rejected, rejectionCode: "invalid-event")
+            ]),
+            activityGraph: ActivityGraph(workspaces: [workspace], activities: [activity], runs: [codexRun, claudeRun]),
+            usageSamples: [
+                UsageSample(integration: .codex, observedAt: start, tokens: UsageTokenCounts(input: 1)),
+                UsageSample(integration: .claudeCode, observedAt: start, tokens: UsageTokenCounts(input: 2))
+            ],
+            codexUsageProcessing: CodexUsageProcessingState(),
+            claudeUsageProcessing: ClaudeUsageProcessingState()
+        )
+        let store = makeStore(clock: clock, persistence: InMemoryPersistence(state))
+
+        store.deleteIntegrationData(for: DeveloperTool.codex)
+
+        XCTAssertFalse(store.state.settings.codexUsageTrackingEnabled)
+        XCTAssertFalse(store.state.settings.claudeUsageTrackingEnabled)
+        XCTAssertNil(store.state.codexUsageProcessing)
+        XCTAssertNotNil(store.state.claudeUsageProcessing)
+        XCTAssertEqual(store.state.usageSamples.map { $0.integration }, [DeveloperTool.claudeCode])
+        XCTAssertEqual(store.activityGraph.runs.map { $0.agentMetadata?.integration }, [DeveloperEventIntegration.claudeCode])
+        XCTAssertEqual(store.state.developerEventDiagnostics?.entries.map { $0.integration }, ["claude-code", nil])
+    }
+
     func testLegacySessionControlsMaintainCompatibleManualActivityRun() throws {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)
