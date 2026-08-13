@@ -35,5 +35,8 @@ jobs:
       - name: Build package
         run: swift build --configuration debug
 
+      - name: Verify release preflight safety
+        run: ./script/check_release_preflight.sh
+
       - name: Run tests
         run: swift test --configuration debug

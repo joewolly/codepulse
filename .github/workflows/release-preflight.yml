@@ -24,24 +24,38 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 45
     steps:
+      - name: Validate synthetic release inputs
+        env:
+          PREFLIGHT_VERSION: ${{ inputs.version }}
+          PREFLIGHT_BUILD: ${{ inputs.build }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PREFLIGHT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "error: synthetic version must use MAJOR.MINOR.PATCH" >&2
+            exit 1
+          }
+          [[ "$PREFLIGHT_BUILD" =~ ^[0-9]+$ ]] || {
+            echo "error: synthetic build must be numeric" >&2
+            exit 1
+          }
+          {
+            echo "CODEPULSE_VERSION=$PREFLIGHT_VERSION"
+            echo "CODEPULSE_BUILD=$PREFLIGHT_BUILD"
+          } >> "$GITHUB_ENV"
+
       - name: Check out source
         # v4.1.7; pin prevents a mutable action tag from running in CI.
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
-      - name: Validate synthetic release inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "${{ inputs.build }}" =~ ^[0-9]+$ ]]
+      - name: Verify preflight workflow safety
+        run: ./script/check_release_preflight.sh
 
       - name: Run tests
         run: swift test --configuration debug
 
       - name: Package without publishing
         env:
-          CODEPULSE_VERSION: ${{ inputs.version }}
-          CODEPULSE_BUILD: ${{ inputs.build }}
           CODEPULSE_RELEASE_REPOSITORY: ${{ github.repository }}
         run: ./script/package_release.sh --adhoc-sign
 
@@ -49,41 +63,41 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DMG="dist/release/CodePulse-${{ inputs.version }}.dmg"
+          DMG="dist/release/CodePulse-${CODEPULSE_VERSION}.dmg"
           CHECKSUMS="dist/release/checksums.txt"
           [[ -f "$DMG" && -f "$CHECKSUMS" ]]
           EXPECTED_SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
-          grep -F "SHA256 (CodePulse-${{ inputs.version }}.dmg) = $EXPECTED_SHA" "$CHECKSUMS"
+          grep -F "SHA256 (CodePulse-${CODEPULSE_VERSION}.dmg) = $EXPECTED_SHA" "$CHECKSUMS"
           hdiutil imageinfo "$DMG" >/dev/null
 
-      - name: Validate Sparkle signing without publishing
-        env:
-          SPARKLE_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
+      - name: Validate Sparkle signing with a disposable key
         shell: bash
         run: |
           set -euo pipefail
-          [[ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ]] || {
-            echo "error: SPARKLE_PRIVATE_KEY_BASE64 repository secret is not configured" >&2
+          SPARKLE_TOOL_DIR=".build/artifacts/sparkle/Sparkle/bin"
+          SIGN_UPDATE="$SPARKLE_TOOL_DIR/sign_update"
+          [[ -x "$SIGN_UPDATE" ]] || {
+            echo "error: expected SwiftPM Sparkle sign_update tool at $SIGN_UPDATE" >&2
             exit 1
           }
-          swift build --configuration release
-          SIGN_UPDATE="$(find .build -type f -name sign_update -perm -111 -print -quit)"
-          [[ -x "$SIGN_UPDATE" ]]
           KEY_FILE="$(mktemp)"
           trap 'rm -f "$KEY_FILE"' EXIT
-          printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D > "$KEY_FILE"
+          /usr/bin/openssl rand 32 > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
-          DMG="dist/release/CodePulse-${{ inputs.version }}.dmg"
+          DMG="dist/release/CodePulse-${CODEPULSE_VERSION}.dmg"
           SIGNATURE_OUTPUT="$("$SIGN_UPDATE" --ed-key-file "$KEY_FILE" "$DMG")"
           SIGNATURE="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
-          [[ -n "$SIGNATURE" ]]
+          [[ -n "$SIGNATURE" ]] || {
+            echo "error: Sparkle did not produce an EdDSA signature" >&2
+            exit 1
+          }
           "$SIGN_UPDATE" --verify --ed-key-file "$KEY_FILE" "$DMG" "$SIGNATURE"
 
       - name: Upload preflight artifacts
         # v4.3.3; pin prevents a mutable action tag from accessing artifacts.
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
         with:
-          name: codepulse-release-preflight-${{ inputs.version }}
+          name: codepulse-release-preflight
           path: dist/release/
           if-no-files-found: error
           retention-days: 7
