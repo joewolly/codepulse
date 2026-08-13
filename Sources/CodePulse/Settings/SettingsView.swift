@@ -14,6 +14,8 @@ struct SettingsView: View {
     @State private var loginItemError: String?
     @State private var backupError: String?
     @State private var recoveryExportError: String?
+    @State private var supportBundleError: String?
+    @State private var integrationDataToDelete: DeveloperTool?
 
     var body: some View {
         Form {
@@ -44,6 +46,23 @@ struct SettingsView: View {
             }
 
             integrationSection
+
+            Section("Integration Data") {
+                ForEach(IntegrationDataInventory.items) { item in
+                    LabeledContent(item.title, value: item.detail)
+                        .font(.caption)
+                }
+                Text("Deleting an integration removes only CodePulse's saved lifecycle, usage, and attributable diagnostics for that tool. It does not modify source logs, projects, manual sessions, backups, or user-owned tool configuration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(DeveloperTool.allCases) { tool in
+                    Button("Delete (tool.title) Data…", role: .destructive) {
+                        integrationDataToDelete = tool
+                    }
+                    .accessibilityLabel("Delete stored \(tool.title) integration data")
+                }
+            }
 
             Section("Workspace Discovery") {
                 Toggle("Automatically create Git workspaces from agent events", isOn: Binding(
@@ -113,6 +132,19 @@ struct SettingsView: View {
                 .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
 
                 Text("Backups include local projects, settings, saved sessions, and any active session. No secrets or external data are included.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    exportRedactedSupportBundle()
+                } label: {
+                    Label("Export Redacted Support Bundle…", systemImage: "cross.case")
+                }
+                .accessibilityLabel("Export redacted support bundle")
+                .accessibilityHint("Saves aggregate diagnostics without paths, session identifiers, or session content")
+
+                Text("Support bundles contain aggregate counts and adapter states only. Review the generated file before sharing it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -274,6 +306,20 @@ struct SettingsView: View {
         } message: {
             Text("Saved sessions keep their project name, but this project will no longer be available for new sessions.")
         }
+        .alert("Delete Integration Data?", isPresented: Binding(
+            get: { integrationDataToDelete != nil },
+            set: { if !$0 { integrationDataToDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let tool = integrationDataToDelete {
+                    store.deleteIntegrationData(for: tool)
+                }
+                integrationDataToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { integrationDataToDelete = nil }
+        } message: {
+            Text("This removes CodePulse's saved lifecycle, usage, and attributable diagnostics for \(integrationDataToDelete?.title ?? "this tool"). It cannot change source logs or existing backup files.")
+        }
         .alert("Backup Export Failed", isPresented: Binding(
             get: { backupError != nil },
             set: { if !$0 { backupError = nil } }
@@ -289,6 +335,14 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { recoveryExportError = nil }
         } message: {
             Text(recoveryExportError ?? "CodePulse could not export the recovery copy.")
+        }
+        .alert("Support Bundle Export Failed", isPresented: Binding(
+            get: { supportBundleError != nil },
+            set: { if !$0 { supportBundleError = nil } }
+        )) {
+            Button("OK", role: .cancel) { supportBundleError = nil }
+        } message: {
+            Text(supportBundleError ?? "CodePulse could not export the redacted support bundle.")
         }
     }
 
@@ -435,6 +489,20 @@ struct SettingsView: View {
             try store.exportPersistenceRecoveryCopy(to: url)
         } catch {
             recoveryExportError = error.localizedDescription
+        }
+    }
+
+    private func exportRedactedSupportBundle() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "CodePulse Support \(CodePulseFormatting.exportDate(store.now)).json"
+        panel.prompt = "Export Support Bundle"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try store.exportRedactedSupportBundle(to: url)
+        } catch {
+            supportBundleError = error.localizedDescription
         }
     }
 }

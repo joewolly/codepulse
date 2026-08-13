@@ -199,6 +199,22 @@ export excludes workspace and activity labels; users can opt them in for a
 specific file. Treat every exported file according to the labels and token/cost
 metadata it contains before sharing it.
 
+## Integration deletion and support bundles
+
+**Settings → Integration Data** shows the categories CodePulse holds for local
+developer integrations. A confirmed per-tool deletion removes CodePulse's
+saved agent runs, usage samples, attributable diagnostics, and reader
+checkpoints for that integration, and disables its usage reader. It does not
+delete a Codex/Claude/OpenCode source log, user-owned configuration, manual
+session, project, or previously exported backup.
+
+The optional redacted support bundle is also a user-chosen local JSON file. It
+contains only state schema information, aggregate run/sample counts,
+per-integration reader/adapter status, and diagnostic status totals. It never
+contains paths, UUIDs, session or source fingerprints, raw event data, prompts,
+transcripts, commands, source content, credentials, or freeform session text.
+CodePulse does not upload the bundle; inspect it before sharing it manually.
+
 ## Deleting data
 
 Individual saved sessions and projects can be removed inside CodePulse. Removing

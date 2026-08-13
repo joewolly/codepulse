@@ -4,17 +4,25 @@ on:
   push:
     branches:
       - main
-      - codex/v0.1-session-foundation
   pull_request:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   swiftpm:
     runs-on: macos-14
+    timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        # v4.1.7; pin prevents a mutable action tag from running in CI.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Show toolchain
         run: |

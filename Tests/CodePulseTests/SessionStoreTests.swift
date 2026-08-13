@@ -37,6 +37,84 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.elapsedDuration, 0, accuracy: 0.001)
     }
 
+    func testDeleteIntegrationDataRemovesOnlySelectedAgentMetadataAndUsage() throws {
+        let clock = TestClock(start)
+        let workspace = Workspace(name: "Automatic", createdAt: start, source: .automatic)
+        let activity = Activity(workspaceID: workspace.id, title: "Agent", createdAt: start)
+        let codexRun = Run(
+            activityID: activity.id,
+            kind: .agent,
+            startedAt: start,
+            agentMetadata: AgentRunMetadata(integration: .codex, sessionFingerprint: "codex", lastEventAt: start)
+        )
+        let claudeRun = Run(
+            activityID: activity.id,
+            kind: .agent,
+            startedAt: start,
+            agentMetadata: AgentRunMetadata(integration: .claudeCode, sessionFingerprint: "claude", lastEventAt: start)
+        )
+        let state = AppState(
+            settings: CodePulseSettings(),
+            developerEventDiagnostics: DeveloperEventDiagnosticsJournal(entries: [
+                DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "codex"),
+                DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "claude-code"),
+                DeveloperEventDiagnostic(receivedAt: start, status: .rejected, rejectionCode: "invalid-event")
+            ]),
+            activityGraph: ActivityGraph(workspaces: [workspace], activities: [activity], runs: [codexRun, claudeRun]),
+            usageSamples: [
+                UsageSample(integration: .codex, observedAt: start, tokens: UsageTokenCounts(input: 1)),
+                UsageSample(integration: .claudeCode, observedAt: start, tokens: UsageTokenCounts(input: 2))
+            ],
+            codexUsageProcessing: CodexUsageProcessingState(),
+            claudeUsageProcessing: ClaudeUsageProcessingState()
+        )
+        let store = makeStore(clock: clock, persistence: InMemoryPersistence(state))
+
+        store.deleteIntegrationData(for: DeveloperTool.codex)
+
+        XCTAssertFalse(store.state.settings.codexUsageTrackingEnabled)
+        XCTAssertFalse(store.state.settings.claudeUsageTrackingEnabled)
+        XCTAssertNil(store.state.codexUsageProcessing)
+        XCTAssertNotNil(store.state.claudeUsageProcessing)
+        XCTAssertEqual(store.state.usageSamples.map { $0.integration }, [DeveloperTool.claudeCode])
+        XCTAssertEqual(store.activityGraph.runs.map { $0.agentMetadata?.integration }, [DeveloperEventIntegration.claudeCode])
+        XCTAssertEqual(store.state.developerEventDiagnostics?.entries.map { $0.integration }, ["claude-code", nil])
+    }
+
+    func testRedactedSupportBundleContainsOnlyAggregateIntegrationEvidence() throws {
+        let clock = TestClock(start)
+        let state = AppState(
+            completedSessions: [CompletedSession(
+                id: UUID(),
+                projectID: nil,
+                projectName: nil,
+                type: .coding,
+                goal: "private goal",
+                outcome: nil,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(60),
+                pauseIntervals: []
+            )],
+            developerEventDiagnostics: DeveloperEventDiagnosticsJournal(entries: [
+                DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "codex", eventFingerprint: "secret-fingerprint")
+            ]),
+            usageSamples: [UsageSample(integration: .codex, observedAt: start, sessionFingerprint: "secret-session", tokens: UsageTokenCounts(input: 5))]
+        )
+        let store = makeStore(clock: clock, persistence: InMemoryPersistence(state))
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("codepulse-support-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try store.exportRedactedSupportBundle(to: url, at: start)
+
+        let text = try XCTUnwrap(String(data: Data(contentsOf: url), encoding: .utf8))
+        XCTAssertTrue(text.contains("codepulse-redacted-support-bundle"))
+        XCTAssertTrue(text.contains("usageSampleCount"))
+        XCTAssertFalse(text.contains("private goal"))
+        XCTAssertFalse(text.contains("secret-fingerprint"))
+        XCTAssertFalse(text.contains("secret-session"))
+        XCTAssertFalse(text.contains("completedSessions"))
+    }
+
     func testLegacySessionControlsMaintainCompatibleManualActivityRun() throws {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

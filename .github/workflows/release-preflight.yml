@@ -1,0 +1,89 @@
+name: Release preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Synthetic version used only for preflight packaging
+        required: true
+        default: 0.0.0
+      build:
+        description: Synthetic numeric build used only for preflight packaging
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        # v4.1.7; pin prevents a mutable action tag from running in CI.
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Validate synthetic release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${{ inputs.build }}" =~ ^[0-9]+$ ]]
+
+      - name: Run tests
+        run: swift test --configuration debug
+
+      - name: Package without publishing
+        env:
+          CODEPULSE_VERSION: ${{ inputs.version }}
+          CODEPULSE_BUILD: ${{ inputs.build }}
+          CODEPULSE_RELEASE_REPOSITORY: ${{ github.repository }}
+        run: ./script/package_release.sh --adhoc-sign
+
+      - name: Verify generated artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG="dist/release/CodePulse-${{ inputs.version }}.dmg"
+          CHECKSUMS="dist/release/checksums.txt"
+          [[ -f "$DMG" && -f "$CHECKSUMS" ]]
+          EXPECTED_SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          grep -F "SHA256 (CodePulse-${{ inputs.version }}.dmg) = $EXPECTED_SHA" "$CHECKSUMS"
+          hdiutil imageinfo "$DMG" >/dev/null
+
+      - name: Validate Sparkle signing without publishing
+        env:
+          SPARKLE_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_PRIVATE_KEY_BASE64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ]] || {
+            echo "error: SPARKLE_PRIVATE_KEY_BASE64 repository secret is not configured" >&2
+            exit 1
+          }
+          swift build --configuration release
+          SIGN_UPDATE="$(find .build -type f -name sign_update -perm -111 -print -quit)"
+          [[ -x "$SIGN_UPDATE" ]]
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$SPARKLE_PRIVATE_KEY_BASE64" | /usr/bin/base64 -D > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          DMG="dist/release/CodePulse-${{ inputs.version }}.dmg"
+          SIGNATURE_OUTPUT="$("$SIGN_UPDATE" --ed-key-file "$KEY_FILE" "$DMG")"
+          SIGNATURE="$(printf '%s\n' "$SIGNATURE_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')"
+          [[ -n "$SIGNATURE" ]]
+          "$SIGN_UPDATE" --verify --ed-key-file "$KEY_FILE" "$DMG" "$SIGNATURE"
+
+      - name: Upload preflight artifacts
+        # v4.3.3; pin prevents a mutable action tag from accessing artifacts.
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808
+        with:
+          name: codepulse-release-preflight-${{ inputs.version }}
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7

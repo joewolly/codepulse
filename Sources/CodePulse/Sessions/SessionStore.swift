@@ -807,6 +807,52 @@ final class SessionStore: ObservableObject {
         try persistence.exportRecoveryCopy(to: fileURL)
     }
 
+    func exportRedactedSupportBundle(to fileURL: URL, at date: Date? = nil) throws {
+        let data = try RedactedSupportBundleCodec.encode(
+            state: state,
+            createdAt: date ?? clock.now,
+            persistenceRecoveryIssue: persistenceRecoveryIssue
+        )
+        try data.write(to: fileURL, options: .atomic)
+    }
+
+    /// Removes persisted metadata attributable to one integration. It neither
+    /// touches the integration's own configuration nor source logs owned by
+    /// Codex, Claude Code, or OpenCode. Unattributed rejection diagnostics are
+    /// retained because they cannot be safely assigned to a tool.
+    func deleteIntegrationData(for tool: DeveloperTool) {
+        var nextState = state
+        let rawValue = tool.eventIntegrationRawValue
+        let deletedRunIDs = Set(nextState.activityGraph.runs.compactMap { run in
+            run.agentMetadata?.integration.rawValue == rawValue ? run.id : nil
+        })
+        nextState.activityGraph.runs.removeAll { deletedRunIDs.contains($0.id) }
+        nextState.usageSamples.removeAll { $0.integration == tool }
+        nextState.developerEventDiagnostics?.entries.removeAll { $0.integration == rawValue }
+
+        switch tool {
+        case .codex:
+            nextState.codexUsageProcessing = nil
+            nextState.settings.codexUsageTrackingEnabled = false
+        case .claudeCode:
+            nextState.claudeUsageProcessing = nil
+            nextState.settings.claudeUsageTrackingEnabled = false
+        case .opencode:
+            nextState.openCodeUsageProcessing = nil
+            nextState.settings.openCodeUsageTrackingEnabled = false
+        }
+
+        let remainingActivityIDs = Set(nextState.activityGraph.runs.map(\.activityID))
+        nextState.activityGraph.activities.removeAll { activity in
+            activity.legacySessionID == nil && !remainingActivityIDs.contains(activity.id)
+        }
+        let remainingWorkspaceIDs = Set(nextState.activityGraph.activities.map(\.workspaceID))
+        nextState.activityGraph.workspaces.removeAll { workspace in
+            workspace.legacyProjectID == nil && workspace.source != .manual && !remainingWorkspaceIDs.contains(workspace.id)
+        }
+        commit(nextState)
+    }
+
     private func commit(_ nextState: AppState) {
         state = nextState
         persistence.save(nextState)

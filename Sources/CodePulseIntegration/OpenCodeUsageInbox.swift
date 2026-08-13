@@ -63,10 +63,19 @@ public enum OpenCodeUsageInboxError: Error, Equatable {
 public final class OpenCodeUsageInbox {
     public let paths: DeveloperToolIntegrationPaths
     private let fileManager: FileManager
+    private let maximumFiles: Int
+    private let maximumBytes: Int
 
-    public init(paths: DeveloperToolIntegrationPaths = .default(), fileManager: FileManager = .default) {
+    public init(
+        paths: DeveloperToolIntegrationPaths = .default(),
+        fileManager: FileManager = .default,
+        maximumFiles: Int = DeveloperToolIntegrationLimits.maximumInboxFiles,
+        maximumBytes: Int = DeveloperToolIntegrationLimits.maximumInboxBytes
+    ) {
         self.paths = paths
         self.fileManager = fileManager
+        self.maximumFiles = max(1, maximumFiles)
+        self.maximumBytes = max(DeveloperToolIntegrationLimits.maximumEventBytes, maximumBytes)
     }
 
     public func write(_ event: OpenCodeUsageEvent) throws {
@@ -80,6 +89,7 @@ public final class OpenCodeUsageInbox {
         }
         guard !containsSymbolicLink(paths.openCodeUsageInboxURL) else { throw OpenCodeUsageInboxError.unsafePath }
         try fileManager.createDirectory(at: paths.openCodeUsageInboxURL, withIntermediateDirectories: true)
+        try ensureCapacity(incomingBytes: data.count)
         let target = paths.openCodeUsageInboxURL.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
         guard !isSymbolicLink(target) else { throw OpenCodeUsageInboxError.unsafePath }
         try data.write(to: target, options: .atomic)
@@ -139,6 +149,28 @@ public final class OpenCodeUsageInbox {
         }
     }
 
+    private func ensureCapacity(incomingBytes: Int) throws {
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: paths.openCodeUsageInboxURL,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ), urls.count < maximumFiles else {
+            throw OpenCodeUsageInboxError.eventTooLarge
+        }
+        var total = 0
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
+                  values.isSymbolicLink != true else {
+                throw OpenCodeUsageInboxError.unsafePath
+            }
+            if values.isRegularFile == true {
+                total += values.fileSize ?? 0
+                guard total <= maximumBytes else { throw OpenCodeUsageInboxError.eventTooLarge }
+            }
+        }
+        guard incomingBytes <= maximumBytes - total else { throw OpenCodeUsageInboxError.eventTooLarge }
+    }
+
     private func isInboxFile(_ url: URL) -> Bool {
         url.deletingLastPathComponent().standardizedFileURL == paths.openCodeUsageInboxURL.standardizedFileURL && !isSymbolicLink(url)
     }
@@ -149,10 +181,12 @@ public final class OpenCodeUsageInbox {
 
     private func containsSymbolicLink(_ url: URL) -> Bool {
         var current = url
-        while current.path != "/" {
+        let managedRoot = paths.rootURL.standardizedFileURL
+        let managedParent = managedRoot.deletingLastPathComponent()
+        while true {
             if isSymbolicLink(current) { return true }
+            if current.standardizedFileURL == managedParent { return false }
             current.deleteLastPathComponent()
         }
-        return false
     }
 }
