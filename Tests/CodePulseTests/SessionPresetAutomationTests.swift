@@ -160,6 +160,32 @@ final class SessionPresetAutomationTests: XCTestCase {
         XCTAssertFalse(trigger.matches(bundleIdentifier: "Editor"))
     }
 
+    func testDisabledApplicationRuleDoesNotStartFrontmostMonitoring() throws {
+        let project = try makeProject(name: "Disabled Application Project")
+        let preset = SessionPreset(name: "Disabled Application", projectID: project.record.id)
+        let rule = SessionAutomationRule(
+            name: "Disabled Editor",
+            isEnabled: false,
+            trigger: .applications(ApplicationAutomationTrigger(applications: [
+                ApplicationIdentity(bundleIdentifier: "com.example.Editor", displayName: "Editor")
+            ])),
+            presetID: preset.id
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [project.record],
+            settings: CodePulseSettings(automationEnabled: true),
+            sessionPresets: [preset],
+            automationRules: [rule]
+        ))
+        let monitor = TestFrontmostApplicationMonitor(
+            currentApplication: ApplicationIdentity(bundleIdentifier: "com.example.Editor", displayName: "Editor")
+        )
+
+        _ = makeStore(persistence: persistence, clock: PresetTestClock(start), monitor: monitor)
+
+        XCTAssertFalse(monitor.isRunning)
+    }
+
     func testDeletingPresetRelinquishesActiveAutomationWithoutFinishing() throws {
         let project = try makeProject(name: "Delete Preset Project")
         let preset = SessionPreset(name: "Delete Me", projectID: project.record.id)

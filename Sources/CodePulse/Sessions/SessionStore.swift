@@ -226,7 +226,7 @@ final class SessionStore: ObservableObject {
         guard let frontmostApplicationMonitor else { return }
 
         let needsMonitoring = state.settings.automationEnabled && state.automationRules.contains { rule in
-            rule.applicationTrigger != nil
+            rule.isEnabled && rule.applicationTrigger != nil
         }
 
         if needsMonitoring {
@@ -1352,14 +1352,12 @@ final class SessionStore: ObservableObject {
                 applyAutomationAction(action, for: item.event, at: scanDate)
             }
 
-            var attachedState = state
-            if developerToolEventConsumer.attach(item.event, to: &attachedState, now: scanDate) {
-                commit(attachedState)
-            }
-
             var acknowledgedState = state
+            _ = developerToolEventConsumer.attach(item.event, to: &acknowledgedState, now: scanDate)
             _ = developerToolEventConsumer.markProcessed(item, in: &acknowledgedState, at: scanDate)
             if acknowledgedState != state {
+                // Persist enrichment and acknowledgement together so a crash
+                // cannot reattach the same inbox event on the next launch.
                 commit(acknowledgedState)
             }
             developerToolEventConsumer.cleanup(item)
