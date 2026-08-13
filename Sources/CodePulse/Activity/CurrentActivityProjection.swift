@@ -30,12 +30,30 @@ struct CurrentActivityRun: Equatable, Identifiable {
     let activityTitle: String
     let runKind: RunKind
     let integration: DeveloperEventIntegration?
+    let model: String?
     let displayState: DisplayState
     let activeDuration: TimeInterval
     let lastTransitionAt: Date
     let isCodePulseOwnedManualRun: Bool
 
     var id: UUID { runID }
+
+    var statusDescription: String {
+        switch displayState {
+        case .active:
+            return "Active"
+        case .reviewGrace(let remaining):
+            return "Review grace: \(CodePulseFormatting.duration(remaining, includeSeconds: true)) remaining"
+        case .waiting:
+            return "Waiting"
+        }
+    }
+
+    var accessibilitySummary: String {
+        let tool = integration?.title ?? "Manual timer"
+        let modelText = model.map { ", \($0)" } ?? ""
+        return "\(workspaceName), \(activityTitle), \(tool)\(modelText), \(statusDescription), active \(CodePulseFormatting.duration(activeDuration, includeSeconds: true))"
+    }
 }
 
 enum CurrentActivityProjection {
@@ -57,6 +75,7 @@ enum CurrentActivityProjection {
                 activityTitle: activity.title,
                 runKind: run.kind,
                 integration: run.agentMetadata?.integration,
+                model: run.agentMetadata?.model,
                 displayState: displayState,
                 activeDuration: activeDuration(for: run, at: now),
                 lastTransitionAt: run.agentMetadata?.lastEventAt ?? run.intervals.last?.startedAt ?? run.startedAt,

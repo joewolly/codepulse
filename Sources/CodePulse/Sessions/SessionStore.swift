@@ -338,6 +338,19 @@ final class SessionStore: ObservableObject {
         )
     }
 
+    /// A manual stop can only finish the current CodePulse-owned manual run;
+    /// external agent runs never expose a stop action through this facade.
+    @discardableResult
+    func finishCodePulseOwnedManualRun(id runID: UUID, at date: Date? = nil) -> Bool {
+        guard let session = state.activeSession,
+              state.activityGraph.runs.contains(where: {
+                  $0.id == runID && $0.kind == .manual && $0.legacySessionID == session.id && $0.endedAt == nil
+              }) else {
+            return false
+        }
+        return finish(at: date)
+    }
+
     func activityGraphDiagnosticsJSON() throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
