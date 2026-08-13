@@ -47,6 +47,12 @@ Depending on how the app is used, that state can include:
   and conservative run/workspace links. It never contains a raw Claude session
   ID, transcript path, message body, prompt, response, tool data, command, or
   source-file text.
+- Optional OpenCode usage state: installation-salted session fingerprints,
+  timestamps, model/provider and service-mode labels, token counters, available
+  provider-reported USD cost, conservative run/workspace links, calculated-cost
+  provenance, and a small adapter-health summary. It never contains an OpenCode
+  session or message ID, message body, prompt, response, tool data, command,
+  database record, transcript, or source-file text.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -83,7 +89,13 @@ separately enabled, it reads only `session_meta`, `turn_context`, and
 `event_msg` records with `token_count` totals from current local
 `~/.codex/sessions` JSONL files; it skips all other record types and does not
 read archived-session data. The OpenCode adapter does not scrape conversation
-storage or subscribe to content/tool events. Prompt classification is not
+storage or subscribe to tool, command, or file events. When **Track OpenCode
+token usage** is separately enabled, its CodePulse-owned plugin receives only
+an assistant-message update and emits an allowlisted usage record: session and
+message identity, working directory, timestamp, model/provider, service mode,
+numeric token counters, and a reported USD cost when available. It omits
+message text and all other message fields before the local handoff. CodePulse
+does not use an OpenCode database fallback. Prompt classification is not
 implemented: no integration sends prompt text to CodePulse, and the v2 event
 schema rejects prompt-bearing fields.
 
@@ -109,6 +121,15 @@ usage files. It retains existing privacy-safe local usage history until the
 user deletes CodePulse data. A parent roll-up adds parent-exclusive and child
 samples once; when a supported parent aggregate explicitly includes children,
 the aggregate is used instead to avoid double counting.
+
+OpenCode token tracking is likewise off by default and independent from timing.
+The local helper checks this stored consent before decoding or writing any usage
+handoff, and the app does not enumerate its usage inbox while disabled. Turning
+it off therefore stops CodePulse from accepting or processing new OpenCode usage
+records immediately; existing privacy-safe local usage history remains until the
+user deletes CodePulse data. A missing, malformed, or future-version plugin
+record updates only the optional usage adapter-health state and never changes
+lifecycle timing.
 
 Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
 and the processed-event ledger remain local as part of CodePulse state and

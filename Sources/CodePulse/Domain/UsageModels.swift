@@ -101,6 +101,7 @@ struct UsageSample: Codable, Equatable, Identifiable {
     let runID: UUID?
     let workspaceID: UUID?
     let model: String?
+    let provider: String?
     let effort: String?
     let serviceMode: String?
     let tokens: UsageTokenCounts
@@ -120,6 +121,7 @@ struct UsageSample: Codable, Equatable, Identifiable {
         runID: UUID? = nil,
         workspaceID: UUID? = nil,
         model: String? = nil,
+        provider: String? = nil,
         effort: String? = nil,
         serviceMode: String? = nil,
         tokens: UsageTokenCounts,
@@ -135,6 +137,7 @@ struct UsageSample: Codable, Equatable, Identifiable {
         self.runID = runID
         self.workspaceID = workspaceID
         self.model = model
+        self.provider = provider
         self.effort = effort
         self.serviceMode = serviceMode
         self.tokens = tokens
@@ -146,7 +149,7 @@ struct UsageSample: Codable, Equatable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, integration, observedAt, sessionFingerprint, runID, workspaceID
-        case model, effort, serviceMode, tokens, providerReportedCost
+        case model, provider, effort, serviceMode, tokens, providerReportedCost
         case providerReportedCurrency, includesSubagentUsage, calculatedCosts
     }
 
@@ -159,6 +162,7 @@ struct UsageSample: Codable, Equatable, Identifiable {
         runID = try container.decodeIfPresent(UUID.self, forKey: .runID)
         workspaceID = try container.decodeIfPresent(UUID.self, forKey: .workspaceID)
         model = try container.decodeIfPresent(String.self, forKey: .model)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
         effort = try container.decodeIfPresent(String.self, forKey: .effort)
         serviceMode = try container.decodeIfPresent(String.self, forKey: .serviceMode)
         tokens = try container.decode(UsageTokenCounts.self, forKey: .tokens)

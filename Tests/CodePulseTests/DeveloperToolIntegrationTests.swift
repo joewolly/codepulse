@@ -691,6 +691,9 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertTrue(source.hasPrefix(OpenCodeIntegrationInstaller.managedMarker))
         XCTAssertTrue(source.contains("Bun.spawn([CODEPULSE_HELPER, \"--opencode-hook\"]"))
         XCTAssertTrue(source.contains("const CODEPULSE_PLUGIN_VERSION = \"opencode-plugin-v1\";"))
+        XCTAssertTrue(source.contains("const CODEPULSE_USAGE_PLUGIN_VERSION = \"opencode-usage-plugin-v1\";"))
+        XCTAssertTrue(source.contains("event.type === \"message.updated\""))
+        XCTAssertTrue(source.contains("--opencode-usage-hook"))
         XCTAssertTrue(source.contains("await child.stdin.end();"))
         XCTAssertTrue(source.contains("await child.exited;"))
         XCTAssertTrue(source.contains("session.created"))
@@ -705,7 +708,7 @@ final class DeveloperToolIntegrationTests: XCTestCase {
             )
         }
         for forbiddenEventPrefix in [
-            #"event.type === "message."#, #"event.type === "tool."#, #"event.type === "command."#
+            #"event.type === "tool."#, #"event.type === "command."#
         ] {
             XCTAssertFalse(
                 source.contains(forbiddenEventPrefix),

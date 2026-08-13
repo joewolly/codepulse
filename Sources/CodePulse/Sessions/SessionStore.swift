@@ -44,6 +44,7 @@ final class SessionStore: ObservableObject {
     let developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating
     let codexUsageTracking: CodexUsageTracking
     let claudeUsageTracking: ClaudeUsageTracking
+    let openCodeUsageTracking: OpenCodeUsageTracking
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -60,6 +61,7 @@ final class SessionStore: ObservableObject {
         developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating = DeveloperToolLifecycleCoordinator(),
         codexUsageTracking: CodexUsageTracking = CodexUsageTrackingService(),
         claudeUsageTracking: ClaudeUsageTracking = ClaudeUsageTrackingService(),
+        openCodeUsageTracking: OpenCodeUsageTracking = OpenCodeUsageTrackingService(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
@@ -71,6 +73,7 @@ final class SessionStore: ObservableObject {
         self.developerToolLifecycleCoordinator = developerToolLifecycleCoordinator
         self.codexUsageTracking = codexUsageTracking
         self.claudeUsageTracking = claudeUsageTracking
+        self.openCodeUsageTracking = openCodeUsageTracking
         self.calendar = calendar
         self.state = persistence.load()
         self.persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
@@ -85,6 +88,7 @@ final class SessionStore: ObservableObject {
         processPendingIntegrationEvents(force: true)
         processCodexUsage()
         processClaudeUsage()
+        processOpenCodeUsage()
         reconcileAgentRuns()
 
         if automaticallyRefresh {
@@ -176,6 +180,7 @@ final class SessionStore: ObservableObject {
         processPendingIntegrationEvents()
         processCodexUsage()
         processClaudeUsage()
+        processOpenCodeUsage()
         reconcileAgentRuns()
     }
 
@@ -895,6 +900,12 @@ final class SessionStore: ObservableObject {
     private func processClaudeUsage() {
         var nextState = state
         guard claudeUsageTracking.process(state: &nextState, now: clock.now) else { return }
+        commit(nextState)
+    }
+
+    private func processOpenCodeUsage() {
+        var nextState = state
+        guard openCodeUsageTracking.process(state: &nextState, now: clock.now) else { return }
         commit(nextState)
     }
 

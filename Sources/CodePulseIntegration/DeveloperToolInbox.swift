@@ -5,6 +5,7 @@ public struct DeveloperToolIntegrationPaths: Equatable, Sendable {
     public let inboxURL: URL
     public let eventV2InboxURL: URL
     public let eventV2ReceiptURL: URL
+    public let openCodeUsageInboxURL: URL
     public let eventV2FingerprintSaltURL: URL
 
     public init(applicationSupportDirectory: URL = DeveloperToolIntegrationPaths.defaultApplicationSupportDirectory()) {
@@ -15,6 +16,7 @@ public struct DeveloperToolIntegrationPaths: Equatable, Sendable {
         self.inboxURL = rootURL.appendingPathComponent("Inbox", isDirectory: true)
         self.eventV2InboxURL = rootURL.appendingPathComponent("InboxV2", isDirectory: true)
         self.eventV2ReceiptURL = rootURL.appendingPathComponent("InboxV2Receipts", isDirectory: true)
+        self.openCodeUsageInboxURL = rootURL.appendingPathComponent("OpenCodeUsageInbox", isDirectory: true)
         self.eventV2FingerprintSaltURL = rootURL.appendingPathComponent("event-v2-fingerprint-salt", isDirectory: false)
     }
 

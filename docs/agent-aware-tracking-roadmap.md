@@ -157,7 +157,7 @@ not exist yet.
 | 11 | @ZacharyRW | `feature/11-activity-classification` | [#16](https://github.com/ZacharyRW/codepulse/pull/16) | Merged | 2026-08-13 |
 | 12 | @ZacharyRW | `feature/12-pricing-catalog` | [#17](https://github.com/ZacharyRW/codepulse/pull/17) | Merged | 2026-08-13 |
 | 13 | @ZacharyRW | `feature/13-codex-usage` | [#18](https://github.com/ZacharyRW/codepulse/pull/18) | Merged | 2026-08-13 |
-| 14 | @ZacharyRW | `feature/14-claude-usage` | [#19](https://github.com/ZacharyRW/codepulse/pull/19) | In review | — |
+| 14 | @ZacharyRW | `feature/14-claude-usage` | [#19](https://github.com/ZacharyRW/codepulse/pull/19) | Merged | 2026-08-13 |
 | 15 | — | `feature/15-opencode-usage` | — | Not started | — |
 | 16 | — | `feature/16-usage-attribution` | — | Not started | — |
 | 17 | — | `feature/17-usage-insights` | — | Not started | — |
@@ -489,11 +489,11 @@ not exist yet.
 **PR title:** `feat: track OpenCode token usage`  
 **Depends on:** 07, 12
 
-1. Add a separate OpenCode usage-consent toggle and document the preferred event-based source plus any read-only local-database fallback.
+1. Add a separate OpenCode usage-consent toggle and document the preferred event-based source. The managed plugin is the sole source for this release; no local-database fallback is used, so unknown schemas cannot expose stored OpenCode data.
    - Test: consent gating and no-write guarantees.
    - Commit: `feat: add OpenCode token tracking consent`
-2. Implement the stable OpenCode usage adapter. Prefer plugin usage events; otherwise access only the required local tables/records in read-only mode with schema-version detection and clear unsupported-version diagnostics.
-   - Test: plugin-event and synthetic database fixtures, locked/missing database handling.
+2. Implement the stable OpenCode usage adapter from the managed plugin's content-safe event. Version-gate that event and expose unsupported/malformed diagnostics; database access remains deliberately out of scope.
+   - Test: plugin-event fixtures and missing/unsupported handoff handling.
    - Commit: `feat: ingest OpenCode usage metadata`
 3. Normalize OpenCode model/provider/token/stored-cost data and correlate it to runs/workspaces. Preserve supplied provider cost separately from calculated estimates.
    - Test: model alias, provider, project-match, and unassigned-usage tests.
@@ -502,7 +502,7 @@ not exist yet.
    - Test: incompatible-schema isolation and recovery tests.
    - Commit: `feat: report OpenCode usage adapter health`
 
-**Acceptance criteria:** OpenCode per-project tokens/costs work with explicit consent, read-only data access, and graceful degradation. Open and merge the fork PR.
+**Acceptance criteria:** OpenCode per-project tokens/costs work with explicit consent, content-safe event access, and graceful degradation. Open and merge the fork PR.
 
 ## Feature 16 — Usage attribution and cross-tool analytics layer
 
