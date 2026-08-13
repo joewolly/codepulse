@@ -200,9 +200,9 @@ private struct ScreenshotFixture {
         let openCode = DeveloperToolSessionContext(
             tool: .opencode,
             externalSessionID: "fixture-opencode-1",
-            workingDirectory: "/Users/demo/Projects/CodePulse",
-            firstActivityAt: Self.date(day: 11, hour: 9, minute: 30),
-            lastActivityAt: Self.date(day: 11, hour: 12),
+            workingDirectory: "/Users/demo/Projects/DocsKit",
+            firstActivityAt: Self.date(day: 12, hour: 8, minute: 30),
+            lastActivityAt: Self.date(day: 12, hour: 9, minute: 50),
             model: "DeepSeek V4 Flash",
             eventCount: 7
         )

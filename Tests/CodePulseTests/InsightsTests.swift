@@ -246,6 +246,7 @@ final class InsightsTests: XCTestCase {
         XCTAssertEqual(thisWeek.interval.end, date(year: 2023, month: 1, day: 16))
         XCTAssertEqual(thisWeek.comparisonInterval?.start, date(year: 2023, month: 1, day: 2))
         XCTAssertEqual(thisWeek.comparisonInterval?.end, date(year: 2023, month: 1, day: 9))
+        XCTAssertEqual(thisWeek.comparisonSessionCount, 0)
 
         let lastWeek = InsightsCalculator.summary(
             state: state,
@@ -293,6 +294,7 @@ final class InsightsTests: XCTestCase {
         )
         XCTAssertNil(allTime.comparisonInterval)
         XCTAssertNil(allTime.durationDifference)
+        XCTAssertNil(allTime.comparisonSessionCount)
     }
 
     func testSessionCountCountsBoundaryOverlapOnceAndAverageUsesClippedDuration() {
@@ -360,9 +362,20 @@ final class InsightsTests: XCTestCase {
             endedAt: date(year: 2023, month: 1, day: 11, hour: 13),
             pauseIntervals: []
         )
+        let namedNoProject = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: "Configured",
+            type: .planning,
+            goal: nil,
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 10, hour: 9),
+            endedAt: date(year: 2023, month: 1, day: 10, hour: 10),
+            pauseIntervals: []
+        )
         var state = AppState()
         state.projects = [ProjectRecord(id: configuredID, name: "Configured")]
-        state.completedSessions = [configured, deleted, noProject]
+        state.completedSessions = [configured, deleted, noProject, namedNoProject]
 
         let configuredSummary = InsightsCalculator.summary(
             state: state,
@@ -400,6 +413,51 @@ final class InsightsTests: XCTestCase {
         XCTAssertTrue(store.insightsProjectOptions.contains {
             $0.filter == .projectID(deletedID) && $0.title == "Deleted Project"
         })
+        let configuredOptions = store.insightsProjectOptions.filter { $0.title == "Configured" }
+        XCTAssertEqual(configuredOptions.count, 1)
+        XCTAssertTrue(configuredOptions.first?.filter == .projectID(configuredID))
+        XCTAssertFalse(store.insightsProjectOptions.contains { $0.filter == .historicalName("Configured") })
+    }
+
+    func testInsightsProjectOptionsUseMostRecentHistoricalProjectName() {
+        let reference = date(year: 2023, month: 1, day: 11, hour: 13)
+        let historicalID = UUID()
+        let newer = CompletedSession(
+            id: UUID(),
+            projectID: historicalID,
+            projectName: "Newest Name",
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 11, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 11, hour: 11),
+            pauseIntervals: []
+        )
+        let older = CompletedSession(
+            id: UUID(),
+            projectID: historicalID,
+            projectName: "Older Name",
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 9, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 9, hour: 11),
+            pauseIntervals: []
+        )
+        var state = AppState()
+        state.completedSessions = [newer, older]
+
+        let store = SessionStore(
+            persistence: InsightsTestPersistence(state),
+            clock: InsightsTestClock(reference),
+            calendar: calendar,
+            automaticallyRefresh: false
+        )
+
+        XCTAssertEqual(
+            store.insightsProjectOptions.first(where: { $0.filter == .projectID(historicalID) })?.title,
+            "Newest Name"
+        )
     }
 
     func testDeveloperToolParticipationUsesOverlappingSessionSemantics() {

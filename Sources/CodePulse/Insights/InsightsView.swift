@@ -21,6 +21,8 @@ struct InsightsView: View {
     }
 
     var body: some View {
+        let summary = self.summary
+
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 InsightsFilterBar(
@@ -57,7 +59,8 @@ struct InsightsView: View {
                 } else {
                     InsightsEmptyState(
                         timeframe: timeframe,
-                        projectTitle: projectTitle,
+                        projectTitle: project.title(options: projectOptions),
+                        isAllProjects: project == .allProjects,
                         hasAnySessions: hasAnySessions
                     )
                 }
@@ -72,15 +75,17 @@ struct InsightsView: View {
     private var hasAnySessions: Bool {
         !store.state.completedSessions.isEmpty || store.state.activeSession != nil
     }
+}
 
-    private var projectTitle: String {
-        switch project {
+private extension InsightsProjectFilter {
+    func title(options: [InsightsProjectOption]) -> String {
+        switch self {
         case .allProjects:
             return "All Projects"
         case .noProject:
             return "No Project"
         case .projectID(let projectID):
-            return projectOptions.first(where: { $0.filter == .projectID(projectID) })?.title ?? "Project"
+            return options.first(where: { $0.filter == .projectID(projectID) })?.title ?? "Project"
         case .historicalName(let name):
             return name
         }
@@ -125,19 +130,9 @@ private struct InsightsFilterBar: View {
             }
             .pickerStyle(.menu)
             .accessibilityLabel("Insights project")
-            .accessibilityValue(projectTitle)
+            .accessibilityValue(project.title(options: projectOptions))
         }
         .accessibilityElement(children: .contain)
-    }
-
-    private var projectTitle: String {
-        switch project {
-        case .allProjects: return "All Projects"
-        case .noProject: return "No Project"
-        case .projectID(let projectID):
-            return projectOptions.first(where: { $0.filter == .projectID(projectID) })?.title ?? "Project"
-        case .historicalName(let name): return name
-        }
     }
 }
 
@@ -320,7 +315,7 @@ private struct ActivityChart: View {
     let calendar: Calendar
 
     private var usesWeeklyBuckets: Bool {
-        timeframe == .last90Days || timeframe == .allTime && activity.count > 45
+        timeframe == .last90Days || (timeframe == .allTime && activity.count > 45)
     }
 
     private var buckets: [ActivityBucket] {
@@ -525,6 +520,7 @@ private struct InsightValueRow: View {
 private struct InsightsEmptyState: View {
     let timeframe: InsightsTimeframe
     let projectTitle: String
+    let isAllProjects: Bool
     let hasAnySessions: Bool
 
     var body: some View {
@@ -548,7 +544,7 @@ private struct InsightsEmptyState: View {
         if !hasAnySessions {
             return "Start a session from the menu bar and your local activity will appear here."
         }
-        if projectTitle == "All Projects" {
+        if isAllProjects {
             return "There is no active session overlap in \(timeframe.title.lowercased()). Try another timeframe."
         }
         return "There is no active session overlap for \(projectTitle) in \(timeframe.title.lowercased()). Try another project or timeframe."
