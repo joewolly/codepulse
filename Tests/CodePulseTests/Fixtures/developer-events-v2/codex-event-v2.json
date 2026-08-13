@@ -1,0 +1,15 @@
+{
+  "schemaVersion" : 2,
+  "integration" : "codex",
+  "eventKind" : "activity.observed",
+  "observedAt" : "2027-01-15T08:00:00Z",
+  "idempotencyKey" : "codex-0123456789abcdef",
+  "externalSessionKey" : "codex-session-1",
+  "workingDirectory" : "/tmp/codepulse",
+  "model" : "gpt-5.6",
+  "effort" : "high",
+  "serviceMode" : "priority",
+  "parserVersion" : "1",
+  "integrationVersion" : "1",
+  "metadata" : { "adapterVersion" : "1", "eventSequence" : 1, "sourceKind" : "hook" }
+}

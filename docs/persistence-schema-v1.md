@@ -35,6 +35,12 @@ Before Feature 01 a missing or malformed file silently produced an empty
 - **Developer integration inbox:** individual validated event JSON files live
   under `CodePulse/Integrations/Inbox/`. They are an intake queue, not app
   state, and are independently atomic/best-effort cleaned after processing.
+- **Developer-event v2 intake:** Feature 03 adds a separate `InboxV2/` queue
+  plus a bounded `InboxV2Receipts/` queue. Receipt files contain only an
+  accepted/duplicate/rejected outcome, a salted event fingerprint, safe
+  integration/parser versions, and a fixed rejection code; neither queue is
+  app state or a raw-hook archive. An installation-scoped fingerprint secret
+  is stored with user-only file permissions under `CodePulse/Integrations/`.
 - **Integration configuration:** CodePulse-managed Codex/OpenCode hook/plugin
   files live in the respective developer-tool configuration locations. They
   are not decoded as CodePulse state.
@@ -54,6 +60,7 @@ Schema v2 wraps `AppState` in `StatePersistenceEnvelope` with
 copy has been made. Each subsequent save first preserves the last readable file
 as that backup. Schema v3 adds the activity graph and migrates legacy projects
 and sessions into workspaces, activities, manual runs, and active/waiting
-intervals while retaining the legacy payload for compatibility views. Unknown
-future versions are left in place and presented as a non-destructive recovery
+intervals while retaining the legacy payload for compatibility views. Schema v4
+adds the bounded, redacted developer-event diagnostics journal. Unknown future
+versions are left in place and presented as a non-destructive recovery
 condition.

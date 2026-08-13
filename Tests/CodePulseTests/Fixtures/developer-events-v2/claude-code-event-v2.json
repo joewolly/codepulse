@@ -1,0 +1,15 @@
+{
+  "schemaVersion" : 2,
+  "integration" : "claude-code",
+  "eventKind" : "session.idle",
+  "observedAt" : "2027-01-15T08:00:00Z",
+  "idempotencyKey" : "claude-0123456789abcdef",
+  "externalSessionKey" : "claude-session-1",
+  "workingDirectory" : "/tmp/codepulse",
+  "model" : "claude",
+  "effort" : "medium",
+  "serviceMode" : "standard",
+  "parserVersion" : "1",
+  "integrationVersion" : "1",
+  "metadata" : { "adapterVersion" : "1", "eventSequence" : 2, "sourceKind" : "hook" }
+}
