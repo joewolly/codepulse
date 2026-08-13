@@ -113,7 +113,22 @@ fi
 /usr/bin/codesign --force --sign - "$STAGED_APP_BUNDLE"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$STAGED_APP_BUNDLE"
 
-rm -rf "$APP_BUNDLE"
+if [[ -L "$DIST_DIR" || ( -e "$DIST_DIR" && ! -d "$DIST_DIR" ) ]]; then
+  echo "error: refusing to use an unsafe dist path: $DIST_DIR" >&2
+  exit 1
+fi
+mkdir -p "$DIST_DIR"
+if [[ -L "$DIST_DIR" || ! -d "$DIST_DIR" ]]; then
+  echo "error: dist path is not a real directory: $DIST_DIR" >&2
+  exit 1
+fi
+if [[ -e "$APP_BUNDLE" || -L "$APP_BUNDLE" ]]; then
+  [[ -d "$APP_BUNDLE" && ! -L "$APP_BUNDLE" ]] || {
+    echo "error: refusing to replace non-directory app path: $APP_BUNDLE" >&2
+    exit 1
+  }
+  rm -rf "$APP_BUNDLE"
+fi
 /usr/bin/ditto "$STAGED_APP_BUNDLE" "$APP_BUNDLE"
 
 bundle_content_manifest() {
