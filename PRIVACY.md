@@ -189,7 +189,9 @@ and review them before sharing.
 
 Backups can include the privacy-safe token/cost metadata and calculation
 provenance described above. They do not include raw usage source files, prompts,
-transcripts, commands, transcript paths, or external session identifiers.
+transcripts, commands, or transcript paths. Complete recovery backups can
+include legacy external session identifiers and working directories when those
+values remain in CodePulse state, so they are not share-safe exports.
 
 CodePulse currently exports backups but does not restore them automatically.
 
@@ -199,12 +201,17 @@ export excludes workspace and activity labels; users can opt them in for a
 specific file. Treat every exported file according to the labels and token/cost
 metadata it contains before sharing it.
 
+A separately versioned redacted/share-safe export is planned for a future
+release. Until then, use the redacted support bundle only for diagnostics and
+do not treat a recovery backup as safe to share.
+
 ## Integration deletion and support bundles
 
 **Settings → Integration Data** shows the categories CodePulse holds for local
 developer integrations. A confirmed per-tool deletion removes CodePulse's
-saved agent runs, usage samples, attributable diagnostics, and reader
-checkpoints for that integration, and disables its usage reader. It does not
+saved legacy lifecycle contexts, agent runs, usage samples, attributable
+diagnostics, and reader checkpoints for that integration, and disables its
+usage reader. It does not
 delete a Codex/Claude/OpenCode source log, user-owned configuration, manual
 session, project, or previously exported backup.
 

@@ -94,7 +94,8 @@ or allow the automatic update check.
    **Export** menu writes the selected period locally; workspace and activity
    labels are opt-in, and paths/source identifiers are never exported.
 10. In **Settings → Integration Data**, review the stored metadata categories,
-    remove one integration's CodePulse-held records when needed, or export a
+    remove one integration's CodePulse-held records when needed, export a
+    full-fidelity recovery backup only for private recovery, or export a
     redacted support bundle for local troubleshooting.
 
 Projects are optional. Adding a project grants CodePulse access only to the
