@@ -25,6 +25,8 @@ MOUNT_POINT=""
 MOUNTED=false
 VERSION=""
 BUILD_NUMBER=""
+UPDATE_REPOSITORY=""
+UPDATE_FEED_URL=""
 DMG_PATH=""
 CHECKSUMS_PATH="$RELEASE_DIR/checksums.txt"
 ARM64_BINARY=""
@@ -47,8 +49,9 @@ Options:
   --adhoc-sign   Apply an optional local ad-hoc signature to the app bundle.
   --help         Show this help text.
 
-Version overrides:
+Release overrides:
   CODEPULSE_VERSION=0.4.2 CODEPULSE_BUILD=402 ./script/package_release.sh
+  CODEPULSE_RELEASE_REPOSITORY=owner/repository ./script/package_release.sh
 USAGE
 }
 
@@ -133,6 +136,12 @@ determine_version() {
   [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || die "CODEPULSE_VERSION must contain one to three numeric components: $VERSION"
   [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || die "CODEPULSE_BUILD must be numeric: $BUILD_NUMBER"
   DMG_PATH="$RELEASE_DIR/$APP_NAME-$VERSION.dmg"
+}
+
+determine_update_feed() {
+  UPDATE_REPOSITORY="${CODEPULSE_RELEASE_REPOSITORY:-joewolly/codepulse}"
+  [[ "$UPDATE_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "CODEPULSE_RELEASE_REPOSITORY must use owner/repository form"
+  UPDATE_FEED_URL="https://github.com/$UPDATE_REPOSITORY/releases/latest/download/appcast.xml"
 }
 
 prepare_workspace() {
@@ -232,6 +241,7 @@ stage_app_bundle() {
 
   /usr/bin/plutil -replace CFBundleShortVersionString -string "$VERSION" "$INFO_PLIST"
   /usr/bin/plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$INFO_PLIST"
+  /usr/bin/plutil -replace SUFeedURL -string "$UPDATE_FEED_URL" "$INFO_PLIST"
 
   if ! /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -Fq '@executable_path/../Frameworks'; then
     /usr/bin/install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_BINARY"
@@ -285,7 +295,7 @@ verify_bundle() {
   [[ "$minimum_system" == "13.0" ]] || die "minimum system mismatch: $minimum_system"
   [[ "$ls_ui_element" == "true" ]] || die "LSUIElement must remain enabled: $ls_ui_element"
   [[ "$icon_file" == "CodePulse" ]] || die "unexpected icon declaration: $icon_file"
-  [[ "$feed_url" == "https://github.com/joewolly/codepulse/releases/latest/download/appcast.xml" ]] || die "unexpected Sparkle feed URL: $feed_url"
+  [[ "$feed_url" == "$UPDATE_FEED_URL" ]] || die "unexpected Sparkle feed URL: $feed_url"
   [[ "$public_ed_key" == "EX4J6W41dIHFiPsqUhlk6Jp/VsX/2AxoYmCDlsqzuDM=" ]] || die "unexpected Sparkle public EdDSA key"
 
   architecture_info="$(/usr/bin/lipo -info "$APP_BINARY")"
@@ -375,6 +385,7 @@ main() {
   parse_options "$@"
   validate_environment
   determine_version
+  determine_update_feed
   prepare_workspace
   build_release
   stage_app_bundle
