@@ -30,7 +30,8 @@ that state can include:
   activation history are not stored in backups.
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
-  prunes entries older than 30 days during event processing.
+  prunes entries older than 30 days during event processing. It is machine-local
+  replay bookkeeping and is omitted from portable backups.
 - A separate bounded internal ledger of processed `codepulsectl` mutation UUIDs
   and privacy-minimal responses may be kept in the live state for exactly-once
   relaunch recovery. It is not a permanent command history and is omitted from
@@ -73,15 +74,29 @@ Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
 Developer-tool metadata and the processed-event ledger remain local as part of
-CodePulse state and normal JSON backups. Automation rules and active-session
-ownership are local configuration/recovery state; transient claims are bounded
-and exist only to keep the current automatic session deterministic across a
-relaunch. When an application rule is enabled, CodePulse observes the current
-frontmost application through native workspace activation notifications and
-compares its bundle identifier against configured rules. It does not inspect
-windows or persist activation/deactivation history. Disabling an integration
-removes only the CodePulse-owned hook or plugin configuration; it does not
-delete user-owned tool configuration.
+CodePulse state. Portable backups retain developer-tool contexts already
+attached to saved or active sessions, but omit the processed-event ledger and
+the separate control ledger. Restoring a backup resets both ledgers, preserves
+the current Mac's launch-at-login setting, and leaves Session Automation
+disabled until the user reviews it. Automation rules and active-session
+ownership are local configuration/recovery state; imported active-session
+timelines are retained while stale automation claims and pending automatic-save
+ownership are cleared. When an application rule is enabled, CodePulse observes
+the current frontmost application through native workspace activation
+notifications and compares its bundle identifier against configured rules. It
+does not inspect windows or persist activation/deactivation history. Disabling
+an integration removes only the CodePulse-owned hook or plugin configuration;
+it does not delete user-owned tool configuration.
+
+## Backup restore
+
+The **Settings → Data** restore workflow reads a user-selected JSON file locally,
+shows a summary before confirmation, and replaces local state only after a
+verified recovery backup has been created. Backups can contain paths, bookmarks,
+session notes, and metadata, so treat both exported and automatic recovery files
+as potentially sensitive. No backup is uploaded to CodePulse or a cloud
+service. A moved project whose bookmark cannot resolve remains stored and is
+shown as needing relinking; CodePulse does not silently retarget it.
 
 Application automation does not collect or retain unrelated application
 durations, window titles, document names, file names, browser URLs, terminal
@@ -141,7 +156,9 @@ CodePulse does not intentionally add credentials, conversation content, or file
 contents, but user-entered text may itself be sensitive. Protect backup files
 and review them before sharing.
 
-CodePulse currently exports backups but does not restore them automatically.
+CodePulse restores backups only when the user explicitly selects a file in
+Settings and confirms replacement of local data; it does not restore backups
+automatically or contact a cloud service.
 
 ## Deleting data
 
