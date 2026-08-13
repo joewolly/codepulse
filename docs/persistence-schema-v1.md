@@ -61,6 +61,7 @@ copy has been made. Each subsequent save first preserves the last readable file
 as that backup. Schema v3 adds the activity graph and migrates legacy projects
 and sessions into workspaces, activities, manual runs, and active/waiting
 intervals while retaining the legacy payload for compatibility views. Schema v4
-adds the bounded, redacted developer-event diagnostics journal. Unknown future
-versions are left in place and presented as a non-destructive recovery
-condition.
+adds the bounded, redacted developer-event diagnostics journal. Schema v5 adds
+the persisted review-grace preference (default: 180 seconds) and optional,
+fingerprint-only agent-run lifecycle metadata. Unknown future versions are left
+in place and presented as a non-destructive recovery condition.

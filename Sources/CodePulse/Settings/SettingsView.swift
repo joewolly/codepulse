@@ -57,6 +57,19 @@ struct SettingsView: View {
                         disable: { _ = integrationManager.disable(tool) }
                     )
                 }
+
+                Stepper(
+                    "Agent review grace: \(store.state.settings.agentReviewGraceSeconds / 60) minutes",
+                    value: Binding(
+                        get: { store.state.settings.agentReviewGraceSeconds / 60 },
+                        set: { minutes in store.updateSettings { $0.agentReviewGraceSeconds = minutes * 60 } }
+                    ),
+                    in: 0...15
+                )
+                Text("After an agent stop, CodePulse counts this limited review period before marking the run waiting. A new activity, permission request, or session end cancels it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Workflow") {

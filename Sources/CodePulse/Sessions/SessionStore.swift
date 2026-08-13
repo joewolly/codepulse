@@ -74,6 +74,7 @@ final class SessionStore: ObservableObject {
         }
 
         processPendingIntegrationEvents(force: true)
+        reconcileAgentRuns()
 
         if automaticallyRefresh {
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -159,6 +160,7 @@ final class SessionStore: ObservableObject {
     func refresh() {
         now = clock.now
         processPendingIntegrationEvents()
+        reconcileAgentRuns()
     }
 
     @discardableResult
@@ -236,6 +238,51 @@ final class SessionStore: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    @discardableResult
+    func startAgentRun(
+        activityID: UUID,
+        integration: DeveloperEventIntegration,
+        sessionFingerprint: String,
+        parentSessionFingerprint: String? = nil,
+        at date: Date? = nil
+    ) -> UUID? {
+        let startedAt = date ?? clock.now
+        var nextState = state
+        do {
+            let run = try ActivityGraphRepository.startRun(
+                in: &nextState.activityGraph,
+                activityID: activityID,
+                kind: .agent,
+                at: startedAt,
+                agentMetadata: AgentRunMetadata(
+                    integration: integration,
+                    sessionFingerprint: sessionFingerprint,
+                    parentSessionFingerprint: parentSessionFingerprint,
+                    lastEventAt: startedAt
+                )
+            )
+            commit(nextState)
+            return run.id
+        } catch {
+            return nil
+        }
+    }
+
+    @discardableResult
+    func applyAgentLifecycleEvent(_ event: DeveloperEventV2, to runID: UUID) -> Bool {
+        var nextState = state
+        guard ActivityGraphRepository.applyAgentEvent(
+            in: &nextState.activityGraph,
+            runID: runID,
+            event: event,
+            reviewGrace: TimeInterval(nextState.settings.agentReviewGraceSeconds)
+        ) else {
+            return false
+        }
+        commit(nextState)
+        return true
     }
 
     @discardableResult
@@ -732,6 +779,15 @@ final class SessionStore: ObservableObject {
         guard didProcessV1 || didProcessV2 else {
             return
         }
+        commit(nextState)
+    }
+
+    private func reconcileAgentRuns() {
+        var nextState = state
+        guard ActivityGraphRepository.reconcileAgentRuns(
+            in: &nextState.activityGraph,
+            now: clock.now
+        ) else { return }
         commit(nextState)
     }
 

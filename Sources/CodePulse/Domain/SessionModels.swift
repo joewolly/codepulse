@@ -595,6 +595,7 @@ struct CodePulseSettings: Codable, Equatable {
     var defaultProjectBehavior: DefaultProjectBehavior
     var specificProjectID: UUID?
     var globalShortcutEnabled: Bool
+    var agentReviewGraceSeconds: Int
 
     init(
         launchAtLogin: Bool = false,
@@ -602,7 +603,8 @@ struct CodePulseSettings: Codable, Equatable {
         idleAppearance: IdleAppearance = .code,
         defaultProjectBehavior: DefaultProjectBehavior = .lastUsed,
         specificProjectID: UUID? = nil,
-        globalShortcutEnabled: Bool = true
+        globalShortcutEnabled: Bool = true,
+        agentReviewGraceSeconds: Int = 3 * 60
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -610,11 +612,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.defaultProjectBehavior = defaultProjectBehavior
         self.specificProjectID = specificProjectID
         self.globalShortcutEnabled = globalShortcutEnabled
+        self.agentReviewGraceSeconds = max(0, agentReviewGraceSeconds)
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds
     }
 
     init(from decoder: Decoder) throws {
@@ -625,6 +628,7 @@ struct CodePulseSettings: Codable, Equatable {
         defaultProjectBehavior = try container.decodeIfPresent(DefaultProjectBehavior.self, forKey: .defaultProjectBehavior) ?? .lastUsed
         specificProjectID = try container.decodeIfPresent(UUID.self, forKey: .specificProjectID)
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
+        agentReviewGraceSeconds = max(0, try container.decodeIfPresent(Int.self, forKey: .agentReviewGraceSeconds) ?? 3 * 60)
     }
 }
 

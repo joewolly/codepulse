@@ -24,8 +24,9 @@ developer-tool metadata.
 - GitHub context — associates local sessions with their GitHub repository and
   optionally their current pull request when the repository has a GitHub remote.
 - Receives optional local lifecycle metadata from Codex and OpenCode through a
-  versioned, content-safe event boundary. It records redacted receipt
-  diagnostics without starting or controlling a CodePulse session.
+  versioned, content-safe event boundary; dedicated per-tool run correlation is
+  introduced incrementally by the agent-tracking roadmap. It records redacted
+  receipt diagnostics without starting or controlling a CodePulse session.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -147,13 +148,17 @@ To inspect the optional CLI status yourself, use:
 gh auth status
 ```
 
-CodePulse 0.6 adds optional Developer Integrations for Codex and OpenCode. A
-small local helper normalizes lifecycle metadata into `DeveloperEventV2`. The
-receiver validates event size, schema, timestamp, integration, and idempotency
-before passing it through CodePulse-owned v2 inboxes. It keeps bounded,
-redacted diagnostics and never persists prompts, transcripts, source content,
-commands, or raw hook bodies. Integration events never start, pause, resume, or
-finish a CodePulse session.
+CodePulse's optional Developer Integrations use a small local helper to
+normalize lifecycle metadata into `DeveloperEventV2`. The receiver validates
+event size, schema, timestamp, integration, and idempotency before passing it
+through CodePulse-owned v2 inboxes. It keeps bounded, redacted diagnostics and
+never persists prompts, transcripts, source content, commands, or raw hook
+bodies. The shared agent-run state machine defines active, waiting, review-
+grace, ended, and orphaned timing for explicitly correlated agent runs;
+dedicated per-tool correlation arrives in the next roadmap features. It does
+not start or control a manual CodePulse session. See
+[`docs/agent-run-state-machine.md`](docs/agent-run-state-machine.md) for the
+event mapping and timing rules.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

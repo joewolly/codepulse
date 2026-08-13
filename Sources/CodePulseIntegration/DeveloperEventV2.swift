@@ -13,6 +13,8 @@ public enum DeveloperEventIntegration: String, Codable, CaseIterable, Equatable,
 public enum DeveloperEventKindV2: String, Codable, CaseIterable, Equatable, Sendable {
     case sessionStarted = "session.started"
     case activityObserved = "activity.observed"
+    case permissionRequested = "permission.requested"
+    case sessionStopped = "session.stopped"
     case sessionIdle = "session.idle"
     case sessionEnded = "session.ended"
     case integrationError = "integration.error"

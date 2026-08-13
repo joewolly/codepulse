@@ -26,7 +26,8 @@ Depending on how the app is used, that state can include:
   entries and prunes entries older than 30 days during event processing.
 - Bounded v2 developer-event diagnostics: receipt status, fixed redacted
   rejection codes, parser/integration versions, and installation-salted event
-  fingerprints.
+  fingerprints. Agent runs retain only the integration, salted session
+  fingerprint, lifecycle state, and interval timestamps needed for timing.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -51,7 +52,8 @@ accepted, duplicate, or rejected receipts under
 `~/Library/Application Support/CodePulse/Integrations/`. CodePulse does not
 need to be running for an event or receipt to wait there. A filesystem failure
 may leave an inbox file locally; the app removes handoffs best-effort after
-processing. Events are not attached to unrelated projects or manual sessions.
+processing. Agent-run correlation is conservative and is not inferred from
+unrelated projects or manual sessions.
 
 CodePulse does **not** persist or inspect prompts, user messages, assistant
 messages, conversation transcripts, source-file contents, terminal command
@@ -60,10 +62,10 @@ decisions, reasoning, conversation summaries, credentials, or API keys. The
 Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
-Developer-tool metadata, redacted diagnostics, and the processed-event ledger
-remain local as part of CodePulse state and normal JSON backups. Disabling an
-integration removes only the CodePulse-owned hook or plugin configuration; it
-does not delete user-owned tool configuration.
+Developer-tool metadata, redacted diagnostics, agent-run lifecycle metadata,
+and the processed-event ledger remain local as part of CodePulse state and
+normal JSON backups. Disabling an integration removes only the CodePulse-owned
+hook or plugin configuration; it does not delete user-owned tool configuration.
 
 ## Network access
 

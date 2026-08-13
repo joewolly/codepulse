@@ -1,3 +1,4 @@
+import CodePulseIntegration
 import Foundation
 
 enum ActivityGraphError: Error, Equatable {
@@ -50,7 +51,8 @@ struct ActivityGraphRepository {
         activityID: UUID,
         kind: RunKind,
         at date: Date,
-        initialState: IntervalState = .active
+        initialState: IntervalState = .active,
+        agentMetadata: AgentRunMetadata? = nil
     ) throws -> Run {
         guard graph.activities.contains(where: { $0.id == activityID }) else {
             throw ActivityGraphError.activityNotFound
@@ -59,10 +61,35 @@ struct ActivityGraphRepository {
             activityID: activityID,
             kind: kind,
             startedAt: date,
-            intervals: [Interval(state: initialState, startedAt: date)]
+            intervals: agentMetadata?.state == .new ? [] : [Interval(state: initialState, startedAt: date)],
+            agentMetadata: agentMetadata
         )
         graph.runs.append(run)
         return run
+    }
+
+    @discardableResult
+    static func applyAgentEvent(
+        in graph: inout ActivityGraph,
+        runID: UUID,
+        event: DeveloperEventV2,
+        reviewGrace: TimeInterval
+    ) -> Bool {
+        guard let index = graph.runs.firstIndex(where: { $0.id == runID }) else { return false }
+        return AgentRunLifecycle.apply(event, to: &graph.runs[index], reviewGrace: reviewGrace)
+    }
+
+    @discardableResult
+    static func reconcileAgentRuns(
+        in graph: inout ActivityGraph,
+        now: Date,
+        staleAfter: TimeInterval = AgentRunLifecycle.defaultStaleRunTimeout
+    ) -> Bool {
+        var changed = false
+        for index in graph.runs.indices where graph.runs[index].kind == .agent {
+            changed = AgentRunLifecycle.advanceTime(in: &graph.runs[index], now: now, staleAfter: staleAfter) || changed
+        }
+        return changed
     }
 
     static func beginInterval(
