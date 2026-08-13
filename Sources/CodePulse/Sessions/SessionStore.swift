@@ -939,14 +939,33 @@ final class SessionStore: ObservableObject {
         historyGroups(for: HistoryQuery())
     }
 
+    /// Returns saved sessions in the same filtered, newest-first order used by
+    /// History. Keeping this collection separate from grouping lets exports
+    /// consume the exact same canonical matches without reimplementing query
+    /// semantics.
+    func historySessions(
+        for query: HistoryQuery,
+        referenceDate: Date? = nil
+    ) -> [CompletedSession] {
+        let referenceDate = referenceDate ?? clock.now
+        return state.completedSessions
+            .filter { session in
+                query.matches(session, calendar: calendar, referenceDate: referenceDate)
+            }
+            .sorted { lhs, rhs in
+                if lhs.startedAt != rhs.startedAt {
+                    return lhs.startedAt > rhs.startedAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
     func historyGroups(
         for query: HistoryQuery,
         referenceDate: Date? = nil
     ) -> [DaySessionGroup] {
         let referenceDate = referenceDate ?? clock.now
-        let matchingSessions = state.completedSessions.filter { session in
-            query.matches(session, calendar: calendar, referenceDate: referenceDate)
-        }
+        let matchingSessions = historySessions(for: query, referenceDate: referenceDate)
         let groups = Dictionary(grouping: matchingSessions) { session in
             calendar.startOfDay(for: session.startedAt)
         }
@@ -956,7 +975,7 @@ final class SessionStore: ObservableObject {
                 return DaySessionGroup(id: day, sessions: groups[day] ?? [], totalDuration: 0)
             }
             let interval = DateInterval(start: day, end: dayEnd)
-            let sessions = (groups[day] ?? []).sorted { $0.startedAt > $1.startedAt }
+            let sessions = groups[day] ?? []
             let total = sessions.reduce(into: 0) { result, session in
                 result += session.activeDuration(in: interval)
             }
