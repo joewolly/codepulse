@@ -51,3 +51,7 @@ Each report builds in-memory dictionaries keyed by existing workspace, activity,
 and run UUIDs, then makes one pass over the window's usage samples. There is no
 disk scan or persisted analytics index. The test suite exercises a 2,000-sample
 history to confirm that every sample is preserved in its dimensional totals.
+
+For the user-facing selected-period presentation, data-quality states, and
+local CSV/JSON export schema, see [Usage Insights and local
+exports](usage-insights.md).

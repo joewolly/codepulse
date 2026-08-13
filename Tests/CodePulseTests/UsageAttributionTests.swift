@@ -140,6 +140,99 @@ final class UsageAttributionTests: XCTestCase {
         XCTAssertEqual(report.tokens.total, 2_000)
         XCTAssertEqual(report.dimensions[.integration]?.map(\.sampleCount).reduce(0, +), 2_000)
     }
+
+    func testUsageInsightDataStatesDistinguishNoDataTimingOnlyPartialAndPriced() {
+        let fixture = Fixture()
+        let reference = fixture.date("2026-08-13T13:00:00Z")
+        let graph = ActivityGraph(workspaces: [fixture.workspace], activities: [fixture.activity], runs: [fixture.run])
+        let timingOnly = UsageAttributionService.report(
+            state: AppState(activityGraph: graph), calendar: fixture.calendar, referenceDate: reference, window: .day
+        )
+        XCTAssertEqual(UsageInsightsDataState.resolve(report: timingOnly), .timingOnly)
+
+        let noData = UsageAttributionService.report(
+            state: AppState(), calendar: fixture.calendar, referenceDate: reference, window: .day
+        )
+        XCTAssertEqual(UsageInsightsDataState.resolve(report: noData), .noData)
+
+        let partialSample = fixture.sample(runID: fixture.run.id, workspaceID: fixture.workspace.id, observedAt: reference, model: "gpt-5", provider: "openai")
+        let partial = UsageAttributionService.report(
+            state: AppState(activityGraph: graph, usageSamples: [partialSample]), calendar: fixture.calendar, referenceDate: reference, window: .day
+        )
+        XCTAssertEqual(UsageInsightsDataState.resolve(report: partial), .partialUsage)
+
+        let pricedSample = fixture.sample(runID: fixture.run.id, workspaceID: fixture.workspace.id, observedAt: reference, model: "gpt-5", provider: "openai", reportedCost: Decimal(string: "1.25"))
+        let priced = UsageAttributionService.report(
+            state: AppState(activityGraph: graph, usageSamples: [pricedSample]), calendar: fixture.calendar, referenceDate: reference, window: .day
+        )
+        XCTAssertEqual(UsageInsightsDataState.resolve(report: priced), .pricedUsage)
+    }
+
+    func testUsageExportRoundTripsJSONAndExcludesSourceIdentifiersAndContextByDefault() throws {
+        let fixture = Fixture()
+        let reference = fixture.date("2026-08-13T13:00:00Z")
+        let sample = UsageSample(
+            integration: .claudeCode,
+            observedAt: reference,
+            sessionFingerprint: "do-not-export-this",
+            runID: fixture.run.id,
+            workspaceID: fixture.workspace.id,
+            model: "claude-test",
+            provider: "anthropic",
+            effort: "high",
+            serviceMode: "subscription",
+            tokens: UsageTokenCounts(input: 8, output: 3),
+            providerReportedCost: Decimal(string: "2.50"),
+            providerReportedCurrency: "USD",
+            includesSubagentUsage: true
+        )
+        let report = UsageAttributionService.report(
+            state: AppState(activityGraph: ActivityGraph(workspaces: [fixture.workspace], activities: [fixture.activity], runs: [fixture.run]), usageSamples: [sample]),
+            calendar: fixture.calendar,
+            referenceDate: reference,
+            window: .day
+        )
+
+        let json = try UsageExportCodec.jsonData(report: report, exportedAt: reference)
+        let document = try UsageExportCodec.decodeJSON(json)
+        XCTAssertEqual(document.format, UsageExportDocument.format)
+        XCTAssertEqual(document.version, UsageExportDocument.currentVersion)
+        XCTAssertEqual(document.samples.first?.totalTokens, 11)
+        XCTAssertNil(document.samples.first?.workspace)
+        XCTAssertNil(document.samples.first?.activity)
+        XCTAssertEqual(document.samples.first?.costs.first?.label, "Provider-reported cost")
+        XCTAssertFalse(String(decoding: json, as: UTF8.self).contains("do-not-export-this"))
+        XCTAssertFalse(String(decoding: json, as: UTF8.self).contains("Workspace"))
+
+        let csv = String(decoding: UsageExportCodec.csvData(report: report, exportedAt: reference), as: UTF8.self)
+        XCTAssertTrue(csv.contains("cost_label"))
+        XCTAssertTrue(csv.contains("Provider-reported cost"))
+        XCTAssertFalse(csv.contains("do-not-export-this"))
+    }
+
+    func testUsageExportIncludesSelectedContextFieldsAndProjectFilter() {
+        let fixture = Fixture()
+        let projectID = UUID()
+        var workspace = fixture.workspace
+        workspace.legacyProjectID = projectID
+        let sample = fixture.sample(runID: fixture.run.id, workspaceID: workspace.id, observedAt: fixture.date("2026-08-13T12:30:00Z"), model: "gpt-5", provider: "openai")
+        let state = AppState(activityGraph: ActivityGraph(workspaces: [workspace], activities: [fixture.activity], runs: [fixture.run]), usageSamples: [sample])
+        let report = UsageAttributionService.report(
+            state: state,
+            calendar: fixture.calendar,
+            referenceDate: fixture.date("2026-08-13T13:00:00Z"),
+            window: .day,
+            project: .projectID(projectID)
+        )
+        XCTAssertEqual(report.samples.count, 1)
+        let document = UsageExportCodec.document(
+            report: report,
+            exportedAt: fixture.date("2026-08-13T13:00:00Z"),
+            options: UsageExportOptions(includedFields: [.workspace, .activity])
+        )
+        XCTAssertEqual(document.samples.first?.workspace, "Workspace")
+        XCTAssertEqual(document.samples.first?.activity, "Activity")
+    }
 }
 
 private struct Fixture {

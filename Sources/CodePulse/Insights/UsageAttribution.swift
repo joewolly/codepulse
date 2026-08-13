@@ -132,6 +132,9 @@ struct UsageReconciliationRow: Identifiable, Equatable {
     let integration: String
     let provider: String
     let model: String
+    /// A display-only explanation for an aggregate that already includes
+    /// Claude child-agent usage. It is never an external identifier.
+    let rollupDetail: String?
     let tokens: UsageTokenTotals
     let costs: [UsageMoneyTotal]
 }
@@ -154,11 +157,13 @@ enum UsageAttributionService {
         state: AppState,
         calendar: Calendar,
         referenceDate: Date,
-        window: UsageAnalyticsWindow
+        window: UsageAnalyticsWindow,
+        project: InsightsProjectFilter = .allProjects
     ) -> UsageAnalyticsReport {
         let interval = window.interval(calendar: calendar, referenceDate: referenceDate)
         let attributed = attribute(samples: state.usageSamples, graph: state.activityGraph)
             .filter { interval.contains($0.sample.observedAt) }
+            .filter { matches($0, project: project) }
             .sorted { $0.sample.observedAt < $1.sample.observedAt }
         let tokens = tokenTotals(for: attributed)
         let costs = costTotals(for: attributed)
@@ -174,6 +179,19 @@ enum UsageAttributionService {
             dimensions: dimensions,
             reconciliation: reconciliationRows(for: attributed)
         )
+    }
+
+    private static func matches(_ attributed: UsageAttributedSample, project: InsightsProjectFilter) -> Bool {
+        switch project {
+        case .allProjects:
+            return true
+        case .noProject:
+            return attributed.workspace?.legacyProjectID == nil
+        case .projectID(let id):
+            return attributed.workspace?.legacyProjectID == id
+        case .historicalName(let name):
+            return attributed.workspace?.legacyProjectID == nil && attributed.workspace?.name == name
+        }
     }
 
     static func attribute(samples: [UsageSample], graph: ActivityGraph) -> [UsageAttributedSample] {
@@ -260,6 +278,9 @@ enum UsageAttributionService {
                 integration: attributed.sample.integration.title,
                 provider: provider,
                 model: model,
+                rollupDetail: attributed.sample.includesSubagentUsage
+                    ? "Includes Claude child usage once"
+                    : nil,
                 tokens: tokenTotals(for: [attributed]),
                 costs: costTotals(for: [attributed])
             )

@@ -1,5 +1,7 @@
+import AppKit
 import Charts
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct InsightsView: View {
     @EnvironmentObject private var store: SessionStore
@@ -40,7 +42,8 @@ struct InsightsView: View {
             state: store.state,
             calendar: store.calendar,
             referenceDate: store.now,
-            window: window
+            window: window,
+            project: project
         )
     }
 
@@ -85,7 +88,7 @@ struct InsightsView: View {
                     }
 
                     if !usageReport.samples.isEmpty {
-                        UsageAttributionSection(report: usageReport)
+                        UsageAttributionSection(state: store.state, report: usageReport, exportedAt: store.now)
                     }
                 } else {
                     InsightsEmptyState(
@@ -264,41 +267,42 @@ private struct InsightMetric: View {
 }
 
 private struct UsageAttributionSection: View {
+    let state: AppState
     let report: UsageAnalyticsReport
+    let exportedAt: Date
+    @State private var exportFormat: UsageExportFormat = .json
+    @State private var exportOptions = UsageExportOptions()
+    @State private var exportError: String?
 
     private let visibleDimensions: [UsageAttributionDimension] = [.workspace, .domain, .workType, .integration, .provider, .model]
 
     var body: some View {
-        InsightSection(title: "Usage Attribution", systemImage: "chart.bar.doc.horizontal") {
+        let quality = UsageInsightsDataQuality.resolve(state: state, report: report)
+        InsightSection(title: "Usage Insights", systemImage: "chart.bar.doc.horizontal") {
             VStack(alignment: .leading, spacing: 14) {
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                    GridRow {
-                        Text("Tokens")
-                        Text("\(report.tokens.total)")
-                            .monospacedDigit()
-                    }
-                    GridRow {
-                        Text("Manual active")
-                        Text(CodePulseFormatting.duration(report.timing.manualActive))
-                            .monospacedDigit()
-                    }
-                    GridRow {
-                        Text("Agent runtime")
-                        Text(CodePulseFormatting.duration(report.timing.agentRuntime))
-                            .monospacedDigit()
-                    }
-                    GridRow {
-                        Text("Combined wall-active")
-                        Text(CodePulseFormatting.duration(report.timing.combinedWallActive))
-                            .monospacedDigit()
-                    }
-                    GridRow {
-                        Text("Agent waiting")
-                        Text(CodePulseFormatting.duration(report.timing.agentWaiting))
-                            .monospacedDigit()
-                    }
+                Text(quality.state.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12)], spacing: 12) {
+                    UsageMetricCard(title: "Tokens", value: "\(report.tokens.total)", detail: "Recorded local usage")
+                    UsageMetricCard(title: "Manual active", value: CodePulseFormatting.duration(report.timing.manualActive), detail: "Manual runs only")
+                    UsageMetricCard(title: "Agent runtime", value: CodePulseFormatting.duration(report.timing.agentRuntime), detail: "Overlaps allowed")
+                    UsageMetricCard(title: "Combined wall-active", value: CodePulseFormatting.duration(report.timing.combinedWallActive), detail: "Overlaps de-duplicated")
+                    UsageMetricCard(title: "Agent waiting", value: CodePulseFormatting.duration(report.timing.agentWaiting), detail: "Excluded from active time")
                 }
-                .font(.subheadline)
+
+                if !quality.messages.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(quality.messages, id: \.self) { message in
+                            Label(message, systemImage: "info.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Usage data quality")
+                }
 
                 if !report.costs.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
@@ -329,14 +333,26 @@ private struct UsageAttributionSection: View {
                     }
                 }
 
-                DisclosureGroup("Reconciliation (\(report.reconciliation.count) samples)") {
+                HStack {
+                    Text("Privacy-safe details")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    exportMenu
+                }
+
+                DisclosureGroup("Activity, run, and sample details (\(report.reconciliation.count) samples)") {
                     ForEach(report.reconciliation.prefix(25)) { row in
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(row.workspace) · \(row.activity)")
                                 .font(.caption.weight(.medium))
-                            Text("\(row.integration) · \(row.provider) · \(row.model) · \(row.tokens.total) tokens")
+                            Text("\(CodePulseFormatting.time(row.observedAt)) · \(row.integration) · \(row.provider) · \(row.model) · \(row.tokens.total) tokens")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            if let rollupDetail = row.rollupDetail {
+                                Text(rollupDetail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .padding(.vertical, 2)
                     }
@@ -349,7 +365,65 @@ private struct UsageAttributionSection: View {
                 .font(.subheadline)
             }
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Usage attribution")
+            .accessibilityLabel("Usage insights")
+        }
+        .alert("Usage Export Failed", isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button("OK", role: .cancel) { exportError = nil }
+        } message: {
+            Text(exportError ?? "CodePulse could not export usage data.")
+        }
+    }
+
+    private var exportMenu: some View {
+        Menu {
+            Picker("Format", selection: $exportFormat) {
+                ForEach(UsageExportFormat.allCases) { format in
+                    Text(format.rawValue.uppercased()).tag(format)
+                }
+            }
+            Divider()
+            Text("Include context labels")
+            ForEach(UsageExportField.allCases) { field in
+                Toggle(field.title, isOn: Binding(
+                    get: { exportOptions.includes(field) },
+                    set: { enabled in
+                        if enabled { exportOptions.includedFields.insert(field) }
+                        else { exportOptions.includedFields.remove(field) }
+                    }
+                ))
+            }
+            Divider()
+            Button("Choose location…") { export() }
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
+        }
+        .accessibilityLabel("Export usage insights")
+        .accessibilityHint("Exports local usage rows without paths or source identifiers")
+    }
+
+    private func export() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = exportFormat == .json ? [.json] : [.commaSeparatedText]
+        panel.nameFieldStringValue = "CodePulse Usage \(CodePulseFormatting.exportDate(exportedAt)).\(exportFormat.fileExtension)"
+        panel.prompt = "Export Usage"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let data: Data
+                switch exportFormat {
+                case .json:
+                    data = try UsageExportCodec.jsonData(report: report, exportedAt: exportedAt, options: exportOptions)
+                case .csv:
+                    data = UsageExportCodec.csvData(report: report, exportedAt: exportedAt, options: exportOptions)
+                }
+                try data.write(to: url, options: .atomic)
+            } catch {
+                exportError = error.localizedDescription
+            }
         }
     }
 
@@ -358,6 +432,31 @@ private struct UsageAttributionSection: View {
         formatter.numberStyle = .currency
         formatter.currencyCode = total.currency
         return formatter.string(from: total.amount as NSDecimalNumber) ?? "\(total.amount) \(total.currency)"
+    }
+}
+
+private struct UsageMetricCard: View {
+    let title: String
+    let value: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+            Text(title)
+                .font(.caption.weight(.medium))
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(value), \(detail)")
     }
 }
 

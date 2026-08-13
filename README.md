@@ -42,6 +42,9 @@ developer-tool metadata.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
+- Adds Usage Insights for selected periods/projects: manual versus agent timing,
+  waiting, token and labeled cost breakdowns, privacy-safe sample details, and
+  local CSV/JSON export with opt-in context labels.
 - Exports a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -83,6 +86,10 @@ or allow the automatic update check.
    before enabling Claude Code tracking, or
    [`docs/opencode-usage-tracking.md`](docs/opencode-usage-tracking.md) before
    enabling OpenCode tracking.
+9. Open **Insights** to compare manual active time, agent runtime, combined
+   wall-active time, waiting, and optional usage/cost representations. Its
+   **Export** menu writes the selected period locally; workspace and activity
+   labels are opt-in, and paths/source identifiers are never exported.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
@@ -236,6 +243,16 @@ keep manual active time, summed agent runtime, unioned combined wall-active
 time, and agent waiting separate; concurrent runs never inflate wall-active
 time. See [`docs/usage-attribution.md`](docs/usage-attribution.md) for metric
 definitions, reconciliation, and redaction rules.
+
+Usage Insights applies the selected period and project filter to the same local
+attribution layer. It presents manual active time, summed agent runtime,
+de-duplicated wall-active time, waiting, tokens, and each cost representation
+without treating estimates as charges. Privacy-safe sample details and local
+JSON/CSV exports retain selected date ranges, explicit source labels, and cost
+provenance. Workspace/activity labels are opt-in; paths, raw identifiers,
+fingerprints, prompts, and transcript content are never exported. See
+[`docs/usage-insights.md`](docs/usage-insights.md) for definitions, data quality
+states, and the export schema.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

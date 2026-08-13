@@ -57,6 +57,11 @@ Depending on how the app is used, that state can include:
   reconciliation rows. They use existing sample, workspace, activity, and run
   data; they do not add a raw-identifier index, a new analytics database, or a
   new external data source.
+- Usage Insights export: a user-selected local CSV or JSON file for the chosen
+  period/project filter. It contains only usage counters, labeled costs and
+  available calculation provenance, plus context labels the user explicitly
+  selects. Paths, UUIDs, raw source/session identifiers, fingerprints, prompts,
+  transcripts, commands, source content, and credentials are never included.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -187,6 +192,12 @@ provenance described above. They do not include raw usage source files, prompts,
 transcripts, commands, transcript paths, or external session identifiers.
 
 CodePulse currently exports backups but does not restore them automatically.
+
+Usage Insights exports are separate from backups. They are written only after
+the user chooses a destination and are not retained by CodePulse. The default
+export excludes workspace and activity labels; users can opt them in for a
+specific file. Treat every exported file according to the labels and token/cost
+metadata it contains before sharing it.
 
 ## Deleting data
 
