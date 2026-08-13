@@ -2,9 +2,9 @@
 
 CodePulse is designed as a local-first coding timer and journal. It does not
 require an account and does not include cloud sync, telemetry, product analytics,
-advertising, or application/browser/keyboard/mouse/filesystem activity
-monitoring. Optional Session Automation reacts only to enabled local
-developer-tool lifecycle metadata.
+advertising, or application-usage history. Optional Session Automation reacts
+to enabled local developer-tool lifecycle metadata and, when explicitly
+configured, the current frontmost application's bundle identifier.
 
 ## Data stored on the Mac
 
@@ -22,10 +22,11 @@ that state can include:
   lightweight pull request metadata (number, title, state, draft status, URL,
   and branch names).
 - App settings and any active session needed for relaunch recovery.
-- Optional Session Automation rules, the global automation setting, and the
+- Session Presets, optional Session Automation rules, configured application
+  bundle identifiers/display names, the global automation setting, and the
   bounded ownership/timing metadata needed to recover an automatically started
-  active session. Raw developer-tool event files and an unbounded event history
-  are not stored in backups.
+  active session. Raw developer-tool event files and an unbounded application
+  activation history are not stored in backups.
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
   prunes entries older than 30 days during event processing.
@@ -70,8 +71,18 @@ Developer-tool metadata and the processed-event ledger remain local as part of
 CodePulse state and normal JSON backups. Automation rules and active-session
 ownership are local configuration/recovery state; transient claims are bounded
 and exist only to keep the current automatic session deterministic across a
-relaunch. Disabling an integration removes only the CodePulse-owned hook or
-plugin configuration; it does not delete user-owned tool configuration.
+relaunch. When an application rule is enabled, CodePulse observes the current
+frontmost application through native workspace activation notifications and
+compares its bundle identifier against configured rules. It does not inspect
+windows or persist activation/deactivation history. Disabling an integration
+removes only the CodePulse-owned hook or plugin configuration; it does not
+delete user-owned tool configuration.
+
+Application automation does not collect or retain unrelated application
+durations, window titles, document names, file names, browser URLs, terminal
+contents, clipboard contents, keyboard or mouse input, screen contents, or
+accessibility element contents. It does not require Accessibility or Screen
+Recording permission.
 
 ## Network access
 
@@ -97,11 +108,12 @@ score.
 
 Backup export creates a versioned JSON file at a location chosen by the user.
 The backup can contain the same local state described above, including freeform
-session text, filesystem paths, optional developer-tool metadata, automation
-rules, active automation ownership needed for recovery, and the processed-event
-ledger containing event identifiers and processing timestamps (up to 2,048
-entries; event processing prunes entries older than 30 days). Raw inbox event
-files and a separate automation activity history are not intentionally added.
+session text, filesystem paths, session presets, configured application
+identities, optional developer-tool metadata, automation rules, active
+automation ownership needed for recovery, and the processed-event ledger
+containing event identifiers and processing timestamps (up to 2,048 entries;
+event processing prunes entries older than 30 days). Raw inbox event files and
+a separate application activation history are not intentionally added.
 CodePulse does not intentionally add credentials, conversation content, or file
 contents, but user-entered text may itself be sensitive. Protect backup files
 and review them before sharing.

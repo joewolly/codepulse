@@ -25,8 +25,10 @@ CodePulse is a local-first macOS application:
 
 - It has no account system, cloud sync, telemetry, product analytics, or remote
   activity-monitoring service. Optional Session Automation reacts only to
-  explicit local Codex/OpenCode lifecycle metadata and never monitors
-  applications, browsers, keyboards, mice, clipboards, or filesystem activity.
+  explicit local Codex/OpenCode lifecycle metadata and, when the user enables
+  an application rule, the current frontmost bundle identifier. It does not
+  monitor application usage history, browsers, keyboards, mice, clipboards, or
+  filesystem activity.
 - App state is stored locally in the user's Application Support directory.
 - Project access is limited to folders the user selects. CodePulse stores a
   security-scoped bookmark so that access can be restored across launches.
@@ -57,7 +59,9 @@ excluded.
 
 When Session Automation is enabled, a validated event can influence only the
 CodePulse session lifecycle when it matches a user-created Codex/OpenCode rule
-for that configured project. Manual sessions have no automation ownership, and
+for that configured project. An application rule can influence the same path
+only when the current frontmost application's bundle identifier matches its
+configured preset/project. Manual sessions have no automation ownership, and
 manual lifecycle actions disable control for an automatically started session.
 Automation never executes event content, invokes a developer tool, runs a path
 from an event, changes repository files, or performs GitHub mutations.
