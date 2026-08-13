@@ -29,6 +29,26 @@ enum CompletedSessionProjectAssignment: Equatable {
     case project(UUID)
 }
 
+enum ProjectArchiveError: LocalizedError, Equatable {
+    case projectNotFound
+    case alreadyArchived
+    case alreadyActive
+    case activeSession
+
+    var errorDescription: String? {
+        switch self {
+        case .projectNotFound:
+            return "The project could not be found."
+        case .alreadyArchived:
+            return "The project is already archived."
+        case .alreadyActive:
+            return "The project is already active."
+        case .activeSession:
+            return "Finish or discard the current session before archiving this project."
+        }
+    }
+}
+
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
@@ -93,6 +113,7 @@ final class SessionStore: ObservableObject {
         }
 
         var normalizedState = state
+        normalizeProjectConfiguration(in: &normalizedState)
         relinquishInvalidAutomation(in: &normalizedState)
         if normalizedState != state {
             state = normalizedState
@@ -177,9 +198,14 @@ final class SessionStore: ObservableObject {
         case .noProject:
             return nil
         case .specificProject:
-            return state.settings.specificProjectID
+            guard let specificProjectID = state.settings.specificProjectID,
+                  state.projects.contains(where: { $0.id == specificProjectID && $0.isActive }) else {
+                return nil
+            }
+            return specificProjectID
         case .lastUsed:
             return state.projects
+                .filter(\.isActive)
                 .compactMap { project in
                     project.lastUsedAt.map { (project.id, $0) }
                 }
@@ -188,7 +214,30 @@ final class SessionStore: ObservableObject {
     }
 
     var projectsSortedByRecentUse: [ProjectRecord] {
-        state.projects.sorted { lhs, rhs in
+        sortProjectsByRecentUse(state.projects)
+    }
+
+    var activeProjectsSortedByRecentUse: [ProjectRecord] {
+        sortProjectsByRecentUse(state.projects.filter(\.isActive))
+    }
+
+    var archivedProjectsSortedByRecentUse: [ProjectRecord] {
+        sortProjectsByRecentUse(state.projects.filter(\.isArchived))
+    }
+
+    /// Projects that may be selected for future manual work. Folder relinking
+    /// remains a separate concern; manual sessions have historically allowed a
+    /// project whose folder is currently unresolved.
+    var selectableProjectsSortedByRecentUse: [ProjectRecord] {
+        activeProjectsSortedByRecentUse
+    }
+
+    var automationEligibleProjects: [ProjectRecord] {
+        activeProjectsSortedByRecentUse.filter { !$0.requiresRelink }
+    }
+
+    private func sortProjectsByRecentUse(_ projects: [ProjectRecord]) -> [ProjectRecord] {
+        projects.sorted { lhs, rhs in
             switch (lhs.lastUsedAt, rhs.lastUsedAt) {
             case let (left?, right?) where left != right:
                 return left > right
@@ -199,6 +248,48 @@ final class SessionStore: ObservableObject {
             default:
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
+        }
+    }
+
+    func isProjectAvailableForManualStart(_ projectID: UUID?) -> Bool {
+        guard let projectID else { return true }
+        return state.projects.contains { $0.id == projectID && $0.isActive }
+    }
+
+    func isSessionPresetAvailableForManualStart(_ preset: SessionPreset) -> Bool {
+        preset.isValid && isProjectAvailableForManualStart(preset.projectID)
+    }
+
+    var sessionPresetsAvailableForManualStart: [SessionPreset] {
+        sessionPresetsSorted.filter(isSessionPresetAvailableForManualStart)
+    }
+
+    var sessionPresetsAvailableForAutomation: [SessionPreset] {
+        sessionPresetsSorted.filter { preset in
+            guard let projectID = preset.projectID,
+                  let project = state.projects.first(where: { $0.id == projectID }) else {
+                return false
+            }
+            return project.isActive
+        }
+    }
+
+    func projectsForPresetEditing(_ preset: SessionPreset?) -> [ProjectRecord] {
+        var projects = activeProjectsSortedByRecentUse
+        if let archivedProjectID = preset?.projectID,
+           let archivedProject = state.projects.first(where: { $0.id == archivedProjectID && $0.isArchived }) {
+            projects.append(archivedProject)
+        }
+        return projects
+    }
+
+    func presetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
+        sessionPresetsSorted.filter { preset in
+            guard let projectID = preset.projectID,
+                  let project = state.projects.first(where: { $0.id == projectID }) else {
+                return true
+            }
+            return project.isActive || preset.id == rule?.presetID
         }
     }
 
@@ -230,7 +321,7 @@ final class SessionStore: ObservableObject {
         guard let frontmostApplicationMonitor else { return }
 
         let needsMonitoring = state.settings.automationEnabled && state.automationRules.contains { rule in
-            rule.isEnabled && rule.applicationTrigger != nil
+            rule.isEnabled && rule.applicationTrigger != nil && isAutomationRuleUsable(rule)
         }
 
         if needsMonitoring {
@@ -332,6 +423,7 @@ final class SessionStore: ObservableObject {
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
               let project = state.projects.first(where: { $0.id == projectID }),
+              project.isActive,
               DeveloperToolProjectResolver.isUsableFolder(for: project),
               isAutomationTriggerValid(rule.trigger),
               sourceMatchesTrigger(source, trigger: rule.trigger) else {
@@ -395,6 +487,10 @@ final class SessionStore: ObservableObject {
         automationMetadata: SessionAutomationMetadata?
     ) -> (state: AppState, session: ActiveSession, folderURL: URL?)? {
         guard state.activeSession == nil else { return nil }
+
+        guard projectID == nil || state.projects.contains(where: { $0.id == projectID && $0.isActive }) else {
+            return nil
+        }
 
         let project = projectID.flatMap { id in state.projects.first(where: { $0.id == id }) }
         let folderURL = project.flatMap { projectFolderURL(for: $0) }
@@ -608,6 +704,15 @@ final class SessionStore: ObservableObject {
                     date: date
                 )
             }
+            guard !project.isArchived else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .presetOrProjectNotFound,
+                    message: "Project \"\(project.name)\" is archived.",
+                    action: command.action,
+                    date: date
+                )
+            }
             guard let type = SessionType(rawValue: sessionType) else {
                 return recordControlFailure(
                     commandID: command.id,
@@ -768,6 +873,17 @@ final class SessionStore: ObservableObject {
                 commandID: commandID,
                 result: .presetOrProjectNotFound,
                 message: "The session preset references a missing project.",
+                action: action,
+                date: date
+            )
+        }
+        if let projectID = preset.projectID,
+           let project = state.projects.first(where: { $0.id == projectID }),
+           project.isArchived {
+            return recordControlFailure(
+                commandID: commandID,
+                result: .presetOrProjectNotFound,
+                message: "Project \"\(project.name)\" is archived.",
                 action: action,
                 date: date
             )
@@ -1104,6 +1220,44 @@ final class SessionStore: ObservableObject {
     }
 
     @discardableResult
+    func archiveProject(id: UUID, at date: Date? = nil) throws -> ProjectRecord {
+        guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        guard !state.projects[index].isArchived else {
+            throw ProjectArchiveError.alreadyArchived
+        }
+        guard state.activeSession?.projectID != id else {
+            throw ProjectArchiveError.activeSession
+        }
+
+        var nextState = state
+        nextState.projects[index].archivedAt = date ?? clock.now
+        if nextState.settings.defaultProjectBehavior == .specificProject,
+           nextState.settings.specificProjectID == id {
+            nextState.settings.defaultProjectBehavior = .lastUsed
+            nextState.settings.specificProjectID = nil
+        }
+        commit(nextState)
+        return state.projects[index]
+    }
+
+    @discardableResult
+    func restoreProject(id: UUID) throws -> ProjectRecord {
+        guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        guard state.projects[index].isArchived else {
+            throw ProjectArchiveError.alreadyActive
+        }
+
+        var nextState = state
+        nextState.projects[index].archivedAt = nil
+        commit(nextState)
+        return state.projects[index]
+    }
+
+    @discardableResult
     func updateProjectFolder(id: UUID, folderURL: URL) -> Bool {
         guard let index = state.projects.firstIndex(where: { $0.id == id }) else { return false }
 
@@ -1196,6 +1350,7 @@ final class SessionStore: ObservableObject {
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
               let project = state.projects.first(where: { $0.id == projectID }),
+              project.isActive,
               let folderPath = DeveloperToolProjectResolver.folderPath(for: project),
               DeveloperToolProjectResolver.isUsableFolder(for: project) else {
             return false
@@ -1208,6 +1363,17 @@ final class SessionStore: ObservableObject {
         guard rule.isValid,
               state.sessionPresets.contains(where: { $0.id == rule.presetID }),
               isAutomationTriggerValid(rule.trigger) else { return false }
+
+        if let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
+           let projectID = preset.projectID,
+           let project = state.projects.first(where: { $0.id == projectID }),
+           project.isArchived,
+           state.automationRules.first(where: { $0.id == rule.id })?.presetID != rule.presetID {
+            // Keep an existing rule attached to an archived project so it can
+            // become eligible again after restore, but do not create or
+            // retarget a rule to an archived project.
+            return false
+        }
         var nextState = state
         if let index = nextState.automationRules.firstIndex(where: { $0.id == rule.id }) {
             nextState.automationRules[index] = rule
@@ -1365,9 +1531,30 @@ final class SessionStore: ObservableObject {
         try restoreBackup(inspectBackup(at: fileURL))
     }
 
+    private func normalizeProjectConfiguration(in state: inout AppState) {
+        switch state.settings.defaultProjectBehavior {
+        case .specificProject:
+            guard let specificProjectID = state.settings.specificProjectID,
+                  state.projects.contains(where: { $0.id == specificProjectID && $0.isActive }) else {
+                state.settings.defaultProjectBehavior = .lastUsed
+                state.settings.specificProjectID = nil
+                return
+            }
+            // Keep the explicit reference only while it points to an active
+            // project. The guard above intentionally leaves a valid setting
+            // untouched, including for projects that need relinking.
+            state.settings.specificProjectID = specificProjectID
+        case .lastUsed, .noProject:
+            state.settings.specificProjectID = nil
+        }
+    }
+
     private func commit(_ nextState: AppState) {
-        state = nextState
-        persistence.save(nextState)
+        var normalizedState = nextState
+        normalizeProjectConfiguration(in: &normalizedState)
+        relinquishInvalidAutomation(in: &normalizedState)
+        state = normalizedState
+        persistence.save(normalizedState)
         configureApplicationMonitoring()
     }
 

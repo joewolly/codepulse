@@ -546,6 +546,7 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
     var bookmarkData: Data?
     let createdAt: Date
     var lastUsedAt: Date?
+    var archivedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -553,7 +554,8 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
         folderPath: String? = nil,
         bookmarkData: Data? = nil,
         createdAt: Date = Date(),
-        lastUsedAt: Date? = nil
+        lastUsedAt: Date? = nil,
+        archivedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -561,6 +563,15 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
         self.bookmarkData = bookmarkData
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
+        self.archivedAt = archivedAt
+    }
+
+    var isArchived: Bool {
+        archivedAt != nil
+    }
+
+    var isActive: Bool {
+        !isArchived
     }
 
     /// A project remains persisted when a moved or stale bookmark cannot be

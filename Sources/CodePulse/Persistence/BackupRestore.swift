@@ -143,6 +143,7 @@ enum BackupRestoreNormalizer {
         case .specificProject:
             guard let projectID = restored.settings.specificProjectID,
                   let project = restored.projects.first(where: { $0.id == projectID }),
+                  project.isActive,
                   !project.requiresRelink else {
                 restored.settings.defaultProjectBehavior = .lastUsed
                 restored.settings.specificProjectID = nil
