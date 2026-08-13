@@ -17,9 +17,14 @@ protocol DeveloperToolLifecycleCoordinating {
 /// only normalized metadata and never reads hook bodies or integration files.
 struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
     private let workspaceResolver: GitWorkspaceResolving
+    private let localTaskResolver: LocalTaskResolving
 
-    init(workspaceResolver: GitWorkspaceResolving = SystemGitWorkspaceResolver()) {
+    init(
+        workspaceResolver: GitWorkspaceResolving = SystemGitWorkspaceResolver(),
+        localTaskResolver: LocalTaskResolving = SystemLocalTaskResolver()
+    ) {
         self.workspaceResolver = workspaceResolver
+        self.localTaskResolver = localTaskResolver
     }
 
     func apply(
@@ -117,32 +122,42 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
         if let index = matchingWorkspaceIndex(for: event, in: state.activityGraph) {
             return index
         }
-        guard let identity = workspaceResolver.resolve(workingDirectory: event.workingDirectory) else {
-            return nil
-        }
-        if let index = GitWorkspaceIdentityMatcher.workspaceIndex(for: identity, in: state.activityGraph) {
-            guard state.activityGraph.workspaces[index].automaticDiscoveryEnabled else { return index }
-            if !state.activityGraph.workspaces[index].roots.contains(where: { $0.path == identity.worktreeRoot }) {
-                state.activityGraph.workspaces[index].roots.append(WorkspaceRoot(
-                    path: identity.worktreeRoot,
-                    kind: .gitWorktree,
-                    addedAt: event.observedAt,
-                    gitIdentity: identity
-                ))
+        if let identity = workspaceResolver.resolve(workingDirectory: event.workingDirectory) {
+            if let index = GitWorkspaceIdentityMatcher.workspaceIndex(for: identity, in: state.activityGraph) {
+                guard state.activityGraph.workspaces[index].automaticDiscoveryEnabled else { return index }
+                if !state.activityGraph.workspaces[index].roots.contains(where: { $0.path == identity.worktreeRoot }) {
+                    state.activityGraph.workspaces[index].roots.append(WorkspaceRoot(path: identity.worktreeRoot, kind: .gitWorktree, addedAt: event.observedAt, gitIdentity: identity))
+                }
+                return index
             }
-            return index
+            guard state.settings.automaticGitWorkspaceDiscoveryEnabled else { return nil }
+            state.activityGraph.workspaces.append(Workspace(
+                name: URL(fileURLWithPath: identity.worktreeRoot).lastPathComponent,
+                roots: [WorkspaceRoot(path: identity.worktreeRoot, kind: .gitWorktree, addedAt: event.observedAt, gitIdentity: identity)],
+                createdAt: event.observedAt,
+                source: .automatic
+            ))
+            return state.activityGraph.workspaces.index(before: state.activityGraph.workspaces.endIndex)
         }
-        guard state.settings.automaticGitWorkspaceDiscoveryEnabled else { return nil }
+        return localWorkspaceIndex(for: event, in: &state)
+    }
+
+    private func localWorkspaceIndex(for event: DeveloperEventV2, in state: inout AppState) -> Int? {
+        guard let identity = localTaskResolver.resolve(workingDirectory: event.workingDirectory) else { return nil }
+        if let index = state.activityGraph.workspaces.indices.first(where: {
+            state.activityGraph.workspaces[$0].localTaskIdentity?.canonicalPath == identity.canonicalPath
+        }) { return index }
+        let root = identity.isTransient ? [] : [WorkspaceRoot(
+            path: identity.canonicalPath,
+            kind: .folder,
+            addedAt: event.observedAt
+        )]
         state.activityGraph.workspaces.append(Workspace(
-            name: URL(fileURLWithPath: identity.worktreeRoot).lastPathComponent,
-            roots: [WorkspaceRoot(
-                path: identity.worktreeRoot,
-                kind: .gitWorktree,
-                addedAt: event.observedAt,
-                gitIdentity: identity
-            )],
+            name: identity.displayName,
+            roots: root,
             createdAt: event.observedAt,
-            source: .automatic
+            source: identity.isTransient ? .transientLocalTask : .automatic,
+            localTaskIdentity: identity
         ))
         return state.activityGraph.workspaces.index(before: state.activityGraph.workspaces.endIndex)
     }

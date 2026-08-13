@@ -17,12 +17,12 @@ enum WorkspaceSource: String, Codable, Equatable {
     case legacyProject
     case legacySession
     case automatic
+    case transientLocalTask
 }
 
 enum WorkspaceRootKind: String, Codable, Equatable {
     case folder
     case gitWorktree
-    case localFile
 }
 
 struct WorkspaceRoot: Codable, Equatable, Identifiable {
@@ -83,6 +83,12 @@ struct GitWorkspaceIdentity: Codable, Equatable {
     }
 }
 
+struct LocalTaskIdentity: Codable, Equatable {
+    let canonicalPath: String
+    let displayName: String
+    let isTransient: Bool
+}
+
 struct Workspace: Codable, Equatable, Identifiable {
     let id: UUID
     var name: String
@@ -92,6 +98,7 @@ struct Workspace: Codable, Equatable, Identifiable {
     let source: WorkspaceSource
     var legacyProjectID: UUID?
     var automaticDiscoveryEnabled: Bool
+    var localTaskIdentity: LocalTaskIdentity?
 
     init(
         id: UUID = UUID(),
@@ -101,7 +108,8 @@ struct Workspace: Codable, Equatable, Identifiable {
         updatedAt: Date? = nil,
         source: WorkspaceSource,
         legacyProjectID: UUID? = nil,
-        automaticDiscoveryEnabled: Bool = true
+        automaticDiscoveryEnabled: Bool = true,
+        localTaskIdentity: LocalTaskIdentity? = nil
     ) {
         self.id = id
         self.name = name
@@ -111,10 +119,11 @@ struct Workspace: Codable, Equatable, Identifiable {
         self.source = source
         self.legacyProjectID = legacyProjectID
         self.automaticDiscoveryEnabled = automaticDiscoveryEnabled
+        self.localTaskIdentity = localTaskIdentity
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, roots, createdAt, updatedAt, source, legacyProjectID, automaticDiscoveryEnabled
+        case id, name, roots, createdAt, updatedAt, source, legacyProjectID, automaticDiscoveryEnabled, localTaskIdentity
     }
 
     init(from decoder: Decoder) throws {
@@ -127,6 +136,7 @@ struct Workspace: Codable, Equatable, Identifiable {
         source = try container.decode(WorkspaceSource.self, forKey: .source)
         legacyProjectID = try container.decodeIfPresent(UUID.self, forKey: .legacyProjectID)
         automaticDiscoveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticDiscoveryEnabled) ?? true
+        localTaskIdentity = try container.decodeIfPresent(LocalTaskIdentity.self, forKey: .localTaskIdentity)
     }
 }
 
