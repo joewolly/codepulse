@@ -28,6 +28,9 @@ developer-tool metadata.
   active, waiting, review-grace, or ended intervals. It never starts or
   controls a manual CodePulse session; cloud-only sessions without a local
   hook/process are not tracked.
+- Shows all current manual and agent runs together in **Active Now**, including
+  a review-grace countdown and waiting state. Agent runtime, manual active time,
+  and de-duplicated combined wall-active time remain separate measures.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -61,6 +64,9 @@ or allow the automatic update check.
 6. If desired, open **Settings → Integrations** to enable local Codex, Claude
    Code, or OpenCode lifecycle tracking. It is optional, timing-only, and never
    controls the manual timer.
+7. When enabled integrations have local activity, use **Active Now** to inspect
+   concurrent runs; only the current CodePulse-owned manual timer can be
+   finished from this view.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
@@ -158,18 +164,24 @@ never persists prompts, transcripts, source content, commands, or raw hook
 bodies. Codex and Claude Code hooks, plus the OpenCode local plugin event API,
 map local lifecycle signals into the shared agent-run state machine. Claude
 subagents remain separate runs linked to their parent by an installation-salted
-fingerprint. A run is correlated only when its working directory matches an
-existing local workspace or a valid Git worktree discovered from that event.
-Sibling Git worktrees stay separate; equivalent clones can share one workspace.
-These integrations do not start or control a manual CodePulse session, and
-cloud-only sessions are excluded. See
+fingerprint. A run is correlated with an existing local workspace, a valid Git
+worktree discovered from its event, or a specific non-Git folder/local-file
+task. The filesystem root, home directory, and temporary locations become
+transient tasks instead of overly broad projects. Sibling Git worktrees stay
+separate; equivalent clones can share one workspace. These integrations do not
+start or control a manual CodePulse session, and cloud-only sessions are
+excluded. **Active Now** lists concurrent active, review-grace, and waiting
+runs without summing overlaps as personal time; activity details expose only
+safe state-transition timelines. See
 [`docs/agent-run-state-machine.md`](docs/agent-run-state-machine.md) for the
 event mapping and timing rules, and
 [`docs/codex-lifecycle-integration.md`](docs/codex-lifecycle-integration.md)
 and [`docs/claude-code-lifecycle-integration.md`](docs/claude-code-lifecycle-integration.md)
 and [`docs/opencode-lifecycle-integration.md`](docs/opencode-lifecycle-integration.md)
 and [`docs/git-workspace-discovery.md`](docs/git-workspace-discovery.md) for
-setup, privacy, discovery, and uninstall details.
+setup, privacy, discovery, and uninstall details. See
+[`docs/concurrent-activity-ui.md`](docs/concurrent-activity-ui.md) for the
+concurrent-run display and aggregate timing rules.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

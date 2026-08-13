@@ -149,11 +149,11 @@ not exist yet.
 | 03 | @ZacharyRW | `feature/03-developer-event-v2` | [#5](https://github.com/ZacharyRW/codepulse/pull/5) | Merged | 2026-08-12 |
 | 04 | @ZacharyRW | `feature/04-agent-aware-timing` | [#7](https://github.com/ZacharyRW/codepulse/pull/7) | Merged | 2026-08-12 |
 | 05 | @ZacharyRW | `feature/05-codex-lifecycle` | [#9](https://github.com/ZacharyRW/codepulse/pull/9) | Merged | 2026-08-13 |
-| 06 | @ZacharyRW | `feature/06-claude-lifecycle` | [#10](https://github.com/ZacharyRW/codepulse/pull/10) | In review | — |
-| 07 | @ZacharyRW | `feature/07-opencode-lifecycle` | [#11](https://github.com/ZacharyRW/codepulse/pull/11) | In review | — |
-| 08 | @ZacharyRW | `feature/08-git-workspace-discovery` | [#12](https://github.com/ZacharyRW/codepulse/pull/12) | In review | — |
-| 09 | — | `feature/09-local-task-discovery` | — | Not started | — |
-| 10 | — | `feature/10-concurrent-activity-ui` | — | Not started | — |
+| 06 | @ZacharyRW | `feature/06-claude-lifecycle` | [#10](https://github.com/ZacharyRW/codepulse/pull/10) | Merged | 2026-08-13 |
+| 07 | @ZacharyRW | `feature/07-opencode-lifecycle` | [#11](https://github.com/ZacharyRW/codepulse/pull/11) | Merged | 2026-08-13 |
+| 08 | @ZacharyRW | `feature/08-git-workspace-discovery` | [#12](https://github.com/ZacharyRW/codepulse/pull/12) | Merged | 2026-08-13 |
+| 09 | @ZacharyRW | `feature/09-local-task-discovery` | [#14](https://github.com/ZacharyRW/codepulse/pull/14) | Merged | 2026-08-13 |
+| 10 | @ZacharyRW | `feature/10-concurrent-activity-ui` | [#15](https://github.com/ZacharyRW/codepulse/pull/15) | In review | — |
 | 11 | — | `feature/11-activity-classification` | — | Not started | — |
 | 12 | — | `feature/12-pricing-catalog` | — | Not started | — |
 | 13 | — | `feature/13-codex-usage` | — | Not started | — |
