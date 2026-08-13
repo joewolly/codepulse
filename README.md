@@ -227,6 +227,16 @@ the Claude Code transcript-metadata boundary and roll-up rules, plus
 [`docs/opencode-usage-tracking.md`](docs/opencode-usage-tracking.md) for the
 OpenCode event boundary and adapter-health states.
 
+CodePulse also provides a local usage-attribution layer for the currently
+stored privacy-safe samples. It groups tokens and cost representations by
+workspace, activity, work type, domain, integration, provider, model, effort,
+and service mode, while retaining an explicit **Unassigned** or **Unknown**
+bucket whenever a relationship is missing or inconsistent. Its timing metrics
+keep manual active time, summed agent runtime, unioned combined wall-active
+time, and agent waiting separate; concurrent runs never inflate wall-active
+time. See [`docs/usage-attribution.md`](docs/usage-attribution.md) for metric
+definitions, reconciliation, and redaction rules.
+
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling
 timeframes plus project filtering, and shows participation-based developer-tool

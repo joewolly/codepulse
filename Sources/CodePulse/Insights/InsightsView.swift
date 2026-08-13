@@ -20,8 +20,33 @@ struct InsightsView: View {
         )
     }
 
+    private var usageReport: UsageAnalyticsReport {
+        let interval = InsightsCalculator.interval(
+            for: timeframe,
+            state: store.state,
+            calendar: store.calendar,
+            referenceDate: store.now
+        )
+        let window: UsageAnalyticsWindow
+        switch timeframe {
+        case .thisWeek:
+            window = .week
+        case .thisMonth:
+            window = .month
+        case .lastWeek, .last30Days, .last90Days, .allTime:
+            window = .custom(interval)
+        }
+        return UsageAttributionService.report(
+            state: store.state,
+            calendar: store.calendar,
+            referenceDate: store.now,
+            window: window
+        )
+    }
+
     var body: some View {
         let summary = self.summary
+        let usageReport = self.usageReport
 
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -31,30 +56,36 @@ struct InsightsView: View {
                     projectOptions: projectOptions
                 )
 
-                if summary.hasActivity {
-                    InsightSummarySection(summary: summary)
-                    ActivityChart(
-                        activity: summary.dailyActivity,
-                        timeframe: timeframe,
-                        calendar: store.calendar
-                    )
+                if summary.hasActivity || !usageReport.samples.isEmpty {
+                    if summary.hasActivity {
+                        InsightSummarySection(summary: summary)
+                        ActivityChart(
+                            activity: summary.dailyActivity,
+                            timeframe: timeframe,
+                            calendar: store.calendar
+                        )
 
-                    InsightSection(title: "Work Type", systemImage: "square.grid.2x2") {
-                        InsightBreakdownBars(values: summary.typeBreakdown)
+                        InsightSection(title: "Work Type", systemImage: "square.grid.2x2") {
+                            InsightBreakdownBars(values: summary.typeBreakdown)
+                        }
+
+                        InsightSection(title: "Projects", systemImage: "folder") {
+                            InsightBreakdownBars(values: summary.projectBreakdown)
+                        }
+
+                        DeveloperToolInsightSection(insights: summary.developerToolInsights)
+
+                        if summary.gitInsights.sessionsWithGitContext > 0 {
+                            GitInsightSection(insights: summary.gitInsights)
+                        }
+
+                        if summary.githubInsights.sessionsWithGitHubContext > 0 {
+                            GitHubInsightSection(insights: summary.githubInsights)
+                        }
                     }
 
-                    InsightSection(title: "Projects", systemImage: "folder") {
-                        InsightBreakdownBars(values: summary.projectBreakdown)
-                    }
-
-                    DeveloperToolInsightSection(insights: summary.developerToolInsights)
-
-                    if summary.gitInsights.sessionsWithGitContext > 0 {
-                        GitInsightSection(insights: summary.gitInsights)
-                    }
-
-                    if summary.githubInsights.sessionsWithGitHubContext > 0 {
-                        GitHubInsightSection(insights: summary.githubInsights)
+                    if !usageReport.samples.isEmpty {
+                        UsageAttributionSection(report: usageReport)
                     }
                 } else {
                     InsightsEmptyState(
@@ -229,6 +260,120 @@ private struct InsightMetric: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(detail.map { "\(value), \($0)" } ?? value)
+    }
+}
+
+private struct UsageAttributionSection: View {
+    let report: UsageAnalyticsReport
+
+    private let visibleDimensions: [UsageAttributionDimension] = [.workspace, .domain, .workType, .integration, .provider, .model]
+
+    var body: some View {
+        InsightSection(title: "Usage Attribution", systemImage: "chart.bar.doc.horizontal") {
+            VStack(alignment: .leading, spacing: 14) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    GridRow {
+                        Text("Tokens")
+                        Text("\(report.tokens.total)")
+                            .monospacedDigit()
+                    }
+                    GridRow {
+                        Text("Manual active")
+                        Text(CodePulseFormatting.duration(report.timing.manualActive))
+                            .monospacedDigit()
+                    }
+                    GridRow {
+                        Text("Agent runtime")
+                        Text(CodePulseFormatting.duration(report.timing.agentRuntime))
+                            .monospacedDigit()
+                    }
+                    GridRow {
+                        Text("Combined wall-active")
+                        Text(CodePulseFormatting.duration(report.timing.combinedWallActive))
+                            .monospacedDigit()
+                    }
+                    GridRow {
+                        Text("Agent waiting")
+                        Text(CodePulseFormatting.duration(report.timing.agentWaiting))
+                            .monospacedDigit()
+                    }
+                }
+                .font(.subheadline)
+
+                if !report.costs.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(report.costs) { cost in
+                            LabeledContent(cost.representation.displayLabel, value: money(cost))
+                                .font(.caption)
+                        }
+                    }
+                }
+
+                ForEach(visibleDimensions) { dimension in
+                    if let values = report.dimensions[dimension], !values.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(dimension.title)
+                                .font(.subheadline.weight(.medium))
+                            ForEach(values.prefix(5)) { value in
+                                HStack {
+                                    Text(value.label)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(value.tokens.total) tokens")
+                                        .monospacedDigit()
+                                        .foregroundStyle(.secondary)
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+                }
+
+                DisclosureGroup("Reconciliation (\(report.reconciliation.count) samples)") {
+                    ForEach(report.reconciliation.prefix(25)) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(row.workspace) · \(row.activity)")
+                                .font(.caption.weight(.medium))
+                            Text("\(row.integration) · \(row.provider) · \(row.model) · \(row.tokens.total) tokens")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    if report.reconciliation.count > 25 {
+                        Text("Showing the first 25 privacy-safe sample summaries.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .font(.subheadline)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Usage attribution")
+        }
+    }
+
+    private func money(_ total: UsageMoneyTotal) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = total.currency
+        return formatter.string(from: total.amount as NSDecimalNumber) ?? "\(total.amount) \(total.currency)"
+    }
+}
+
+private extension UsageAttributionDimension {
+    var title: String {
+        switch self {
+        case .workspace: return "Workspace"
+        case .activity: return "Activity"
+        case .workType: return "Work Type"
+        case .domain: return "Domain"
+        case .integration: return "Integration"
+        case .provider: return "Provider"
+        case .model: return "Model"
+        case .effort: return "Effort"
+        case .serviceMode: return "Service Mode"
+        }
     }
 }
 

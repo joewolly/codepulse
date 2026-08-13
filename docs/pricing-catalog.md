@@ -72,3 +72,11 @@ analytical dimension and never becomes an invented multiplier.
 Provider-reported cost is never recomputed or relabeled. Missing model/rate
 data produces no estimate and remains unpriced until a later supported adapter
 can supply trustworthy metadata.
+
+## Attribution roll-ups
+
+Feature 16 aggregates stored cost values only within the same representation
+and currency. Provider-reported cost, API-equivalent estimates, and
+Codex-credit estimates remain distinct totals, preserving their labels and
+provenance. The attribution layer never converts currencies, derives an actual
+charge from an estimate, or changes historical calculation provenance.
