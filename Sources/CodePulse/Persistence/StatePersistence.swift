@@ -28,6 +28,12 @@ final class JSONFilePersistence: StatePersisting {
               let state = try? decoder.decode(AppState.self, from: data) else {
             return AppState()
         }
+        if Self.requiresAutomationMigration(data) {
+            // AppState has already normalized legacy rules into stable preset
+            // references. Persist that canonical representation once so the
+            // next launch does not need to revisit the compatibility path.
+            save(state)
+        }
         return state
     }
 
@@ -48,5 +54,16 @@ final class JSONFilePersistence: StatePersisting {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
         return directory.appendingPathComponent("CodePulse/state.json")
+    }
+
+    private static func requiresAutomationMigration(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        guard let rules = root["automationRules"] as? [[String: Any]], !rules.isEmpty else {
+            return false
+        }
+        guard root["sessionPresets"] != nil else { return true }
+        return rules.contains { $0["presetID"] == nil }
     }
 }

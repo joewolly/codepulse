@@ -641,6 +641,7 @@ struct AppState: Codable, Equatable {
     var completedSessions: [CompletedSession]
     var activeSession: ActiveSession?
     var settings: CodePulseSettings
+    var sessionPresets: [SessionPreset]
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
     var automationRules: [SessionAutomationRule]
 
@@ -649,6 +650,7 @@ struct AppState: Codable, Equatable {
         completedSessions: [CompletedSession] = [],
         activeSession: ActiveSession? = nil,
         settings: CodePulseSettings = CodePulseSettings(),
+        sessionPresets: [SessionPreset] = [],
         developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
         automationRules: [SessionAutomationRule] = []
     ) {
@@ -656,26 +658,59 @@ struct AppState: Codable, Equatable {
         self.completedSessions = completedSessions
         self.activeSession = activeSession
         self.settings = settings
+        self.sessionPresets = Self.normalizedPresets(sessionPresets, rules: automationRules)
         self.developerToolIntegration = developerToolIntegration
-        self.automationRules = automationRules
+        self.automationRules = automationRules.map { $0.canonicalized() }
     }
 
     private enum CodingKeys: String, CodingKey {
         case projects, completedSessions, activeSession, settings
-        case developerToolIntegration, automationRules
+        case sessionPresets, developerToolIntegration, automationRules
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        projects = try container.decodeIfPresent([ProjectRecord].self, forKey: .projects) ?? []
-        completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
-        activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
-        settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
-        developerToolIntegration = try container.decodeIfPresent(
+        let projects = try container.decodeIfPresent([ProjectRecord].self, forKey: .projects) ?? []
+        let completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
+        let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
+        let settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
+        let sessionPresets = try container.decodeIfPresent([SessionPreset].self, forKey: .sessionPresets) ?? []
+        let developerToolIntegration = try container.decodeIfPresent(
             DeveloperToolIntegrationProcessingState.self,
             forKey: .developerToolIntegration
         )
-        automationRules = try container.decodeIfPresent([SessionAutomationRule].self, forKey: .automationRules) ?? []
+        let automationRules = try container.decodeIfPresent([SessionAutomationRule].self, forKey: .automationRules) ?? []
+        self.init(
+            projects: projects,
+            completedSessions: completedSessions,
+            activeSession: activeSession,
+            settings: settings,
+            sessionPresets: sessionPresets,
+            developerToolIntegration: developerToolIntegration,
+            automationRules: automationRules
+        )
+    }
+
+    private static func normalizedPresets(
+        _ explicitPresets: [SessionPreset],
+        rules: [SessionAutomationRule]
+    ) -> [SessionPreset] {
+        var presetsByID: [UUID: SessionPreset] = [:]
+        var orderedIDs: [UUID] = []
+
+        for preset in explicitPresets where presetsByID[preset.id] == nil {
+            presetsByID[preset.id] = preset
+            orderedIDs.append(preset.id)
+        }
+
+        for rule in rules {
+            guard let legacyPreset = rule.legacyPreset,
+                  presetsByID[legacyPreset.id] == nil else { continue }
+            presetsByID[legacyPreset.id] = legacyPreset
+            orderedIDs.append(legacyPreset.id)
+        }
+
+        return orderedIDs.compactMap { presetsByID[$0] }
     }
 }
 
