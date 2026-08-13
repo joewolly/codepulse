@@ -596,6 +596,7 @@ struct CodePulseSettings: Codable, Equatable {
     var specificProjectID: UUID?
     var globalShortcutEnabled: Bool
     var agentReviewGraceSeconds: Int
+    var automaticGitWorkspaceDiscoveryEnabled: Bool
 
     init(
         launchAtLogin: Bool = false,
@@ -604,7 +605,8 @@ struct CodePulseSettings: Codable, Equatable {
         defaultProjectBehavior: DefaultProjectBehavior = .lastUsed,
         specificProjectID: UUID? = nil,
         globalShortcutEnabled: Bool = true,
-        agentReviewGraceSeconds: Int = 3 * 60
+        agentReviewGraceSeconds: Int = 3 * 60,
+        automaticGitWorkspaceDiscoveryEnabled: Bool = true
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -613,11 +615,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.specificProjectID = specificProjectID
         self.globalShortcutEnabled = globalShortcutEnabled
         self.agentReviewGraceSeconds = max(0, agentReviewGraceSeconds)
+        self.automaticGitWorkspaceDiscoveryEnabled = automaticGitWorkspaceDiscoveryEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -629,6 +632,7 @@ struct CodePulseSettings: Codable, Equatable {
         specificProjectID = try container.decodeIfPresent(UUID.self, forKey: .specificProjectID)
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
         agentReviewGraceSeconds = max(0, try container.decodeIfPresent(Int.self, forKey: .agentReviewGraceSeconds) ?? 3 * 60)
+        automaticGitWorkspaceDiscoveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticGitWorkspaceDiscoveryEnabled) ?? true
     }
 }
 

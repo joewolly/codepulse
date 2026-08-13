@@ -30,12 +30,56 @@ struct WorkspaceRoot: Codable, Equatable, Identifiable {
     let path: String
     let kind: WorkspaceRootKind
     let addedAt: Date
+    let gitIdentity: GitWorkspaceIdentity?
 
-    init(id: UUID = UUID(), path: String, kind: WorkspaceRootKind = .folder, addedAt: Date) {
+    init(
+        id: UUID = UUID(),
+        path: String,
+        kind: WorkspaceRootKind = .folder,
+        addedAt: Date,
+        gitIdentity: GitWorkspaceIdentity? = nil
+    ) {
         self.id = id
         self.path = path
         self.kind = kind
         self.addedAt = addedAt
+        self.gitIdentity = gitIdentity
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, path, kind, addedAt, gitIdentity }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        path = try container.decode(String.self, forKey: .path)
+        kind = try container.decodeIfPresent(WorkspaceRootKind.self, forKey: .kind) ?? .folder
+        addedAt = try container.decode(Date.self, forKey: .addedAt)
+        gitIdentity = try container.decodeIfPresent(GitWorkspaceIdentity.self, forKey: .gitIdentity)
+    }
+}
+
+/// Privacy-safe local identity for a Git workspace. Remote URLs are reduced to
+/// a normalized public repository name when they are a valid GitHub remote;
+/// credentials and unrecognized remote URLs are never persisted here.
+struct GitWorkspaceIdentity: Codable, Equatable {
+    let repository: String?
+    let commonDirectory: String
+    let worktreeRoot: String
+    let isLinkedWorktree: Bool
+    let branch: String?
+
+    init(
+        repository: String?,
+        commonDirectory: String,
+        worktreeRoot: String,
+        isLinkedWorktree: Bool,
+        branch: String?
+    ) {
+        self.repository = repository
+        self.commonDirectory = commonDirectory
+        self.worktreeRoot = worktreeRoot
+        self.isLinkedWorktree = isLinkedWorktree
+        self.branch = branch
     }
 }
 
@@ -47,6 +91,7 @@ struct Workspace: Codable, Equatable, Identifiable {
     var updatedAt: Date
     let source: WorkspaceSource
     var legacyProjectID: UUID?
+    var automaticDiscoveryEnabled: Bool
 
     init(
         id: UUID = UUID(),
@@ -55,7 +100,8 @@ struct Workspace: Codable, Equatable, Identifiable {
         createdAt: Date,
         updatedAt: Date? = nil,
         source: WorkspaceSource,
-        legacyProjectID: UUID? = nil
+        legacyProjectID: UUID? = nil,
+        automaticDiscoveryEnabled: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -64,6 +110,23 @@ struct Workspace: Codable, Equatable, Identifiable {
         self.updatedAt = updatedAt ?? createdAt
         self.source = source
         self.legacyProjectID = legacyProjectID
+        self.automaticDiscoveryEnabled = automaticDiscoveryEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, roots, createdAt, updatedAt, source, legacyProjectID, automaticDiscoveryEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        roots = try container.decodeIfPresent([WorkspaceRoot].self, forKey: .roots) ?? []
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        source = try container.decode(WorkspaceSource.self, forKey: .source)
+        legacyProjectID = try container.decodeIfPresent(UUID.self, forKey: .legacyProjectID)
+        automaticDiscoveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticDiscoveryEnabled) ?? true
     }
 }
 

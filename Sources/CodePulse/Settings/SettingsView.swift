@@ -59,6 +59,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Text("OpenCode tracking uses a CodePulse-owned global plugin in its documented plugin directory. It reads local plugin session events only; no OpenCode database, project configuration, prompts, messages, tool data, or transcripts are read. Restart OpenCode after changing this integration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 ForEach(DeveloperTool.allCases) { tool in
                     DeveloperToolIntegrationRow(
                         tool: tool,
@@ -80,6 +85,27 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Workspace Discovery") {
+                Toggle("Automatically create Git workspaces from agent events", isOn: Binding(
+                    get: { store.state.settings.automaticGitWorkspaceDiscoveryEnabled },
+                    set: { value in store.updateSettings { $0.automaticGitWorkspaceDiscoveryEnabled = value } }
+                ))
+
+                Text("For an unknown Git folder, CodePulse retains the repository root, Git common directory, worktree root, current branch, and a normalized GitHub owner/repository name when available. It never stores a remote URL or scans the disk.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(store.activityGraph.workspaces.filter { workspace in
+                    workspace.roots.contains(where: { $0.gitIdentity != nil })
+                }) { workspace in
+                    Toggle("Allow automatic updates for \(workspace.name)", isOn: Binding(
+                        get: { workspace.automaticDiscoveryEnabled },
+                        set: { value in _ = store.setWorkspaceAutomaticDiscovery(id: workspace.id, enabled: value) }
+                    ))
+                }
             }
 
             Section("Workflow") {
