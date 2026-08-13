@@ -66,6 +66,8 @@ jobs:
         run: swift test --configuration debug
 
       - name: Package release
+        env:
+          CODEPULSE_RELEASE_REPOSITORY: ${{ github.repository }}
         run: ./script/package_release.sh
 
       - name: Verify release artifacts
@@ -152,8 +154,13 @@ jobs:
           LENGTH="$(stat -f%z "$DMG")"
           PUB_DATE="$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')"
           TAG="${GITHUB_REF_NAME}"
-          DOWNLOAD_URL="https://github.com/joewolly/codepulse/releases/download/${TAG}/CodePulse-${VERSION}.dmg"
-          RELEASE_URL="https://github.com/joewolly/codepulse/releases/tag/${TAG}"
+          REPOSITORY="${GITHUB_REPOSITORY}"
+          [[ "$REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+            echo "error: invalid GitHub repository: $REPOSITORY" >&2
+            exit 1
+          }
+          DOWNLOAD_URL="https://github.com/${REPOSITORY}/releases/download/${TAG}/CodePulse-${VERSION}.dmg"
+          RELEASE_URL="https://github.com/${REPOSITORY}/releases/tag/${TAG}"
 
           cat > "$APPCAST" <<EOF
           <?xml version="1.0" encoding="utf-8"?>
@@ -161,7 +168,7 @@ jobs:
                xmlns:sparkle="https://sparkle-project.org/xml-namespaces/sparkle">
             <channel>
               <title>CodePulse Updates</title>
-              <link>https://github.com/joewolly/codepulse/releases</link>
+              <link>https://github.com/${REPOSITORY}/releases</link>
               <description>CodePulse macOS updates</description>
               <language>en</language>
               <item>
@@ -195,12 +202,13 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           DMG="dist/release/CodePulse-${VERSION}.dmg"
 
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "error: GitHub Release $TAG already exists" >&2
             exit 1
           fi
 
           gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             "$DMG" \
             dist/release/checksums.txt \
             dist/release/appcast.xml \
@@ -222,13 +230,14 @@ jobs:
           DOWNLOAD_DIR="$(mktemp -d)"
           trap 'rm -rf "$DOWNLOAD_DIR"' EXIT
 
-          RELEASE_STATE="$(gh release view "$TAG" --json tagName,isDraft,isPrerelease --jq '.tagName + " " + (.isDraft | tostring) + " " + (.isPrerelease | tostring)')"
+          RELEASE_STATE="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease --jq '.tagName + " " + (.isDraft | tostring) + " " + (.isPrerelease | tostring)')"
           [[ "$RELEASE_STATE" == "$TAG false false" ]] || {
             echo "error: unexpected published release state: $RELEASE_STATE" >&2
             exit 1
           }
 
           gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             --dir "$DOWNLOAD_DIR" \
             --pattern "$EXPECTED_DMG" \
             --pattern checksums.txt \
@@ -256,7 +265,7 @@ jobs:
 
           cmp dist/release/appcast.xml "$DOWNLOAD_DIR/appcast.xml"
           /usr/bin/xmllint --noout "$DOWNLOAD_DIR/appcast.xml"
-          grep -F "releases/download/${TAG}/${EXPECTED_DMG}" "$DOWNLOAD_DIR/appcast.xml" >/dev/null
+          grep -F "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${EXPECTED_DMG}" "$DOWNLOAD_DIR/appcast.xml" >/dev/null
           grep -F "<sparkle:version>${BUILD_NUMBER}</sparkle:version>" "$DOWNLOAD_DIR/appcast.xml" >/dev/null
 
           echo "Published release $TAG and Sparkle appcast verified: $ACTUAL_SHA"

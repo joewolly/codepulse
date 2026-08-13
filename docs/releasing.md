@@ -49,10 +49,14 @@ and layout check. `--adhoc-sign` applies a local ad-hoc signature for bundle
 integrity checks; it does not identify CodePulse to Gatekeeper and is not
 Developer ID signing.
 
-The version and build number can be overridden without editing source files:
+The version and build number can be overridden without editing source files.
+`CODEPULSE_RELEASE_REPOSITORY` controls the Sparkle feed embedded in the staged
+app bundle; use the GitHub repository that will host the release assets:
 
 ```sh
-CODEPULSE_VERSION=0.4.3 CODEPULSE_BUILD=403 ./script/package_release.sh
+CODEPULSE_VERSION=0.4.3 CODEPULSE_BUILD=403 \
+CODEPULSE_RELEASE_REPOSITORY=owner/codepulse \
+  ./script/package_release.sh
 ```
 
 ## Output
@@ -76,10 +80,15 @@ CodePulse uses Sparkle for update discovery and installation starting with
 v0.4.2. Existing v0.4.1 installations need to install v0.4.2 manually once;
 subsequent releases can be discovered and installed through Sparkle.
 
-The application configuration is stored in `Resources/Info.plist`:
+The source configuration is stored in `Resources/Info.plist`. During release
+packaging, `CODEPULSE_RELEASE_REPOSITORY` determines the staged app's feed URL;
+the GitHub Actions workflow sets it to the repository running the workflow.
+This prevents a fork release from advertising an upstream appcast or assets.
 
-- `SUFeedURL` points to
-  `https://github.com/joewolly/codepulse/releases/latest/download/appcast.xml`
+The staged app contains:
+
+- `SUFeedURL` pointing to
+  `https://github.com/<owner>/<repository>/releases/latest/download/appcast.xml`
 - `SUPublicEDKey` contains only the public Ed25519 verification key
 - `SUEnableAutomaticChecks` enables scheduled background update checks
 
@@ -96,10 +105,12 @@ For example, after exporting the Sparkle private key locally:
 ```sh
 base64 < "$HOME/.config/codepulse/sparkle-private-key" \
   | tr -d '\n' \
-  | gh secret set SPARKLE_PRIVATE_KEY_BASE64 --repo joewolly/codepulse
+  | gh secret set SPARKLE_PRIVATE_KEY_BASE64 --repo owner/codepulse
 ```
 
 The release workflow refuses to publish a release if this secret is missing.
+Each repository that publishes releases needs its own configured secret matching
+the public key embedded in `Resources/Info.plist`.
 It uses Sparkle's `sign_update` utility with the private key passed over stdin,
 creates `appcast.xml`, uploads the appcast with the DMG and checksum, and then
 downloads the published assets again for verification.
