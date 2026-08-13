@@ -647,6 +647,15 @@ final class SessionStore: ObservableObject {
         commit(nextState)
     }
 
+    @discardableResult
+    func setWorkspaceAutomaticDiscovery(id: UUID, enabled: Bool) -> Bool {
+        guard let index = state.activityGraph.workspaces.firstIndex(where: { $0.id == id }) else { return false }
+        var nextState = state
+        nextState.activityGraph.workspaces[index].automaticDiscoveryEnabled = enabled
+        commit(nextState)
+        return true
+    }
+
     func deleteCompletedSession(id: UUID) {
         var nextState = state
         nextState.completedSessions.removeAll { $0.id == id }

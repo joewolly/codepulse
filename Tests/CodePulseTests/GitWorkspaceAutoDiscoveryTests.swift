@@ -8,6 +8,13 @@ private struct FixedGitWorkspaceResolver: GitWorkspaceResolving {
     func resolve(workingDirectory: String) -> GitWorkspaceIdentity? { identities[workingDirectory] }
 }
 
+private final class WorkspaceDiscoveryPersistence: StatePersisting {
+    var state: AppState
+    init(_ state: AppState) { self.state = state }
+    func load() -> AppState { state }
+    func save(_ state: AppState) { self.state = state }
+}
+
 @MainActor
 final class GitWorkspaceAutoDiscoveryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -27,6 +34,28 @@ final class GitWorkspaceAutoDiscoveryTests: XCTestCase {
         var optedOut = AppState(settings: CodePulseSettings(automaticGitWorkspaceDiscoveryEnabled: false))
         XCTAssertFalse(coordinator.apply(event(path: "/repos/demo", session: "three"), sessionFingerprint: "three", parentSessionFingerprint: nil, to: &optedOut))
         XCTAssertTrue(optedOut.activityGraph.workspaces.isEmpty)
+    }
+
+    func testDiscoveryOptOutDoesNotEraseKnownWorkspaceAndPerWorkspaceChoicePersists() {
+        let identity = self.identity(repository: "owner/repo", common: "/repos/demo/.git", root: "/repos/demo")
+        let workspace = Workspace(
+            name: "Keep me",
+            roots: [WorkspaceRoot(path: identity.worktreeRoot, kind: .gitWorktree, addedAt: now, gitIdentity: identity)],
+            createdAt: now,
+            source: .automatic
+        )
+        let persistence = WorkspaceDiscoveryPersistence(AppState(
+            settings: CodePulseSettings(automaticGitWorkspaceDiscoveryEnabled: false),
+            activityGraph: ActivityGraph(workspaces: [workspace])
+        ))
+        let store = SessionStore(persistence: persistence, automaticallyRefresh: false)
+        let coordinator = DeveloperToolLifecycleCoordinator(workspaceResolver: FixedGitWorkspaceResolver(identities: ["/repos/demo": identity]))
+        var state = store.state
+
+        XCTAssertTrue(coordinator.apply(event(path: "/repos/demo", session: "known"), sessionFingerprint: "known", parentSessionFingerprint: nil, to: &state))
+        XCTAssertEqual(state.activityGraph.workspaces.map(\.name), ["Keep me"])
+        XCTAssertTrue(store.setWorkspaceAutomaticDiscovery(id: workspace.id, enabled: false))
+        XCTAssertFalse(store.activityGraph.workspaces[0].automaticDiscoveryEnabled)
     }
 
     private func identity(repository: String?, common: String, root: String) -> GitWorkspaceIdentity {
