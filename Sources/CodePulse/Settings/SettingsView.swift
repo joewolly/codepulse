@@ -108,6 +108,30 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Activity Measures") {
+                let activities = store.activityGraph.activities
+                    .filter { !store.runs(activityID: $0.id).isEmpty }
+                    .sorted { $0.updatedAt > $1.updatedAt }
+
+                if activities.isEmpty {
+                    Text("Combined manual and agent activity will appear here after CodePulse records it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(activities.prefix(5)) { activity in
+                        ActivityMeasuresView(
+                            activity: activity,
+                            metrics: store.activityTimingMetrics(for: activity.id)
+                        )
+                    }
+                }
+
+                Text("Manual active time, agent runtime, and agent waiting remain separate. Combined wall-active time de-duplicates overlapping active intervals.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Workflow") {
                 Toggle("Open History with ⌥⌘T", isOn: Binding(
                     get: { store.state.settings.globalShortcutEnabled },
@@ -365,6 +389,40 @@ struct SettingsView: View {
             try store.exportPersistenceRecoveryCopy(to: url)
         } catch {
             recoveryExportError = error.localizedDescription
+        }
+    }
+}
+
+private struct ActivityMeasuresView: View {
+    let activity: Activity
+    let metrics: ActivityTimingMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(activity.title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+                metric("Manual active", metrics.manualActive)
+                metric("Agent runtime", metrics.agentRuntime)
+                metric("Agent waiting", metrics.agentWaiting)
+                metric("Elapsed span", metrics.elapsedSpan)
+                metric("Combined wall-active", metrics.combinedWallActive)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(activity.title), manual active \(CodePulseFormatting.duration(metrics.manualActive)), agent runtime \(CodePulseFormatting.duration(metrics.agentRuntime)), agent waiting \(CodePulseFormatting.duration(metrics.agentWaiting)), elapsed span \(CodePulseFormatting.duration(metrics.elapsedSpan)), combined wall-active \(CodePulseFormatting.duration(metrics.combinedWallActive))")
+    }
+
+    @ViewBuilder
+    private func metric(_ title: String, _ duration: TimeInterval) -> some View {
+        GridRow {
+            Text(title)
+            Text(CodePulseFormatting.duration(duration))
+                .monospacedDigit()
         }
     }
 }
