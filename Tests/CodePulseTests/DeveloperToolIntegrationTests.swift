@@ -253,9 +253,10 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertEqual(pending.map { $0.event }, [event])
         XCTAssertTrue(state.developerToolIntegration?.processedEvents.isEmpty != false)
 
-        XCTAssertTrue(reader.markProcessed(pending[0], in: &state, at: now))
+        let first = try XCTUnwrap(pending.first)
+        XCTAssertTrue(reader.markProcessed(first, in: &state, at: now))
         XCTAssertEqual(state.developerToolIntegration?.processedEvents.map { $0.id }, [event.id])
-        reader.cleanup(pending[0])
+        reader.cleanup(first)
         XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
     }
 
