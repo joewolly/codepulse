@@ -186,7 +186,9 @@ final class SessionPresetAutomationTests: XCTestCase {
         store.deleteSessionPreset(id: preset.id)
 
         XCTAssertEqual(store.phase, .running)
-        XCTAssertFalse(store.activeSession?.automationMetadata?.controlEnabled ?? true)
+        let activeSession = try XCTUnwrap(store.activeSession)
+        let automationMetadata = try XCTUnwrap(activeSession.automationMetadata)
+        XCTAssertFalse(automationMetadata.controlEnabled)
         clock.now = start.addingTimeInterval(5)
         store.refresh()
         XCTAssertEqual(store.phase, .running)
@@ -300,7 +302,9 @@ final class SessionPresetAutomationTests: XCTestCase {
         monitor.setCurrentApplication(editor)
 
         XCTAssertEqual(store.phase, .paused)
-        XCTAssertFalse(store.activeSession?.automationMetadata?.controlEnabled ?? true)
+        let activeSession = try XCTUnwrap(store.activeSession)
+        let automationMetadata = try XCTUnwrap(activeSession.automationMetadata)
+        XCTAssertFalse(automationMetadata.controlEnabled)
     }
 
     private func makeProject(name: String) throws -> (record: ProjectRecord, url: URL) {
