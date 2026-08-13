@@ -65,15 +65,25 @@ struct DeveloperToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating {
             event.observedAt
         )
 
-        let activity = Activity(
+        let activityID: UUID
+        if let existing = ActivityGraphRepository.matchingManualActivityID(
+            in: state.activityGraph,
             workspaceID: workspaceID,
-            title: "\(event.integration.title) session",
-            createdAt: event.observedAt
-        )
-        state.activityGraph.activities.append(activity)
+            at: event.observedAt
+        ) {
+            activityID = existing
+        } else {
+            let activity = Activity(
+                workspaceID: workspaceID,
+                title: "\(event.integration.title) session",
+                createdAt: event.observedAt
+            )
+            state.activityGraph.activities.append(activity)
+            activityID = activity.id
+        }
 
         var run = Run(
-            activityID: activity.id,
+            activityID: activityID,
             kind: .agent,
             startedAt: event.observedAt,
             agentMetadata: AgentRunMetadata(

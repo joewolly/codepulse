@@ -133,4 +133,24 @@ struct ActivityGraphRepository {
             return graph.activities.first(where: { $0.id == run.activityID })?.workspaceID == workspaceID
         }
     }
+
+    /// Returns a manual activity only when exactly one is actively overlapping
+    /// the agent event. Ambiguous and already-ended activities deliberately
+    /// remain separate so timing provenance is never invented.
+    static func matchingManualActivityID(
+        in graph: ActivityGraph,
+        workspaceID: UUID,
+        at date: Date
+    ) -> UUID? {
+        let candidates = graph.activities.filter { $0.workspaceID == workspaceID }.filter { activity in
+            graph.runs.contains { run in
+                run.activityID == activity.id && run.kind == .manual &&
+                    run.intervals.contains { interval in
+                        interval.state == .active && interval.startedAt <= date && (interval.endedAt ?? .distantFuture) > date
+                    }
+            }
+        }
+        return candidates.count == 1 ? candidates[0].id : nil
+    }
+
 }
