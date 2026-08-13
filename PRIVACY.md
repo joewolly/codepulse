@@ -21,9 +21,12 @@ Depending on how the app is used, that state can include:
   lightweight pull request metadata (number, title, state, draft status, URL,
   and branch names).
 - App settings and any active session needed for relaunch recovery.
-- Processed developer-integration event identifiers and processing timestamps for
-  local deduplication; this bounded ledger retains at most 2,048 entries and
-  prunes entries older than 30 days during event processing.
+- Processed legacy developer-integration event identifiers and processing
+  timestamps for local deduplication; this bounded ledger retains at most 2,048
+  entries and prunes entries older than 30 days during event processing.
+- Bounded v2 developer-event diagnostics: receipt status, fixed redacted
+  rejection codes, parser/integration versions, and installation-salted event
+  fingerprints.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -42,15 +45,13 @@ active session:
 - An optional model label and optional profile/agent label when the tool
   supplies them reliably.
 
-The integration helper accepts one structured event at a time and atomically
-writes it to the local inbox at
-`~/Library/Application Support/CodePulse/Integrations/Inbox/`. CodePulse does
-not need to be running for an event to wait there. Events are validated,
-matched to a selected project by canonical folder hierarchy, deduplicated, and
-removed on a best-effort basis after processing. A filesystem failure may leave
-an inbox file locally; valid events remain in the bounded ledger to prevent
-duplicate attachment. No Project sessions and wrong-project events are not
-attached.
+The integration helper accepts one structured event at a time and normalizes it
+through the v2 receiver. It writes only validated events and content-free
+accepted, duplicate, or rejected receipts under
+`~/Library/Application Support/CodePulse/Integrations/`. CodePulse does not
+need to be running for an event or receipt to wait there. A filesystem failure
+may leave an inbox file locally; the app removes handoffs best-effort after
+processing. Events are not attached to unrelated projects or manual sessions.
 
 CodePulse does **not** persist or inspect prompts, user messages, assistant
 messages, conversation transcripts, source-file contents, terminal command
@@ -59,10 +60,10 @@ decisions, reasoning, conversation summaries, credentials, or API keys. The
 Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
-Developer-tool metadata and the processed-event ledger remain local as part of
-CodePulse state and normal JSON backups. Disabling an integration removes only
-the CodePulse-owned hook or plugin configuration; it does not delete user-owned
-tool configuration.
+Developer-tool metadata, redacted diagnostics, and the processed-event ledger
+remain local as part of CodePulse state and normal JSON backups. Disabling an
+integration removes only the CodePulse-owned hook or plugin configuration; it
+does not delete user-owned tool configuration.
 
 ## Network access
 

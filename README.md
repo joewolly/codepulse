@@ -23,8 +23,9 @@ developer-tool metadata.
 - Captures best-effort local Git context without changing the repository.
 - GitHub context — associates local sessions with their GitHub repository and
   optionally their current pull request when the repository has a GitHub remote.
-- Optionally records that Codex and/or OpenCode participated in a selected
-  project's session using only local lifecycle metadata.
+- Receives optional local lifecycle metadata from Codex and OpenCode through a
+  versioned, content-safe event boundary. It records redacted receipt
+  diagnostics without starting or controlling a CodePulse session.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -75,17 +76,17 @@ folder you select, allowing it to read local Git metadata for that project.
 
 CodePulse stores its state as JSON under the user's Application Support
 directory. Session notes, project paths, settings, Git snapshots, GitHub context
-snapshots, developer-tool session metadata, and active session state stay on the
-Mac unless the user exports or shares a backup. Developer-tool metadata is
-limited to the tool name, external session identifier, working directory,
-timestamps, lifecycle event count, and optional model/profile labels. CodePulse
-also keeps a local deduplication ledger of processed event identifiers and
-timestamps (up to 2,048 entries; event processing prunes entries older than
+snapshots, developer-tool session metadata, redacted v2 receipt diagnostics,
+and active session state stay on the Mac unless the user exports or shares a
+backup. The v2 diagnostics retain only receipt status, fixed redacted rejection
+codes, parser/integration versions, and installation-salted event fingerprints.
+CodePulse also keeps a local deduplication ledger of processed event identifiers
+and timestamps (up to 2,048 entries; event processing prunes entries older than
 30 days), which may appear in exported backups. Inbox cleanup after processing
 is best effort, so a filesystem failure may leave a local event file. CodePulse
-does not collect prompts, responses, transcripts, source code, terminal command contents, command
-output, tool-call arguments or results, permission decisions, reasoning,
-conversation summaries, or credentials.
+does not collect prompts, responses, transcripts, source code, terminal command
+contents, command output, tool-call arguments or results, permission decisions,
+reasoning, conversation summaries, or credentials.
 
 Sparkle checks CodePulse release assets on GitHub. When `gh` is installed, the
 optional GitHub Context feature uses the user's existing GitHub CLI setup for
@@ -147,12 +148,12 @@ gh auth status
 ```
 
 CodePulse 0.6 adds optional Developer Integrations for Codex and OpenCode. A
-small local helper writes validated, versioned events to the CodePulse-owned
-inbox at `~/Library/Application Support/CodePulse/Integrations/Inbox/`.
-CodePulse associates an event only with the currently active, selected project
-when the canonical working directory is that project's folder or a child
-directory. No Project sessions and unrelated projects are ignored. Integration
-events never start, pause, resume, or finish a CodePulse session.
+small local helper normalizes lifecycle metadata into `DeveloperEventV2`. The
+receiver validates event size, schema, timestamp, integration, and idempotency
+before passing it through CodePulse-owned v2 inboxes. It keeps bounded,
+redacted diagnostics and never persists prompts, transcripts, source content,
+commands, or raw hook bodies. Integration events never start, pause, resume, or
+finish a CodePulse session.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling
