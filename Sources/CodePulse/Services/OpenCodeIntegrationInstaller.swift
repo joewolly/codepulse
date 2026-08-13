@@ -120,7 +120,7 @@ enum OpenCodePluginSource {
         return """
         // CodePulse developer integration (managed)
         const CODEPULSE_HELPER = \(helperLiteral);
-        const CODEPULSE_SCHEMA_VERSION = \(DeveloperToolEvent.currentSchemaVersion);
+        const CODEPULSE_PLUGIN_VERSION = "opencode-plugin-v1";
         const sessions = new Map();
 
         function text(value) {
@@ -144,32 +144,20 @@ enum OpenCodePluginSource {
           return text(record && record.cwd) || text(fallback);
         }
 
-        async function stableID(seed) {
-          const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed));
-          const bytes = new Uint8Array(digest).slice(0, 16);
-          bytes[6] = (bytes[6] & 15) | 80;
-          bytes[8] = (bytes[8] & 63) | 128;
-          const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0"));
-          return hex.slice(0, 4).join("") + "-" + hex.slice(4, 6).join("") + "-" + hex.slice(6, 8).join("") + "-" + hex.slice(8, 10).join("") + "-" + hex.slice(10, 16).join("");
-        }
-
         async function emit(eventType, id, record, fallbackDirectory, discriminator) {
           const cwd = workingDirectory(record, fallbackDirectory);
           if (!id || !cwd) return;
           try {
-            const eventID = await stableID([id, eventType, discriminator].join("\\u001f"));
             const event = {
-              schemaVersion: CODEPULSE_SCHEMA_VERSION,
-              id: eventID,
-              tool: "opencode",
-              externalSessionID: id,
-              eventType,
-              timestamp: new Date().toISOString(),
-              workingDirectory: cwd,
+              event_type: eventType,
+              session_id: id,
+              cwd,
               model: text(record && record.model),
-              profile: text(record && record.profile)
+              agent: text(record && record.profile),
+              sequence: Number(discriminator.split(":").pop()) || 0,
+              plugin_version: CODEPULSE_PLUGIN_VERSION
             };
-            const child = Bun.spawn([CODEPULSE_HELPER, "--event"], {
+            const child = Bun.spawn([CODEPULSE_HELPER, "--opencode-hook"], {
               stdin: "pipe",
               stdout: "ignore",
               stderr: "ignore"
@@ -215,7 +203,7 @@ enum OpenCodePluginSource {
                 if (record && id) {
                   record.state = "started";
                   record.sequence += 1;
-                  await emit("sessionStarted", id, record, fallbackDirectory, "created:" + record.sequence);
+                  await emit("session.started", id, record, fallbackDirectory, "created:" + record.sequence);
                 }
                 return;
               }
@@ -229,9 +217,9 @@ enum OpenCodePluginSource {
                 record.state = state;
                 record.sequence += 1;
                 if (state === "busy" || state === "retry") {
-                  await emit("activity", id, record, fallbackDirectory, state + ":" + record.sequence);
+                  await emit("activity.observed", id, record, fallbackDirectory, state + ":" + record.sequence);
                 } else if (state === "idle") {
-                  await emit("sessionIdle", id, record, fallbackDirectory, state + ":" + record.sequence);
+                  await emit("session.idle", id, record, fallbackDirectory, state + ":" + record.sequence);
                 }
                 return;
               }
@@ -242,7 +230,7 @@ enum OpenCodePluginSource {
                 if (!record || !id || record.state === "idle") return;
                 record.state = "idle";
                 record.sequence += 1;
-                await emit("sessionIdle", id, record, fallbackDirectory, "idle:" + record.sequence);
+                await emit("session.idle", id, record, fallbackDirectory, "idle:" + record.sequence);
                 return;
               }
 
@@ -251,7 +239,7 @@ enum OpenCodePluginSource {
                 const record = id ? sessions.get(id) : undefined;
                 if (record && id) {
                   record.sequence += 1;
-                  await emit("sessionEnded", id, record, fallbackDirectory, "deleted:" + record.sequence);
+                  await emit("session.ended", id, record, fallbackDirectory, "deleted:" + record.sequence);
                   sessions.delete(id);
                 }
                 return;
@@ -263,7 +251,7 @@ enum OpenCodePluginSource {
                 if (record && id && record.state !== "error") {
                   record.state = "error";
                   record.sequence += 1;
-                  await emit("error", id, record, fallbackDirectory, "error:" + record.sequence);
+                  await emit("integration.error", id, record, fallbackDirectory, "error:" + record.sequence);
                 }
               }
             }
