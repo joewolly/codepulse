@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var projectToDelete: ProjectRecord?
     @State private var loginItemError: String?
     @State private var backupError: String?
+    @State private var recoveryExportError: String?
 
     var body: some View {
         Form {
@@ -78,6 +79,22 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let recoveryIssue = store.persistenceRecoveryIssue {
+                Section("Data Recovery") {
+                    Text(recoveryIssue.userMessage)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button {
+                        exportRecoveryCopy()
+                    } label: {
+                        Label("Export Recovery Copy…", systemImage: "cross.case")
+                    }
+                    .accessibilityHint("Saves the unreadable or last known-good CodePulse state without changing it")
+                }
             }
 
             Section("Menu Bar") {
@@ -228,6 +245,14 @@ struct SettingsView: View {
         } message: {
             Text(backupError ?? "CodePulse could not create the backup.")
         }
+        .alert("Recovery Export Failed", isPresented: Binding(
+            get: { recoveryExportError != nil },
+            set: { if !$0 { recoveryExportError = nil } }
+        )) {
+            Button("OK", role: .cancel) { recoveryExportError = nil }
+        } message: {
+            Text(recoveryExportError ?? "CodePulse could not export the recovery copy.")
+        }
     }
 
     private func addProject() {
@@ -276,6 +301,21 @@ struct SettingsView: View {
             try store.exportBackup(to: url)
         } catch {
             backupError = error.localizedDescription
+        }
+    }
+
+    private func exportRecoveryCopy() {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "CodePulse Recovery \(CodePulseFormatting.exportDate(store.now)).json"
+        panel.prompt = "Export Recovery Copy"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try store.exportPersistenceRecoveryCopy(to: url)
+        } catch {
+            recoveryExportError = error.localizedDescription
         }
     }
 }

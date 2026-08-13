@@ -33,6 +33,7 @@ final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
     @Published private(set) var now: Date
     @Published private(set) var gitCaptureInProgress = false
+    @Published private(set) var persistenceRecoveryIssue: PersistenceRecoveryIssue?
 
     let persistence: StatePersisting
     let clock: SessionClock
@@ -60,6 +61,7 @@ final class SessionStore: ObservableObject {
         self.developerToolEventConsumer = developerToolEventConsumer
         self.calendar = calendar
         self.state = persistence.load()
+        self.persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
         self.now = clock.now
         self.gitCaptureSessionID = nil
         self.lastIntegrationScanAt = nil
@@ -453,9 +455,15 @@ final class SessionStore: ObservableObject {
         try data.write(to: fileURL, options: .atomic)
     }
 
+    func exportPersistenceRecoveryCopy(to fileURL: URL) throws {
+        guard let persistence = persistence as? StatePersistenceRecoveryProviding else { return }
+        try persistence.exportRecoveryCopy(to: fileURL)
+    }
+
     private func commit(_ nextState: AppState) {
         state = nextState
         persistence.save(nextState)
+        persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
     }
 
     private func processPendingIntegrationEvents(force: Bool = false) {
