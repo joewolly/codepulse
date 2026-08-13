@@ -46,7 +46,8 @@ let package = Package(
         .testTarget(
             name: "CodePulseTests",
             dependencies: ["CodePulse", "CodePulseIntegration", "CodePulseControlClient"],
-            path: "Tests/CodePulseTests"
+            path: "Tests/CodePulseTests",
+            resources: [.copy("Fixtures")]
         )
     ]
 )

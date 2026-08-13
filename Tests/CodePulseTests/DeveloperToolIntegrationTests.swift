@@ -123,12 +123,14 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertTrue(backupText.contains("developerToolContexts"))
         XCTAssertTrue(backupText.contains("thread-privacy"))
         XCTAssertTrue(backupText.contains("GPT-5.6"))
-        XCTAssertTrue(backupText.contains(processedEventID.uuidString))
-        XCTAssertTrue(backupText.contains("processedAt"))
+        XCTAssertFalse(backupText.contains(processedEventID.uuidString))
+        XCTAssertFalse(backupText.contains("developerToolIntegration"))
         for forbidden in ["transcript", "assistant message", "tool-call arguments", "command output", "api key"] {
             XCTAssertFalse(backupText.localizedCaseInsensitiveContains(forbidden), "Found \(forbidden) in backup")
         }
-        XCTAssertEqual(try CodePulseBackupCodec.decode(data).state, state)
+        var expectedPortableState = state
+        expectedPortableState.developerToolIntegration = nil
+        XCTAssertEqual(try CodePulseBackupCodec.decode(data).state, expectedPortableState)
     }
 
     func testEventCodecAndOptionalMetadata() throws {
