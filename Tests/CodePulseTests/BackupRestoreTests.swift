@@ -243,6 +243,26 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertTrue(normalized.activeSession?.automationMetadata?.claims.isEmpty == true)
     }
 
+    func testSessionStoreUsesCurrentMachineLoginItemStateDuringRestoreInspection() throws {
+        let root = try temporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let currentState = AppState(settings: CodePulseSettings(launchAtLogin: false))
+        let importedState = AppState(settings: CodePulseSettings(launchAtLogin: true))
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        persistence.save(currentState)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: RestoreTestClock(now),
+            automaticallyRefresh: false,
+            currentLaunchAtLoginState: { false }
+        )
+        let backupURL = root.appendingPathComponent("candidate.json")
+        try CodePulseBackupCodec.encode(state: importedState, exportedAt: now).write(to: backupURL)
+
+        let candidate = try store.inspectBackup(at: backupURL)
+        XCTAssertFalse(candidate.state.settings.launchAtLogin)
+    }
+
     func testTransactionalRestoreWritesAndVerifiesRecoveryAndSurvivesReload() throws {
         let root = try temporaryDirectory()
         let stateURL = root.appendingPathComponent("CodePulse/state.json")

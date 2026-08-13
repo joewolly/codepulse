@@ -1,6 +1,7 @@
 import Combine
 import CodePulseIntegration
 import Foundation
+import ServiceManagement
 
 protocol SessionClock {
     var now: Date { get }
@@ -49,6 +50,7 @@ final class SessionStore: ObservableObject {
     private let controlLaunchDate: Date
     private var lastControlScanAt: Date?
     private var isMonitoringApplications = false
+    private let currentLaunchAtLoginState: () -> Bool
     private(set) var currentFrontmostApplication: ApplicationIdentity?
 
     init(
@@ -60,7 +62,8 @@ final class SessionStore: ObservableObject {
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
         automaticallyRefresh: Bool = true,
         frontmostApplicationMonitor: FrontmostApplicationMonitoring? = nil,
-        controlTransport: CodePulseControlTransport? = nil
+        controlTransport: CodePulseControlTransport? = nil,
+        currentLaunchAtLoginState: @escaping () -> Bool = { SMAppService.mainApp.status == .enabled }
     ) {
         self.persistence = persistence
         self.clock = clock
@@ -71,6 +74,7 @@ final class SessionStore: ObservableObject {
         self.frontmostApplicationMonitor = frontmostApplicationMonitor
         self.controlTransport = controlTransport
         self.calendar = calendar
+        self.currentLaunchAtLoginState = currentLaunchAtLoginState
         self.state = persistence.load()
         let initialNow = clock.now
         self.now = initialNow
@@ -1297,7 +1301,7 @@ final class SessionStore: ObservableObject {
         let backup = try CodePulseBackupCodec.decode(data)
         let normalizedState = try BackupRestoreNormalizer.normalize(
             backup.state,
-            preservingLaunchAtLogin: state.settings.launchAtLogin
+            preservingLaunchAtLogin: currentLaunchAtLoginState()
         )
         return BackupRestoreCandidate(
             backup: backup,
