@@ -136,7 +136,7 @@ fi
 /usr/bin/xattr -cr "$APP_BUNDLE"
 /usr/bin/xattr -r -d com.apple.FinderInfo "$APP_BUNDLE" >/dev/null 2>&1 || true
 /usr/bin/xattr -r -d 'com.apple.fileprovider.fpfs#P' "$APP_BUNDLE" >/dev/null 2>&1 || true
-echo "--strict-verified-local-stage:$STAGED_APP_BUNDLE"
+echo "--strict-verified-local-stage:passed (temporary stage removed on exit)"
 echo "--copied-staged-app:$APP_BUNDLE"
 
 open_app() {

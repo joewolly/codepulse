@@ -104,9 +104,10 @@ base64 < "$HOME/.config/codepulse/sparkle-private-key" \
 ```
 
 The release workflow refuses to publish a release if this secret is missing.
-It uses Sparkle's `sign_update` utility with the private key passed over stdin,
-creates `appcast.xml`, uploads the appcast with the DMG and checksum, and then
-downloads the published assets again for verification.
+It decodes the key into a restrictive-permission temporary file and passes that
+file to Sparkle's `sign_update` utility, creates `appcast.xml`, uploads the
+appcast with the DMG and checksum, and then downloads the published assets again
+for verification.
 
 Each appcast item uses the immutable version-tagged GitHub Release asset URL
 for its DMG. The app itself reads the appcast through GitHub's stable latest
