@@ -661,6 +661,10 @@ struct SessionAutomationMetadata: Codable, Equatable, Sendable {
         if tools.isEmpty, applications.isEmpty, let tool = startedByTool {
             return "Automatic · " + tool.title
         }
+        if tools.isEmpty, applications.isEmpty,
+           case .application = startedBySource {
+            return "Automatic · Application"
+        }
         return "Automatic · Multiple"
     }
 

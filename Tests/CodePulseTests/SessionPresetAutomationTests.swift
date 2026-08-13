@@ -114,6 +114,11 @@ final class SessionPresetAutomationTests: XCTestCase {
         )
 
         monitor.setCurrentApplication(safari)
+        XCTAssertEqual(store.activeAutomationStatusLabel, "Automatic · Xcode")
+        XCTAssertEqual(
+            try XCTUnwrap(store.activeSession?.automationMetadata).statusLabel(contexts: []),
+            "Automatic · Application"
+        )
         clock.now = start.addingTimeInterval(9)
         store.refresh()
         XCTAssertEqual(store.phase, .running)

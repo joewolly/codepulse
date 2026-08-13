@@ -152,8 +152,13 @@ final class SessionStore: ObservableObject {
         if labels.count == 1, let label = labels.first {
             return "Automatic · \(label)"
         }
-        if labels.isEmpty, let tool = metadata.startedByTool {
-            return "Automatic · \(tool.title)"
+        if labels.isEmpty {
+            switch metadata.startedBySource {
+            case .developerTool(let tool, _):
+                return "Automatic · \(tool.title)"
+            case .application(let bundleIdentifier):
+                return "Automatic · \(applicationDisplayName(for: bundleIdentifier) ?? bundleIdentifier)"
+            }
         }
         return "Automatic · Multiple"
     }
