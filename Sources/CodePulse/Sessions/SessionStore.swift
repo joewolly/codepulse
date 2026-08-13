@@ -40,6 +40,7 @@ final class SessionStore: ObservableObject {
     let gitService: GitServicing
     let githubContextService: GitHubContextServicing
     let developerToolEventConsumer: DeveloperToolEventConsuming
+    let developerEventV2Consumer: DeveloperEventV2Consuming
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -52,6 +53,7 @@ final class SessionStore: ObservableObject {
         gitService: GitServicing = SystemGitService(),
         githubContextService: GitHubContextServicing = SystemGitHubContextService(),
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
+        developerEventV2Consumer: DeveloperEventV2Consuming = DeveloperEventV2Consumer(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
@@ -59,6 +61,7 @@ final class SessionStore: ObservableObject {
         self.gitService = gitService
         self.githubContextService = githubContextService
         self.developerToolEventConsumer = developerToolEventConsumer
+        self.developerEventV2Consumer = developerEventV2Consumer
         self.calendar = calendar
         self.state = persistence.load()
         self.persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
@@ -660,7 +663,9 @@ final class SessionStore: ObservableObject {
         lastIntegrationScanAt = scanDate
 
         var nextState = state
-        guard developerToolEventConsumer.processPending(state: &nextState, now: scanDate) else {
+        let didProcessV1 = developerToolEventConsumer.processPending(state: &nextState, now: scanDate)
+        let didProcessV2 = developerEventV2Consumer.processPending(state: &nextState, now: scanDate)
+        guard didProcessV1 || didProcessV2 else {
             return
         }
         commit(nextState)

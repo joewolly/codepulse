@@ -634,6 +634,7 @@ struct AppState: Codable, Equatable {
     var activeSession: ActiveSession?
     var settings: CodePulseSettings
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
+    var developerEventDiagnostics: DeveloperEventDiagnosticsJournal?
     var activityGraph: ActivityGraph
 
     init(
@@ -642,6 +643,7 @@ struct AppState: Codable, Equatable {
         activeSession: ActiveSession? = nil,
         settings: CodePulseSettings = CodePulseSettings(),
         developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
+        developerEventDiagnostics: DeveloperEventDiagnosticsJournal? = nil,
         activityGraph: ActivityGraph = ActivityGraph()
     ) {
         self.projects = projects
@@ -649,11 +651,12 @@ struct AppState: Codable, Equatable {
         self.activeSession = activeSession
         self.settings = settings
         self.developerToolIntegration = developerToolIntegration
+        self.developerEventDiagnostics = developerEventDiagnostics
         self.activityGraph = activityGraph
     }
 
     private enum CodingKeys: String, CodingKey {
-        case projects, completedSessions, activeSession, settings, developerToolIntegration, activityGraph
+        case projects, completedSessions, activeSession, settings, developerToolIntegration, developerEventDiagnostics, activityGraph
     }
 
     init(from decoder: Decoder) throws {
@@ -663,6 +666,7 @@ struct AppState: Codable, Equatable {
         activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
         settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
         developerToolIntegration = try container.decodeIfPresent(DeveloperToolIntegrationProcessingState.self, forKey: .developerToolIntegration)
+        developerEventDiagnostics = try container.decodeIfPresent(DeveloperEventDiagnosticsJournal.self, forKey: .developerEventDiagnostics)
         activityGraph = try container.decodeIfPresent(ActivityGraph.self, forKey: .activityGraph) ?? ActivityGraph()
     }
 }
@@ -679,4 +683,55 @@ struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
 
 struct DeveloperToolIntegrationProcessingState: Codable, Equatable {
     var processedEvents: [DeveloperToolProcessedEvent] = []
+}
+
+enum DeveloperEventDiagnosticStatus: String, Codable, Equatable {
+    case accepted
+    case duplicate
+    case rejected
+}
+
+/// Content-safe operational evidence for the v2 integration boundary. The
+/// input body, paths, session keys, and idempotency key are never persisted.
+struct DeveloperEventDiagnostic: Codable, Equatable, Identifiable {
+    let id: UUID
+    let receivedAt: Date
+    let status: DeveloperEventDiagnosticStatus
+    let integration: String?
+    let eventFingerprint: String?
+    let parserVersion: String?
+    let integrationVersion: String?
+    let rejectionCode: String?
+
+    init(
+        id: UUID = UUID(),
+        receivedAt: Date,
+        status: DeveloperEventDiagnosticStatus,
+        integration: String? = nil,
+        eventFingerprint: String? = nil,
+        parserVersion: String? = nil,
+        integrationVersion: String? = nil,
+        rejectionCode: String? = nil
+    ) {
+        self.id = id
+        self.receivedAt = receivedAt
+        self.status = status
+        self.integration = integration
+        self.eventFingerprint = eventFingerprint
+        self.parserVersion = parserVersion
+        self.integrationVersion = integrationVersion
+        self.rejectionCode = rejectionCode
+    }
+}
+
+struct DeveloperEventDiagnosticsJournal: Codable, Equatable {
+    static let maximumEntries = 512
+    var entries: [DeveloperEventDiagnostic] = []
+
+    mutating func append(_ entry: DeveloperEventDiagnostic) {
+        entries.append(entry)
+        if entries.count > Self.maximumEntries {
+            entries.removeFirst(entries.count - Self.maximumEntries)
+        }
+    }
 }
