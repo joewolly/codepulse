@@ -25,7 +25,8 @@ final class PersistenceMigrationTests: XCTestCase {
         XCTAssertEqual(envelope.migrationHistory.map(\.identifier), [
             "legacy-state-to-envelope",
             "legacy-sessions-to-activity-graph",
-            "developer-event-v2-diagnostics"
+            "developer-event-v2-diagnostics",
+            "agent-review-grace-setting"
         ])
     }
 
@@ -59,7 +60,8 @@ final class PersistenceMigrationTests: XCTestCase {
         XCTAssertEqual(envelope.migrationHistory.map(\.identifier), [
             "legacy-state-to-envelope",
             "legacy-sessions-to-activity-graph",
-            "developer-event-v2-diagnostics"
+            "developer-event-v2-diagnostics",
+            "agent-review-grace-setting"
         ])
         XCTAssertFalse(envelope.payload.settings.globalShortcutEnabled)
     }

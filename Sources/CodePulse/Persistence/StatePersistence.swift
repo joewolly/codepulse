@@ -45,7 +45,7 @@ struct StateMigrationRecord: Codable, Equatable {
 }
 
 struct StatePersistenceEnvelope: Codable, Equatable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     let schemaVersion: Int
     let createdAt: Date
@@ -240,6 +240,8 @@ final class JSONFilePersistence: StatePersisting, StatePersistenceRecoveryProvid
                 migrated = migrateVersion2ToVersion3(migrated)
             case 3:
                 migrated = migrateVersion3ToVersion4(migrated)
+            case 4:
+                migrated = migrateVersion4ToVersion5(migrated)
             default:
                 throw StatePersistenceError.unreadableState
             }
@@ -305,6 +307,25 @@ final class JSONFilePersistence: StatePersisting, StatePersistenceRecoveryProvid
         }
         return StatePersistenceEnvelope(
             schemaVersion: 4,
+            createdAt: envelope.createdAt,
+            migrationHistory: history,
+            payload: envelope.payload
+        )
+    }
+
+    private func migrateVersion4ToVersion5(_ envelope: StatePersistenceEnvelope) -> StatePersistenceEnvelope {
+        precondition(envelope.schemaVersion == 4)
+        var history = envelope.migrationHistory
+        if !history.contains(where: { $0.identifier == "agent-review-grace-setting" }) {
+            history.append(StateMigrationRecord(
+                identifier: "agent-review-grace-setting",
+                fromVersion: 4,
+                toVersion: 5,
+                migratedAt: now()
+            ))
+        }
+        return StatePersistenceEnvelope(
+            schemaVersion: 5,
             createdAt: envelope.createdAt,
             migrationHistory: history,
             payload: envelope.payload
