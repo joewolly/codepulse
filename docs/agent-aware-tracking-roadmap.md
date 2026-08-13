@@ -160,7 +160,7 @@ not exist yet.
 | 14 | @ZacharyRW | `feature/14-claude-usage` | [#19](https://github.com/ZacharyRW/codepulse/pull/19) | Merged | 2026-08-13 |
 | 15 | @ZacharyRW | `feature/15-opencode-usage` | [#20](https://github.com/ZacharyRW/codepulse/pull/20) | Merged | 2026-08-13 |
 | 16 | @ZacharyRW | `feature/16-usage-attribution` | [#21](https://github.com/ZacharyRW/codepulse/pull/21) | Merged | 2026-08-13 |
-| 17 | @ZacharyRW | `feature/17-usage-insights` | — | In review | — |
+| 17 | @ZacharyRW | `feature/17-usage-insights` | — | PR pending GitHub authentication | — |
 | 18 | — | `feature/18-release-hardening` | — | Not started | — |
 
 ---
