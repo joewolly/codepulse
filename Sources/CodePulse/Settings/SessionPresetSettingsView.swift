@@ -166,7 +166,7 @@ private struct SessionPresetEditorView: View {
             }
             .formStyle(.grouped)
 
-            Text("No Project presets are available for manual Quick Start. Automatic rules require a configured project folder.")
+            Text("All presets are available for manual Quick Start. Automatic rules require a configured project folder.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

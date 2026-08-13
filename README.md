@@ -113,8 +113,9 @@ outcome automatically; save or discard it from the CodePulse UI.
 privacy-minimal versioned JSON status object. The command exits nonzero for
 invalid arguments, an unavailable app, invalid state transitions, missing or
 ambiguous presets/projects, expired/rejected commands, and local transport
-failures. The embedded tool is not installed into `/usr/local/bin`; add a shell
-alias or use its bundle path explicitly.
+failures. A response timeout is exit code 7; a mutation may already have been
+applied, so re-read `status` before retrying. The embedded tool is not installed
+into `/usr/local/bin`; add a shell alias or use its bundle path explicitly.
 
 ## Screenshots
 

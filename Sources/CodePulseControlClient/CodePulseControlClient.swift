@@ -53,6 +53,8 @@ public enum CodePulseControlCLIParser {
       5  preset or project was not found
       6  command rejected or expired
       7  local transport or response failure
+
+    A timeout can occur after CodePulse applies a mutation. Re-read status before retrying a command that exits with code 7.
     """
 
     public static func parse(
