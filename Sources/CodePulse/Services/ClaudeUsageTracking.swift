@@ -317,9 +317,16 @@ enum ClaudeUsageRollupCalculator {
             let childSamples = samples.filter { sample in children.contains(where: { $0.id == sample.runID }) }
             let aggregate = direct.filter(\.includesSubagentUsage).max { $0.observedAt < $1.observedAt }
             let included = aggregate.map { [$0] } ?? (direct + childSamples)
-            guard let tokens = included.map(\.tokens).reduce(nil, { partial, next in
-                partial.flatMap { $0.adding(next) } ?? next
-            }) else { return nil }
+            var tokens: UsageTokenCounts?
+            for next in included.map(\.tokens) {
+                if let current = tokens {
+                    guard let combined = current.adding(next) else { return nil }
+                    tokens = combined
+                } else {
+                    tokens = next
+                }
+            }
+            guard let tokens else { return nil }
             return ClaudeUsageRollup(
                 parentRunID: parent.id,
                 childRunIDs: children.map(\.id).sorted { $0.uuidString < $1.uuidString },
@@ -336,17 +343,23 @@ private extension UsageTokenCounts {
     }
 
     func adding(_ other: UsageTokenCounts) -> UsageTokenCounts? {
-        func sum(_ lhs: Int?, _ rhs: Int?) -> Int? {
-            guard lhs != nil || rhs != nil else { return nil }
+        func sum(_ lhs: Int?, _ rhs: Int?) -> (value: Int?, valid: Bool) {
+            guard lhs != nil || rhs != nil else { return (nil, true) }
             let (value, overflow) = (lhs ?? 0).addingReportingOverflow(rhs ?? 0)
-            return overflow ? nil : value
+            return (overflow ? nil : value, !overflow)
         }
+        let input = sum(input, other.input)
+        let output = sum(output, other.output)
+        let cachedInput = sum(cachedInput, other.cachedInput)
+        let cacheWriteInput = sum(cacheWriteInput, other.cacheWriteInput)
+        let reasoning = sum(reasoning, other.reasoning)
+        guard input.valid, output.valid, cachedInput.valid, cacheWriteInput.valid, reasoning.valid else { return nil }
         let result = UsageTokenCounts(
-            input: sum(input, other.input),
-            output: sum(output, other.output),
-            cachedInput: sum(cachedInput, other.cachedInput),
-            cacheWriteInput: sum(cacheWriteInput, other.cacheWriteInput),
-            reasoning: sum(reasoning, other.reasoning)
+            input: input.value,
+            output: output.value,
+            cachedInput: cachedInput.value,
+            cacheWriteInput: cacheWriteInput.value,
+            reasoning: reasoning.value
         )
         return UsageResourcePolicy.accepts(result) ? result : nil
     }

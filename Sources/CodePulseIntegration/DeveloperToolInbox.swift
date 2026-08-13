@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public struct DeveloperToolIntegrationPaths: Equatable, Sendable {
@@ -36,6 +37,7 @@ public enum DeveloperEventV2InboxError: Error, Equatable {
     case eventTooLarge
     case inboxFull
     case cannotReadEvent
+    case cannotLockReceiptLedger
 }
 
 public enum DeveloperEventV2Receipt: Equatable {
@@ -220,17 +222,33 @@ public final class DeveloperEventV2Inbox {
         guard data.count <= DeveloperToolIntegrationLimits.maximumReceiptBytes else {
             throw DeveloperEventV2InboxError.eventTooLarge
         }
-        var existing = receiptFiles()
-        var totalBytes = existing.reduce(0) { $0 + $1.byteCount }
-        while existing.count >= DeveloperToolIntegrationLimits.maximumReceiptFiles ||
-            totalBytes + data.count > DeveloperToolIntegrationLimits.maximumReceiptBytes {
-            guard let oldest = existing.first else { throw DeveloperEventV2InboxError.inboxFull }
-            try? fileManager.removeItem(at: oldest.url)
-            totalBytes -= oldest.byteCount
-            existing.removeFirst()
+        try withReceiptLedgerLock {
+            guard !managedPathContainsSymbolicLink(paths.eventV2ReceiptURL) else {
+                throw DeveloperEventV2InboxError.unsafePath
+            }
+            var existing = receiptFiles()
+            var totalBytes = existing.reduce(0) { $0 + $1.byteCount }
+            while existing.count >= DeveloperToolIntegrationLimits.maximumReceiptFiles ||
+                totalBytes + data.count > DeveloperToolIntegrationLimits.maximumReceiptBytes {
+                guard let oldest = existing.first else { throw DeveloperEventV2InboxError.inboxFull }
+                try? fileManager.removeItem(at: oldest.url)
+                totalBytes -= oldest.byteCount
+                existing.removeFirst()
+            }
+            let target = paths.eventV2ReceiptURL.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
+            try data.write(to: target, options: .atomic)
         }
-        let target = paths.eventV2ReceiptURL.appendingPathComponent("\(UUID().uuidString.lowercased()).json")
-        try data.write(to: target, options: .atomic)
+    }
+
+    private func withReceiptLedgerLock<T>(_ operation: () throws -> T) throws -> T {
+        let lockURL = paths.eventV2ReceiptURL.appendingPathComponent(".receipt-ledger.lock")
+        guard !isSymbolicLink(lockURL) else { throw DeveloperEventV2InboxError.unsafePath }
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else { throw DeveloperEventV2InboxError.cannotLockReceiptLedger }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else { throw DeveloperEventV2InboxError.cannotLockReceiptLedger }
+        defer { flock(descriptor, LOCK_UN) }
+        return try operation()
     }
 
     private func ensureInboxCapacity(incomingBytes: Int) throws {

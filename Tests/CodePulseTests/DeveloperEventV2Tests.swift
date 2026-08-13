@@ -88,6 +88,27 @@ final class DeveloperEventV2Tests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.eventV2ReceiptURL.appendingPathComponent("00000.json").path))
     }
 
+    func testReceiptLedgerSerializesConcurrentPruneAndWriteOperations() throws {
+        let root = try temporaryDirectory()
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperEventV2Inbox(paths: paths)
+        try FileManager.default.createDirectory(at: paths.eventV2ReceiptURL, withIntermediateDirectories: true)
+        for index in 0..<(DeveloperToolIntegrationLimits.maximumReceiptFiles - 1) {
+            try Data("{}".utf8).write(
+                to: paths.eventV2ReceiptURL.appendingPathComponent(String(format: "%05d.json", index))
+            )
+        }
+
+        DispatchQueue.concurrentPerform(iterations: 32) { index in
+            inbox.recordRejected(now: now, code: "concurrent-\(index)")
+        }
+
+        let files = try FileManager.default.contentsOfDirectory(at: paths.eventV2ReceiptURL, includingPropertiesForKeys: [.isRegularFileKey])
+            .filter { $0.pathExtension == "json" }
+        XCTAssertEqual(files.count, DeveloperToolIntegrationLimits.maximumReceiptFiles)
+        XCTAssertEqual(inbox.pendingReceiptURLs().count, DeveloperToolIntegrationLimits.maximumPendingEventsPerScan)
+    }
+
     func testFingerprintsAreInstallationScoped() {
         let key = "codex-0123456789abcdef"
         XCTAssertNotEqual(
