@@ -328,6 +328,16 @@ final class SessionStore: ObservableObject {
         ActivityGraphRepository.runs(in: state.activityGraph, workspaceID: workspaceID, activityID: activityID)
     }
 
+    /// Keeps manual and agent measures separate while exposing their shared
+    /// wall-active time for activity detail surfaces.
+    func activityTimingMetrics(for activityID: UUID, at date: Date? = nil) -> ActivityTimingMetrics {
+        ActivityTimingMetricsCalculator.calculate(
+            activityID: activityID,
+            in: state.activityGraph,
+            at: date ?? now
+        )
+    }
+
     func activityGraphDiagnosticsJSON() throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
