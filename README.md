@@ -42,6 +42,8 @@ read-only repository, pull request, and developer-tool metadata.
 - Exports the currently filtered History as standard UTF-8 CSV.
 - Exports the currently selected Insights timeframe and project as a deterministic
   local Markdown report.
+- Archives projects that are no longer active without deleting their saved
+  sessions, Insights, exports, presets, or automation rules.
 - Exports and restores a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -116,6 +118,21 @@ Insights summary and contains no AI-generated commentary or cloud data.
 
 Both exports are created locally at the destination you choose. CodePulse does
 not upload CSV or Markdown exports.
+
+## Project archiving
+
+Use **Settings → Projects → Archive** when you want to retire a project without
+deleting its CodePulse data. Archived projects leave new-session pickers,
+Quick Start, default-project selection, Session Automation, and direct
+`codepulsectl` starts. CodePulse keeps the project record and does not rewrite
+completed sessions.
+
+Archived projects remain available in History and Insights, including History
+CSV and Insights Markdown exports. Session Presets and automation rules that
+reference an archived project are preserved and shown as unavailable until the
+project is restored. Use **Restore** in Project Settings to make the same
+project, preset, and rule eligible again. Archive state is part of local backup
+configuration and is independent from **Needs Relink** folder status.
 
 ## External local control
 
