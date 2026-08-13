@@ -56,7 +56,10 @@ the documented Claude Code hooks with the same lifecycle mapping plus
 `SubagentStart` and `SubagentStop`; each subagent is a separate run whose
 parent is represented by a salted fingerprint. Both mappers read only
 whitelisted metadata and discard prompt, transcript, command, tool, and
-permission-decision fields. OpenCode remains a later feature.
+permission-decision fields. Feature 07 uses the OpenCode plugin event API:
+`session.created`, `session.status` (`busy`/`retry`), `session.idle`, and
+`session.deleted`. Unsupported status and error payloads remain diagnostics
+rather than being guessed into timing states.
 
 Codex correlation creates or resumes a run only for a matching local workspace
 root. Feature 08 will add Git workspace discovery; cloud-only sessions that
