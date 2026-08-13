@@ -163,6 +163,19 @@ private struct HistoryFilterBar: View {
             .accessibilityLabel("Git filter")
             .accessibilityValue(query.git.title)
 
+            Menu {
+                Picker("Developer Tool", selection: $query.developerTool) {
+                    ForEach(HistoryDeveloperToolFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+            } label: {
+                Label(query.developerTool.title, systemImage: "wrench.and.screwdriver")
+            }
+            .menuStyle(.borderlessButton)
+            .accessibilityLabel("Developer tool filter")
+            .accessibilityValue(query.developerTool.title)
+
             Spacer()
 
             if query.hasRestrictions {
@@ -300,6 +313,15 @@ private struct HistoryRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            if !session.developerToolContexts.isEmpty {
+                Label(
+                    developerToolSummary,
+                    systemImage: "wrench.and.screwdriver"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
         }
         .padding(.vertical, 5)
         .contentShape(Rectangle())
@@ -317,7 +339,13 @@ private struct HistoryRow: View {
         if let goal = session.goal { values.append(goal) }
         if let outcome = session.outcome { values.append(outcome) }
         if let branch = session.gitContext?.branchDisplay { values.append(branch) }
+        if !session.developerToolContexts.isEmpty { values.append(developerToolSummary) }
         return values.joined(separator: ", ")
+    }
+
+    private var developerToolSummary: String {
+        let names = Set(session.developerToolContexts.map(\.tool.title)).sorted()
+        return names.joined(separator: ", ")
     }
 }
 
