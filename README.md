@@ -45,6 +45,9 @@ developer-tool metadata.
 - Adds Usage Insights for selected periods/projects: manual versus agent timing,
   waiting, token and labeled cost breakdowns, privacy-safe sample details, and
   local CSV/JSON export with opt-in context labels.
+- Lets users inspect and delete CodePulse-held data for an individual developer
+  integration, and generate a redacted local support bundle containing only
+  aggregate diagnostics.
 - Exports a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -90,6 +93,9 @@ or allow the automatic update check.
    wall-active time, waiting, and optional usage/cost representations. Its
    **Export** menu writes the selected period locally; workspace and activity
    labels are opt-in, and paths/source identifiers are never exported.
+10. In **Settings → Integration Data**, review the stored metadata categories,
+    remove one integration's CodePulse-held records when needed, or export a
+    redacted support bundle for local troubleshooting.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
@@ -253,6 +259,15 @@ provenance. Workspace/activity labels are opt-in; paths, raw identifiers,
 fingerprints, prompts, and transcript content are never exported. See
 [`docs/usage-insights.md`](docs/usage-insights.md) for definitions, data quality
 states, and the export schema.
+
+The agent-aware release keeps integration data and supportability local: each
+tool's saved agent runs, usage samples, diagnostics, and checkpoints can be
+deleted from Settings without changing user-owned logs or tool configuration.
+The support bundle is a separate, aggregate-only JSON artifact that excludes
+paths, source/session identifiers, prompts, transcripts, commands, source
+content, and session text. See
+[`docs/agent-aware-release.md`](docs/agent-aware-release.md) for migration,
+rollback, release preflight, setup/removal, manual validation, and known limits.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

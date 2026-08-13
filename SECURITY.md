@@ -26,8 +26,12 @@ CodePulse is a local-first macOS application:
 - It has no account system, cloud sync, telemetry, product analytics, or remote
   activity-monitoring service.
 - App state is stored locally in the user's Application Support directory.
-- Project access is limited to folders the user selects. CodePulse stores a
-  security-scoped bookmark so that access can be restored across launches.
+- Project access is limited to folders the user selects, plus the single
+  canonical working directory supplied by an enabled local integration when
+  automatic workspace/local-task discovery is enabled. CodePulse never
+  enumerates directories from that event; users can disable the integration or
+  automatic Git workspace discovery if that local-tool trust boundary is not
+  acceptable. Selected projects use security-scoped bookmarks for relaunch.
 - Git capture invokes `/usr/bin/git` with read-only commands to collect local
   repository metadata and diff statistics. CodePulse does not modify the
   selected repository.
@@ -72,6 +76,12 @@ Sparkle authentication protects the in-app update archive, but it does not give
 the app a Gatekeeper-trusted Apple developer identity. See
 [`docs/releasing.md`](docs/releasing.md) for the packaging, verification, and
 first-launch details.
+
+Release workflows use read-only validation permissions, bounded jobs, cancelled
+superseded validation, SHA-pinned third-party actions, and a manual
+non-publishing preflight. The preflight can validate a Sparkle signing key but
+does not create a GitHub Release. Developer ID signing/notarization remains a
+separate authority boundary requiring Apple credentials.
 
 ## Scope notes
 

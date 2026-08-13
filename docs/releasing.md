@@ -146,6 +146,18 @@ The `GitHub Release` workflow then:
 Do not manually replace release assets after a successful automated release;
 the appcast signature and published archive are expected to stay in sync.
 
+Before creating a real tag, manually dispatch the **Release preflight** GitHub
+Actions workflow with a synthetic semantic version and numeric build. It has
+read-only repository permissions, creates no GitHub Release, and validates the
+test suite, ad-hoc-signed package, DMG checksum, and Sparkle signature before
+uploading a seven-day diagnostic artifact. The workflow requires the same
+`SPARKLE_PRIVATE_KEY_BASE64` secret as a real release, so it validates that the
+key is usable without broadening a pull request's access to that secret.
+
+All GitHub Actions are pinned to reviewed commit SHAs. Dependabot opens weekly
+Swift and GitHub Actions updates; review these like any release-related change
+and do not auto-merge them.
+
 ## Installation and Gatekeeper
 
 The DMG is not Developer ID signed and is not notarized. On a Mac with normal
