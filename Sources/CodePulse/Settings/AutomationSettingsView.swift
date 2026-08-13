@@ -55,8 +55,9 @@ struct AutomationSettingsView: View {
                 presets: store.sessionPresetsSorted,
                 projects: store.projectsSortedByRecentUse,
                 save: { rule in
-                    _ = store.upsertAutomationRule(rule)
+                    guard store.upsertAutomationRule(rule) else { return false }
                     isPresentingEditor = false
+                    return true
                 },
                 cancel: { isPresentingEditor = false }
             )
@@ -154,7 +155,7 @@ private struct AutomationRuleEditorView: View {
     let rule: SessionAutomationRule?
     let presets: [SessionPreset]
     let projects: [ProjectRecord]
-    let save: (SessionAutomationRule) -> Void
+    let save: (SessionAutomationRule) -> Bool
     let cancel: () -> Void
 
     @State private var name: String
@@ -167,12 +168,13 @@ private struct AutomationRuleEditorView: View {
     @State private var finishDelay: String
     @State private var minimumSavedDuration: String
     @State private var isPresentingRunningApplicationPicker = false
+    @State private var saveError: String?
 
     init(
         rule: SessionAutomationRule?,
         presets: [SessionPreset],
         projects: [ProjectRecord],
-        save: @escaping (SessionAutomationRule) -> Void,
+        save: @escaping (SessionAutomationRule) -> Bool,
         cancel: @escaping () -> Void
     ) {
         self.rule = rule
@@ -190,6 +192,7 @@ private struct AutomationRuleEditorView: View {
         _pauseDelay = State(initialValue: String(Int(rule?.pauseDelay ?? 60)))
         _finishDelay = State(initialValue: String(Int(rule?.finishDelay ?? 300)))
         _minimumSavedDuration = State(initialValue: String(Int(rule?.minimumSavedDuration ?? 60)))
+        _saveError = State(initialValue: nil)
     }
 
     var body: some View {
@@ -237,6 +240,11 @@ private struct AutomationRuleEditorView: View {
 
             if let validationMessage {
                 Label(validationMessage, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let saveError {
+                Label(saveError, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
@@ -317,7 +325,7 @@ private struct AutomationRuleEditorView: View {
             trigger = .applications(ApplicationAutomationTrigger(applications: applications))
         }
 
-        save(SessionAutomationRule(
+        let value = SessionAutomationRule(
             id: rule?.id ?? UUID(),
             name: name,
             isEnabled: isEnabled,
@@ -326,7 +334,10 @@ private struct AutomationRuleEditorView: View {
             pauseDelay: pause,
             finishDelay: finish,
             minimumSavedDuration: minimum
-        ))
+        )
+        if !save(value) {
+            saveError = "The rule could not be saved. Check its name, trigger, and session preset."
+        }
     }
 
     private func finiteNonNegativeDouble(_ value: String) -> Double? {
