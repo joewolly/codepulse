@@ -22,9 +22,12 @@
 6. **Preserve local-first identity.** Prompt content, raw cloud sync, invented
    pricing, and provider-balance scraping remain out of scope without a separate
    approved privacy/security design.
-7. **Do not merge histories to resolve product strategy.** The fork and upstream
-   have independent `v0.8.0` lines. Reconcile selected capabilities against
-   current code and migrations, not by a blanket merge.
+7. **Treat the two repositories as independent peer product lines.**
+   `ZacharyRW/codepulse` (`origin`) is authoritative for this roadmap and its
+   releases. `joewolly/codepulse` (locally named `upstream`) is the historical
+   parent and a friendly peer, not a release authority for the fork. Either
+   maintainer may selectively port useful features through focused, reviewed
+   changes; do not blanket-merge histories or assume version equivalence.
 8. **Do not delete branches in this roadmap execution.** The user explicitly
    prohibited branch deletion. Cleanup candidates are inventory only until a
    later, separately authorized action.
@@ -37,6 +40,21 @@ local macOS product.
 
 No new release or production-key preflight should occur until this phase is
 complete.
+
+Decisions recorded for this phase on 2026-08-13:
+
+- Recovery backups remain complete, full-fidelity local recovery artifacts.
+  They may contain sensitive CodePulse state, including paths, user-entered
+  text, and legacy external developer-tool identifiers, and must say so before
+  export.
+- A separately versioned, redacted/share-safe export is committed follow-on
+  work under `FEAT-002`; it must not weaken or silently replace recovery
+  fidelity.
+- The fork and its historical parent are independent, friendly projects.
+  `origin/main` and fork releases are authoritative here; future feature sharing
+  is selective and does not imply shared tags, histories, or release channels.
+- GitHub rulesets, protected production signing, and their verification evidence
+  are Phase 0 deliverables, not an out-of-band suggestion.
 
 ### SEC-001 — Make release-preflight inputs data, never shell source
 
@@ -95,14 +113,21 @@ complete.
 
 ### PRIV-001 — Correct the full-backup privacy contract
 
-- Decide whether recovery backup v2 redacts/fingerprints legacy external IDs and
-  paths or intentionally remains a complete unredacted recovery artifact.
+- Keep the current versioned recovery backup complete and unredacted; do not
+  change its schema version merely to correct disclosure copy.
+- At the export decision point, explicitly warn that the file can contain paths,
+  user-entered text, Git/GitHub metadata, legacy external developer-tool session
+  identifiers, and other locally stored state. State that it excludes
+  credentials and source transcript/file contents only where the implementation
+  enforces those exclusions.
 - Update Settings copy, accessibility hints, `PRIVACY.md`, `SECURITY.md`, and
-  tests to the exact chosen contract.
-- Prefer a separate share-safe export rather than weakening recovery fidelity
-  without a migration plan.
+  contract tests to the exact full-fidelity behavior.
+- Deliver `FEAT-002` later as a separate versioned, redacted/share-safe format;
+  it must have a category preview and a distinct name and must never be described
+  as a recovery backup.
 - **Success:** a user can tell, at export time, exactly which sensitive categories
-  are included; tests enforce the same contract.
+  are included; round-trip and disclosure tests enforce the same contract, and
+  `FEAT-002` remains explicitly tracked.
 
 ### PRIV-002 — Complete per-integration deletion
 
@@ -123,16 +148,19 @@ complete.
 - **Success:** unreviewed commits cannot become the release/signing source and
   history cannot be rewritten through ordinary pushes.
 
-### GH-005 — Record the fork/upstream version strategy
+### GH-005 — Record the independent-fork version strategy
 
 - Do not overwrite either `v0.8.0` tag.
-- Declare the fork's role and the authoritative release channel.
+- Declare `ZacharyRW/codepulse` and its `origin/main` as authoritative for this
+  product line while documenting `joewolly/codepulse` as a friendly peer and
+  possible source/destination for selectively ported features.
 - Document a remote-specific tag inspection/fetch procedure that does not ask
   Git to clobber a tag.
-- Choose the next fork version above `0.8.0`; update `Info.plist` only when a
+- Reserve `0.9.0` as the next fork release line; update `Info.plist` only when a
   release candidate is selected.
 - **Success:** fresh-clone and update instructions do not fail on the tag
-  collision, and users can distinguish fork/upstream release lines.
+  collision, users can distinguish the independent release lines, and a future
+  feature port is reviewed as a normal change rather than a history merge.
 
 ### Phase 0 verification gate
 
@@ -141,7 +169,71 @@ complete.
 - A safe, disposable-key preflight succeeds from an approved ref.
 - Production signing environment is protected and has not been used from an
   arbitrary branch.
+- `main` and release-tag rulesets are enabled and verified against the exact
+  required validation check.
+- Backup disclosure and per-integration deletion pass encode, reload, and
+  re-export contract tests.
+- Fork/repository role, `0.9.0` reservation, and collision-safe tag commands are
+  documented without changing either existing `v0.8.0` tag.
 - No branches are deleted.
+
+### Phase 0 implementation plan
+
+Keep the release freeze in effect throughout this sequence. Start every code
+branch from a freshly fetched `origin/main`; do not merge `upstream/main` or any
+existing feature branch. Each pull request must include the regression test and
+documentation required for its own claim rather than deferring all evidence to
+the final gate.
+
+| Order | Reviewable delivery | IDs | Primary scope | Merge/evidence gate |
+| --- | --- | --- | --- | --- |
+| 1 | Secret-free, injection-safe preflight | SEC-001, part of SEC-002 | Refactor `.github/workflows/release-preflight.yml`; pass dispatch values through step environment variables; validate quoted runtime values before repository commands; remove direct input interpolation from every `run` block; resolve Sparkle tools from a deterministic SwiftPM artifact path; generate a disposable key per preflight run. Add a narrow static workflow check and hostile-value fixture/matrix, and run that check in normal validation. | Static scan finds no dispatch-expression interpolation in shell; quote/newline/substitution/glob/option-like inputs fail before packaging; valid synthetic values package and sign/verify with no production secret. |
+| 2 | Protected production-signing workflow | SEC-002, DOC-002 | Refactor `.github/workflows/release.yml` so an unprivileged job validates and packages an immutable tag commit already contained in `origin/main`, while the signing step/job uses the `production-signing` environment. Update `docs/releasing.md` with the trust boundary, approval, immutable-SHA evidence, and rotation contingency. | Workflow review proves the production secret is referenced only through the protected environment; the approved tag SHA and `main` containment are recorded; no release is published during implementation. |
+| 3 | Non-executing Git command profile | SEC-003 | Centralize the sanitized environment/configuration in `ProcessGitCommandRunner` in `Sources/CodePulse/Services/GitService.swift`; disable repository/global/system fsmonitor, pager, external-diff, and textconv execution paths while keeping `/usr/bin/git` and structured arguments. Add sentinel repositories to `GitServiceTests`/journal capture tests for every prohibited helper. | Sentinels never execute during start/finish capture; normal branch, commit, status, and diff-stat behavior remains unchanged. This must merge before Phase 1 workspace-binding work. |
+| 4 | Bounded receipt ledger | BUG-001 | In `DeveloperToolInbox.swift`, separate complete quota enumeration from the 256-item consumer batch, enforce both the documented 2,048-file ceiling and an explicitly documented aggregate-byte ceiling, prune deterministically oldest-first, and serialize the prune/write critical section across helper processes. | Tests cover accepted, duplicate, malformed, sustained rejected, oversized aggregate, and concurrent traffic; count and bytes remain within bounds and consumer scans remain capped. |
+| 5 | Shared usage numeric policy and checked aggregation | BUG-002 | Add one documented usage resource policy for token/cost/timestamp/label bounds; apply it at Codex, Claude, and OpenCode intake boundaries; replace trapping additions in Claude roll-ups, attribution, Insights, and export with overflow-reporting operations and a recoverable invalid/partial-data result. Validate already-persisted hostile values at consumption so old state cannot repeatedly crash a view or export. | Per-integration `Int.max`, negative, over-limit, invalid timestamp/cost, and cumulative-overflow fixtures are rejected or quarantined without wrap/trap; ordinary totals and pricing provenance are unchanged. |
+| 6 | Truthful full-fidelity recovery backup | PRIV-001, DOC-001 | Preserve `CodePulseBackup` round-trip fidelity in `CodePulseBackup.swift`; replace the false Settings claim and accessibility hint; reconcile `PRIVACY.md`, `SECURITY.md`, README/integration summaries, and tests with the sensitive categories actually encoded. Explicitly distinguish recovery backup, Usage Insights export, redacted support bundle, and future `FEAT-002`. | A representative backup proves legacy IDs/paths and other selected sensitive fields round-trip; disclosure tests prove the UI/docs name them and do not promise redaction. No backup schema bump is made solely for copy. |
+| 7 | Complete per-integration deletion | PRIV-002 | Extend `SessionStore.deleteIntegrationData` to remove matching legacy `developerToolContexts` from active and completed sessions, then audit the remaining legacy ledger fields for tool attribution. Preserve other tools, manual sessions, projects, and user-owned source/configuration. | For each integration, a mixed-state fixture is deleted, persisted, reloaded, and backed up; the selected tool's modern and legacy data is absent everywhere while unrelated/manual data remains byte-for-byte equivalent where practical. |
+| 8 | Independent-release-line documentation | GH-005, DOC-002 | Update release and contributor-facing documentation to name the fork as its own product/release line, reserve `0.9.0`, and document `git fetch origin main --no-tags`, `git ls-remote --tags <remote>`, and an explicitly namespaced tag-fetch procedure for peer inspection. Describe future cross-repository feature work as selective port/reimplementation with migration and security review. | Commands are exercised in a disposable clone/namespace without changing either `v0.8.0`; `Info.plist` remains unchanged until an approved release candidate. |
+| 9 | Repository and signing controls | GH-002, admin half of SEC-002 | Configure the protected `production-signing` environment, move its secret, protect `main`, and protect the `v*` release-tag path after the corresponding workflow/check names are stable. | Settings evidence shows independent approval, minimal bypass, required macOS validation, protected tag creation, blocked force-push/deletion, and no production secret available to preflight or arbitrary refs. |
+
+After deliveries 1 and 2 merge, perform the first GitHub-admin checkpoint on
+the fork:
+
+1. Create the `production-signing` environment, require an independent reviewer
+   and prevent self-review where available, allow only protected release tags,
+   move `SPARKLE_PRIVATE_KEY_BASE64` to the environment, and remove the
+   repository-level copy after the workflow is confirmed to reference the
+   environment secret.
+2. Recheck Actions history and available audit evidence before deciding whether
+   to rotate the production Sparkle key. With no evidence of prior preflight
+   exposure, retain it; if evidence appears, rotate the private key and embedded
+   public key as a separate reviewed security change before any release.
+3. Run the non-publishing preflight from an approved ref with the disposable key
+   and record the workflow URL, commit SHA, inputs, artifact checksum, and result
+   in the Phase 0 completion record.
+
+After the validation workflow names are stable, perform the second GitHub-admin
+checkpoint:
+
+1. Add a `main` ruleset requiring pull requests, one independent approval, and
+   the exact macOS validation check; dismiss stale approvals, block force pushes
+   and deletion, and keep bypass authority minimal and explicit.
+2. Add a release-tag ruleset for `v*` that restricts creation, update, and
+   deletion to the release authority. Do not recreate, move, or delete either
+   existing `v0.8.0` tag.
+3. Exercise the rules with non-destructive test branches/PRs and a disposable
+   non-release tag pattern where needed; record settings screenshots or API
+   output and the successful required-check run. Repository settings and release
+   publication remain separately approved actions.
+
+Close Phase 0 only from a final integration branch or PR based on current
+`origin/main`. Run `swift build`, `swift test`, `swift test --sanitize=thread`,
+the workflow hostile-input/static checks, receipt stress/concurrency tests, the
+usage overflow matrix, backup/deletion round trips, and documentation/link
+checks. Re-run the protected disposable-key preflight after the final workflow
+commit. Record exact commit SHAs, GitHub settings evidence, test commands/results,
+and any environment-only limitations; do not tag or publish as part of the gate.
 
 ## Phase 1: Stabilization
 
@@ -304,17 +396,19 @@ limitations. It should not become an alternate publishing mechanism.
 
 ## Phase 4: Strategic Expansion
 
-### FEAT-006 — Selective upstream session automation
+### FEAT-006 — Selective peer-repository feature porting
 
-Evaluate upstream's session presets, application automation, control transport,
-and `codepulsectl` one slice at a time against the fork's current activity graph,
-privacy model, migrations, and security policy. Port with new branches and tests;
-do not merge upstream `v0.8.0` wholesale.
+Evaluate the peer repository's session presets, application automation, control
+transport, and `codepulsectl` one slice at a time against this product line's
+current activity graph, privacy model, migrations, and security policy. Port or
+reimplement with new branches and tests; do not merge the peer's `v0.8.0`
+history wholesale. Apply the same review boundary if features later move in the
+other direction.
 
-Dependencies: Phase 0–2 stability, explicit fork/upstream ownership decision,
-and a migration design. Risk: duplicated automation/timing authority and a new
-local control boundary. Strategic fit: High if kept local, explicit, and
-reversible.
+Dependencies: Phase 0–2 stability and a migration design. The independent
+ownership/release decision is already recorded in Phase 0. Risk: duplicated
+automation/timing authority and a new local control boundary. Strategic fit:
+High if kept local, explicit, and reversible.
 
 ### REL-002 — Developer ID signing and notarization
 
@@ -387,7 +481,7 @@ Dependency order:
    private vulnerability reporting; add code scanning if a useful Swift analyzer
    is selected.
 3. **GH-004:** set description, homepage, topics, social preview, and explicit
-   fork/upstream status.
+   independent-fork/friendly-peer status.
 4. Enable Issues only with an owner and triage cadence; then add bug/feature
    forms and a security redirect. Add a PR template tied to the validation list.
 5. Disable empty Wiki/Projects features or populate them intentionally. Projects
@@ -434,7 +528,7 @@ deletion.
 
 - No default-branch rename is required; both remotes already use `main`.
 - Do not rename either existing `v0.8.0` tag. Migrate documentation and future
-  release numbering to an explicit fork/upstream policy instead.
+  release numbering to the recorded independent-release-line policy instead.
 - Optionally rename/archive the **document**
   `docs/agent-aware-tracking-roadmap.md`; this is not a branch operation.
 
@@ -458,10 +552,10 @@ deletion.
 | SEC-003 | Non-executing Git profile | P0 | M | None | 0 | Sentinel Git helpers never execute; metadata tests pass. |
 | BUG-001 | Receipt capacity repair | P0 | S | None | 0 | Count/byte bounds hold above quota under accepted/rejected traffic. |
 | BUG-002 | Usage numeric bounds | P0 | M | None | 0 | Int-limit fixtures cannot crash parse, Insights, or export. |
-| PRIV-001 | Truthful/versioned backup contract | P0 | M | Product decision | 0 | UI/docs/schema/tests agree on every sensitive category. |
+| PRIV-001 | Truthful/versioned backup contract | P0 | M | Decision recorded | 0 | UI/docs/schema/tests agree on every sensitive category. |
 | PRIV-002 | Complete integration deletion | P0 | S | PRIV-001 | 0 | Selected legacy/modern data absent after reload and backup. |
 | GH-002 | Main/tag protection | P0 | S | GitHub admin | 0 | Required CI/PR; force-push/deletion blocked. |
-| GH-005 | Fork/upstream release policy | P0 | S | Maintainer decision | 0 | Tag fetch instructions work; next release line unambiguous. |
+| GH-005 | Independent-fork release policy | P0 | S | Decision recorded | 0 | Tag fetch instructions work; next release line unambiguous. |
 | BUG-003 | Lifecycle workspace binding | P1 | M | SEC-003 | 1 | Cross-workspace reused IDs cannot mutate existing runs. |
 | BUG-004 | OpenCode usage workspace binding | P1 | S | BUG-003 | 1 | Mismatched path remains unassigned. |
 | SEC-004 | Spreadsheet-safe CSV | P1 | S | None | 1 | Formula-prefix matrix exports inert cells. |
@@ -489,7 +583,7 @@ deletion.
 | FEAT-003 | Safe backup import | P3 | L | PRIV-001, PERF-003 | 3 | Previewed, bounded, rollback-safe import. |
 | FEAT-004 | User-facing retention controls | P2 | M | PERF-001 | 3 | Transparent defaults and export-before-delete. |
 | FEAT-005 | Release readiness report | P2 | M | SEC-001/002, DOC-002 | 3 | Non-secret evidence bundle gates tagging. |
-| FEAT-006 | Selective upstream automation | P3 | XL | Phase 0–2, owner alignment | 4 | Individually ported features with migrations/security tests. |
+| FEAT-006 | Selective peer feature porting | P3 | XL | Phase 0–2 | 4 | Individually ported features with migrations/security tests. |
 | REL-002 | Developer ID/notarization | P3 | L | Apple authority, SEC-002 | 4 | Signed, notarized, stapled app passes clean-machine Gatekeeper. |
 | FEAT-007 | Validated budgets/alerts | P3 | L | PERF-001, attribution/pricing validation | 4 | Opt-in thresholds never imply balance or billed total. |
 
@@ -527,9 +621,12 @@ operational project, XL = coordinated product-line integration.
 1. Freeze production-key preflight and future release activity.
 2. Land SEC-001 and SEC-002 with workflow/static tests; configure the protected
    environment and repository rules.
-3. Land SEC-003 and PERF-002 together around one safe Git runner contract.
+3. Land SEC-003 around one safe Git runner contract; build Phase 1 PERF-002 on
+   that contract without delaying the Phase 0 execution fix.
 4. Land BUG-001 and BUG-002 with hard-limit regression fixtures.
-5. Decide and implement PRIV-001; immediately follow with PRIV-002 and DOC-001.
+5. Implement the recorded full-fidelity PRIV-001 contract; immediately follow
+   with PRIV-002 and DOC-001, while retaining FEAT-002 as committed follow-on
+   work.
 6. Bind lifecycle and OpenCode usage to workspace identity (BUG-003/BUG-004).
 7. Fix CSV, consent, discovery ordering, state decode, and usage enumeration.
 8. Run normal tests, TSan, coverage, static checks, and the clean-machine/manual
@@ -539,6 +636,6 @@ operational project, XL = coordinated product-line integration.
 10. Define and benchmark retention before refactoring storage or `SessionStore`.
 11. Add architecture/contribution docs and GitHub public/security metadata.
 12. Select Phase 3 product work based on user value and measured limits.
-13. Decide whether to port individual upstream automation capabilities.
+13. Decide whether to port individual capabilities from the peer repository.
 14. Prepare the next version, optionally complete Developer ID/notarization,
     and publish only under separate explicit release authority.
