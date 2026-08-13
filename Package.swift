@@ -25,7 +25,8 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 "CodePulseIntegration"
             ],
-            path: "Sources/CodePulse"
+            path: "Sources/CodePulse",
+            resources: [.process("Resources")]
         ),
         .executableTarget(
             name: "CodePulseIntegrationCLI",

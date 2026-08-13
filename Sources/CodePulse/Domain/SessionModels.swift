@@ -597,6 +597,7 @@ struct CodePulseSettings: Codable, Equatable {
     var globalShortcutEnabled: Bool
     var agentReviewGraceSeconds: Int
     var automaticGitWorkspaceDiscoveryEnabled: Bool
+    var primaryCostDisplays: [String: UsageCostRepresentation]
 
     init(
         launchAtLogin: Bool = false,
@@ -606,7 +607,8 @@ struct CodePulseSettings: Codable, Equatable {
         specificProjectID: UUID? = nil,
         globalShortcutEnabled: Bool = true,
         agentReviewGraceSeconds: Int = 3 * 60,
-        automaticGitWorkspaceDiscoveryEnabled: Bool = true
+        automaticGitWorkspaceDiscoveryEnabled: Bool = true,
+        primaryCostDisplays: [String: UsageCostRepresentation] = [:]
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -616,11 +618,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.globalShortcutEnabled = globalShortcutEnabled
         self.agentReviewGraceSeconds = max(0, agentReviewGraceSeconds)
         self.automaticGitWorkspaceDiscoveryEnabled = automaticGitWorkspaceDiscoveryEnabled
+        self.primaryCostDisplays = primaryCostDisplays
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, agentReviewGraceSeconds, automaticGitWorkspaceDiscoveryEnabled, primaryCostDisplays
     }
 
     init(from decoder: Decoder) throws {
@@ -633,6 +636,7 @@ struct CodePulseSettings: Codable, Equatable {
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
         agentReviewGraceSeconds = max(0, try container.decodeIfPresent(Int.self, forKey: .agentReviewGraceSeconds) ?? 3 * 60)
         automaticGitWorkspaceDiscoveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .automaticGitWorkspaceDiscoveryEnabled) ?? true
+        primaryCostDisplays = try container.decodeIfPresent([String: UsageCostRepresentation].self, forKey: .primaryCostDisplays) ?? [:]
     }
 }
 
@@ -644,6 +648,7 @@ struct AppState: Codable, Equatable {
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
     var developerEventDiagnostics: DeveloperEventDiagnosticsJournal?
     var activityGraph: ActivityGraph
+    var usageSamples: [UsageSample]
 
     init(
         projects: [ProjectRecord] = [],
@@ -652,7 +657,8 @@ struct AppState: Codable, Equatable {
         settings: CodePulseSettings = CodePulseSettings(),
         developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
         developerEventDiagnostics: DeveloperEventDiagnosticsJournal? = nil,
-        activityGraph: ActivityGraph = ActivityGraph()
+        activityGraph: ActivityGraph = ActivityGraph(),
+        usageSamples: [UsageSample] = []
     ) {
         self.projects = projects
         self.completedSessions = completedSessions
@@ -661,10 +667,11 @@ struct AppState: Codable, Equatable {
         self.developerToolIntegration = developerToolIntegration
         self.developerEventDiagnostics = developerEventDiagnostics
         self.activityGraph = activityGraph
+        self.usageSamples = usageSamples
     }
 
     private enum CodingKeys: String, CodingKey {
-        case projects, completedSessions, activeSession, settings, developerToolIntegration, developerEventDiagnostics, activityGraph
+        case projects, completedSessions, activeSession, settings, developerToolIntegration, developerEventDiagnostics, activityGraph, usageSamples
     }
 
     init(from decoder: Decoder) throws {
@@ -676,6 +683,7 @@ struct AppState: Codable, Equatable {
         developerToolIntegration = try container.decodeIfPresent(DeveloperToolIntegrationProcessingState.self, forKey: .developerToolIntegration)
         developerEventDiagnostics = try container.decodeIfPresent(DeveloperEventDiagnosticsJournal.self, forKey: .developerEventDiagnostics)
         activityGraph = try container.decodeIfPresent(ActivityGraph.self, forKey: .activityGraph) ?? ActivityGraph()
+        usageSamples = try container.decodeIfPresent([UsageSample].self, forKey: .usageSamples) ?? []
     }
 }
 

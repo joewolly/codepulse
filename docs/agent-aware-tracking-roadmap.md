@@ -154,8 +154,8 @@ not exist yet.
 | 08 | @ZacharyRW | `feature/08-git-workspace-discovery` | [#12](https://github.com/ZacharyRW/codepulse/pull/12) | Merged | 2026-08-13 |
 | 09 | @ZacharyRW | `feature/09-local-task-discovery` | [#14](https://github.com/ZacharyRW/codepulse/pull/14) | Merged | 2026-08-13 |
 | 10 | @ZacharyRW | `feature/10-concurrent-activity-ui` | [#15](https://github.com/ZacharyRW/codepulse/pull/15) | Merged | 2026-08-13 |
-| 11 | @ZacharyRW | `feature/11-activity-classification` | [#16](https://github.com/ZacharyRW/codepulse/pull/16) | In review | — |
-| 12 | — | `feature/12-pricing-catalog` | — | Not started | — |
+| 11 | @ZacharyRW | `feature/11-activity-classification` | [#16](https://github.com/ZacharyRW/codepulse/pull/16) | Merged | 2026-08-13 |
+| 12 | @ZacharyRW | `feature/12-pricing-catalog` | — | PR pending | — |
 | 13 | — | `feature/13-codex-usage` | — | Not started | — |
 | 14 | — | `feature/14-claude-usage` | — | Not started | — |
 | 15 | — | `feature/15-opencode-usage` | — | Not started | — |
