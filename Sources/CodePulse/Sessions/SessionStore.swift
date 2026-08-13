@@ -40,10 +40,13 @@ final class SessionStore: ObservableObject {
     let githubContextService: GitHubContextServicing
     let developerToolEventConsumer: DeveloperToolEventConsuming
     let sessionAutomationCoordinator: SessionAutomationCoordinator
+    let frontmostApplicationMonitor: FrontmostApplicationMonitoring?
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
     private var lastIntegrationScanAt: Date?
+    private var isMonitoringApplications = false
+    private(set) var currentFrontmostApplication: ApplicationIdentity?
 
     init(
         persistence: StatePersisting,
@@ -52,7 +55,8 @@ final class SessionStore: ObservableObject {
         gitService: GitServicing = SystemGitService(),
         githubContextService: GitHubContextServicing = SystemGitHubContextService(),
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
-        automaticallyRefresh: Bool = true
+        automaticallyRefresh: Bool = true,
+        frontmostApplicationMonitor: FrontmostApplicationMonitoring? = nil
     ) {
         self.persistence = persistence
         self.clock = clock
@@ -60,19 +64,33 @@ final class SessionStore: ObservableObject {
         self.githubContextService = githubContextService
         self.developerToolEventConsumer = developerToolEventConsumer
         self.sessionAutomationCoordinator = SessionAutomationCoordinator()
+        self.frontmostApplicationMonitor = frontmostApplicationMonitor
         self.calendar = calendar
         self.state = persistence.load()
         self.now = clock.now
         self.gitCaptureSessionID = nil
         self.lastIntegrationScanAt = nil
+        self.currentFrontmostApplication = nil
+
+        self.frontmostApplicationMonitor?.onChange = { [weak self] application in
+            self?.handleFrontmostApplication(application)
+        }
 
         if state.activeSession?.phase == .idle {
             state.activeSession = nil
         }
 
+        var normalizedState = state
+        relinquishInvalidAutomation(in: &normalizedState)
+        if normalizedState != state {
+            state = normalizedState
+            persistence.save(normalizedState)
+        }
+
         processPendingIntegrationEvents(force: true)
         restoreAutomaticFinishingState()
         evaluateAutomaticLifecycle(at: clock.now)
+        configureApplicationMonitoring()
 
         if automaticallyRefresh {
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -86,6 +104,7 @@ final class SessionStore: ObservableObject {
 
     deinit {
         refreshTimer?.invalidate()
+        frontmostApplicationMonitor?.stop()
     }
 
     static func live() -> SessionStore {
@@ -93,7 +112,8 @@ final class SessionStore: ObservableObject {
             persistence: JSONFilePersistence(),
             developerToolEventConsumer: DeveloperToolEventConsumer(
                 inbox: DeveloperToolInbox()
-            )
+            ),
+            frontmostApplicationMonitor: NSWorkspaceFrontmostApplicationMonitor()
         )
     }
 
@@ -101,6 +121,31 @@ final class SessionStore: ObservableObject {
 
     var phase: SessionPhase {
         state.activeSession?.phase ?? .idle
+    }
+
+    var activeAutomationStatusLabel: String? {
+        guard let metadata = state.activeSession?.automationMetadata,
+              metadata.controlEnabled else {
+            return nil
+        }
+
+        let activeClaims = metadata.claims.filter(\.isActive)
+        let labels = Set(activeClaims.map { claim -> String in
+            switch claim.source {
+            case .developerTool(let tool, _):
+                return tool.title
+            case .application(let bundleIdentifier):
+                return applicationDisplayName(for: bundleIdentifier) ?? bundleIdentifier
+            }
+        })
+
+        if labels.count == 1, let label = labels.first {
+            return "Automatic · \(label)"
+        }
+        if labels.isEmpty, let tool = metadata.startedByTool {
+            return "Automatic · \(tool.title)"
+        }
+        return "Automatic · Multiple"
     }
 
     var elapsedDuration: TimeInterval {
@@ -144,6 +189,70 @@ final class SessionStore: ObservableObject {
         evaluateAutomaticLifecycle(at: now)
     }
 
+    /// Feeds only the current frontmost identity into the coordinator. No
+    /// activation history is retained or persisted.
+    func handleFrontmostApplication(_ application: ApplicationIdentity?) {
+        currentFrontmostApplication = application?.isValid == true ? application : nil
+        guard state.settings.automationEnabled else { return }
+
+        let actions = sessionAutomationCoordinator.applicationActions(
+            for: currentFrontmostApplication,
+            in: state,
+            now: clock.now
+        )
+        for action in actions {
+            applyAutomationAction(action, for: nil, at: clock.now)
+        }
+        evaluateAutomaticLifecycle(at: clock.now)
+    }
+
+    private func configureApplicationMonitoring() {
+        guard let frontmostApplicationMonitor else { return }
+
+        let needsMonitoring = state.settings.automationEnabled && state.automationRules.contains { rule in
+            rule.applicationTrigger != nil
+        }
+
+        if needsMonitoring {
+            if !isMonitoringApplications {
+                isMonitoringApplications = true
+                frontmostApplicationMonitor.start()
+                handleFrontmostApplication(frontmostApplicationMonitor.currentApplication)
+            }
+        } else if isMonitoringApplications {
+            isMonitoringApplications = false
+            frontmostApplicationMonitor.stop()
+            currentFrontmostApplication = nil
+        }
+    }
+
+    private func isAutomationTriggerValid(_ trigger: SessionAutomationTrigger) -> Bool {
+        switch trigger {
+        case .developerTool(let tool):
+            return DeveloperTool.allCases.contains(tool)
+        case .applications(let applicationTrigger):
+            return applicationTrigger.isValid
+        }
+    }
+
+    private func sourceMatchesTrigger(
+        _ source: SessionAutomationClaimSource,
+        trigger: SessionAutomationTrigger
+    ) -> Bool {
+        switch source {
+        case .developerTool(let tool, _):
+            return trigger.developerTool == tool
+        case .application(let bundleIdentifier):
+            return trigger.applicationTrigger?.matches(bundleIdentifier: bundleIdentifier) == true
+        }
+    }
+
+    private func applicationDisplayName(for bundleIdentifier: String) -> String? {
+        state.automationRules
+            .compactMap { $0.applicationTrigger?.displayName(for: bundleIdentifier) }
+            .first
+    }
+
     @discardableResult
     func startSession(
         projectID: UUID?,
@@ -165,23 +274,54 @@ final class SessionStore: ObservableObject {
     }
 
     @discardableResult
+    func startSession(using preset: SessionPreset, at date: Date? = nil) -> Bool {
+        startSession(
+            projectID: preset.projectID,
+            goal: preset.goal,
+            type: preset.sessionType,
+            at: date
+        )
+    }
+
+    @discardableResult
     func startAutomatedSession(
         with rule: SessionAutomationRule,
         event: DeveloperToolEvent,
         at startDate: Date,
         signalAt: Date
     ) -> Bool {
+        startAutomatedSession(
+            with: rule,
+            source: .developerTool(
+                tool: event.tool,
+                externalSessionID: event.externalSessionID
+            ),
+            at: startDate,
+            signalAt: signalAt
+        )
+    }
+
+    @discardableResult
+    func startAutomatedSession(
+        with rule: SessionAutomationRule,
+        source: SessionAutomationClaimSource,
+        at startDate: Date,
+        signalAt: Date
+    ) -> Bool {
         guard state.activeSession == nil,
-              let project = state.projects.first(where: { $0.id == rule.projectID }),
+              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
+              let projectID = preset.projectID,
+              let project = state.projects.first(where: { $0.id == projectID }),
               DeveloperToolProjectResolver.isUsableFolder(for: project),
-              let tool = rule.developerTool else {
+              isAutomationTriggerValid(rule.trigger),
+              sourceMatchesTrigger(source, trigger: rule.trigger) else {
             return false
         }
 
         let metadata = SessionAutomationMetadata(
             startedByRuleID: rule.id,
             startedByRuleName: rule.name,
-            startedByTool: tool,
+            startedBySource: source,
             lastMatchingSignalAt: signalAt,
             pauseEligibleAt: signalAt.addingTimeInterval(rule.pauseDelay),
             finishEligibleAt: signalAt.addingTimeInterval(rule.finishDelay),
@@ -189,17 +329,16 @@ final class SessionStore: ObservableObject {
             finishDelay: rule.finishDelay,
             minimumSavedDuration: rule.minimumSavedDuration,
             claims: [SessionAutomationClaim(
-                tool: event.tool,
-                externalSessionID: event.externalSessionID,
+                source: source,
                 isActive: true,
                 lastSignalAt: signalAt
             )]
         )
 
         return startSessionInternal(
-            projectID: rule.projectID,
-            goal: rule.goal,
-            type: rule.sessionType,
+            projectID: projectID,
+            goal: preset.goal,
+            type: preset.sessionType,
             at: startDate,
             automationMetadata: metadata
         )
@@ -517,6 +656,38 @@ final class SessionStore: ObservableObject {
         commit(nextState)
     }
 
+    var sessionPresetsSorted: [SessionPreset] {
+        state.sessionPresets.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    func sessionPreset(id: UUID) -> SessionPreset? {
+        state.sessionPresets.first(where: { $0.id == id })
+    }
+
+    @discardableResult
+    func upsertSessionPreset(_ preset: SessionPreset) -> Bool {
+        var nextState = state
+        if let index = nextState.sessionPresets.firstIndex(where: { $0.id == preset.id }) {
+            nextState.sessionPresets[index] = preset
+        } else {
+            nextState.sessionPresets.append(preset)
+        }
+        relinquishInvalidAutomation(in: &nextState)
+        commit(nextState)
+        return true
+    }
+
+    func deleteSessionPreset(id: UUID) {
+        var nextState = state
+        nextState.sessionPresets.removeAll { $0.id == id }
+        relinquishInvalidAutomation(in: &nextState)
+        commit(nextState)
+    }
+
     var automationRulesSorted: [SessionAutomationRule] {
         state.automationRules.sorted { lhs, rhs in
             let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
@@ -526,8 +697,10 @@ final class SessionStore: ObservableObject {
     }
 
     func isAutomationRuleUsable(_ rule: SessionAutomationRule) -> Bool {
-        guard state.projects.contains(where: { $0.id == rule.projectID }),
-              let project = state.projects.first(where: { $0.id == rule.projectID }),
+        guard isAutomationTriggerValid(rule.trigger),
+              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
+              let projectID = preset.projectID,
+              let project = state.projects.first(where: { $0.id == projectID }),
               let folderPath = DeveloperToolProjectResolver.folderPath(for: project),
               DeveloperToolProjectResolver.isUsableFolder(for: project) else {
             return false
@@ -537,7 +710,8 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
-        guard state.projects.contains(where: { $0.id == rule.projectID }) else { return false }
+        guard state.sessionPresets.contains(where: { $0.id == rule.presetID }),
+              isAutomationTriggerValid(rule.trigger) else { return false }
         var nextState = state
         if let index = nextState.automationRules.firstIndex(where: { $0.id == rule.id }) {
             nextState.automationRules[index] = rule
@@ -624,6 +798,7 @@ final class SessionStore: ObservableObject {
     private func commit(_ nextState: AppState) {
         state = nextState
         persistence.save(nextState)
+        configureApplicationMonitoring()
     }
 
     private func processPendingIntegrationEvents(force: Bool = false) {
@@ -672,19 +847,29 @@ final class SessionStore: ObservableObject {
 
     private func applyAutomationAction(
         _ action: SessionAutomationAction,
-        for event: DeveloperToolEvent,
+        for event: DeveloperToolEvent?,
         at date: Date
     ) {
         switch action {
         case .start(let rule, let startDate):
+            guard let event else { return }
             _ = startAutomatedSession(with: rule, event: event, at: startDate, signalAt: event.timestamp)
         case .signal(let rule, let tool, let externalSessionID, let isActive):
             applyAutomationSignal(
                 rule: rule,
-                tool: tool,
-                externalSessionID: externalSessionID,
+                source: .developerTool(tool: tool, externalSessionID: externalSessionID),
                 isActive: isActive,
-                signalAt: event.timestamp,
+                signalAt: event?.timestamp ?? date,
+                transitionAt: date
+            )
+        case .startWithSource(let rule, let source, let startDate):
+            _ = startAutomatedSession(with: rule, source: source, at: startDate, signalAt: date)
+        case .signalWithSource(let rule, let source, let isActive):
+            applyAutomationSignal(
+                rule: rule,
+                source: source,
+                isActive: isActive,
+                signalAt: date,
                 transitionAt: date
             )
         case .relinquish:
@@ -697,9 +882,8 @@ final class SessionStore: ObservableObject {
     }
 
     private func applyAutomationSignal(
-        rule: SessionAutomationRule,
-        tool: DeveloperTool,
-        externalSessionID: String,
+        rule: SessionAutomationRule?,
+        source: SessionAutomationClaimSource,
         isActive: Bool,
         signalAt eventDate: Date,
         transitionAt date: Date
@@ -712,15 +896,12 @@ final class SessionStore: ObservableObject {
         }
 
         let signalDate = max(metadata.lastMatchingSignalAt, eventDate)
-        if let index = metadata.claims.firstIndex(where: {
-            $0.tool == tool && $0.externalSessionID == externalSessionID
-        }) {
+        if let index = metadata.claims.firstIndex(where: { $0.source == source }) {
             metadata.claims[index].isActive = isActive
             metadata.claims[index].lastSignalAt = max(metadata.claims[index].lastSignalAt, signalDate)
-        } else if metadata.claims.count < DeveloperToolIntegrationLimits.maximumContextsPerSession {
+        } else if isActive, metadata.claims.count < DeveloperToolIntegrationLimits.maximumContextsPerSession {
             metadata.claims.append(SessionAutomationClaim(
-                tool: tool,
-                externalSessionID: externalSessionID,
+                source: source,
                 isActive: isActive,
                 lastSignalAt: signalDate
             ))
@@ -751,10 +932,7 @@ final class SessionStore: ObservableObject {
             return
         }
 
-        guard let rule = state.automationRules.first(where: { $0.id == metadata.startedByRuleID }),
-              rule.isEnabled,
-                  let project = state.projects.first(where: { $0.id == session.projectID }),
-                  DeveloperToolProjectResolver.isUsableFolder(for: project) else {
+        guard hasSupportingAutomationRule(for: session, metadata: metadata, in: state) else {
             var nextState = state
             relinquishInvalidAutomation(in: &nextState)
             if nextState != state { commit(nextState) }
@@ -893,22 +1071,51 @@ final class SessionStore: ObservableObject {
             return
         }
 
-        let ruleIsValid: Bool = {
-            guard state.settings.automationEnabled,
-                  let rule = state.automationRules.first(where: { $0.id == metadata.startedByRuleID }),
-                  rule.isEnabled,
-                  let project = state.projects.first(where: { $0.id == session.projectID }),
-                  DeveloperToolProjectResolver.folderPath(for: project) != nil else {
-                return false
+        guard state.settings.automationEnabled else {
+            metadata.controlEnabled = false
+            metadata.pendingAutomaticSave = false
+            metadata.claims = metadata.claims.map { claim in
+                var claim = claim
+                claim.isActive = false
+                return claim
             }
-            return true
-        }()
+            session.automationMetadata = metadata
+            state.activeSession = session
+            return
+        }
 
-        guard !ruleIsValid else { return }
-        metadata.controlEnabled = false
-        metadata.pendingAutomaticSave = false
+        let sources = Set(metadata.claims.map(\.source) + [metadata.startedBySource])
+        let supportedSources = sources.filter { source in
+            sessionAutomationCoordinator.hasSupportingRule(
+                for: source,
+                projectID: session.projectID,
+                in: state
+            )
+        }
+
+        metadata.claims = metadata.claims.filter { supportedSources.contains($0.source) }
+        if supportedSources.isEmpty {
+            metadata.controlEnabled = false
+            metadata.pendingAutomaticSave = false
+            metadata.claims = []
+        }
         session.automationMetadata = metadata
         state.activeSession = session
+    }
+
+    private func hasSupportingAutomationRule(
+        for session: ActiveSession,
+        metadata: SessionAutomationMetadata,
+        in state: AppState
+    ) -> Bool {
+        let sources = Set(metadata.claims.map(\.source) + [metadata.startedBySource])
+        return sources.contains { source in
+            sessionAutomationCoordinator.hasSupportingRule(
+                for: source,
+                projectID: session.projectID,
+                in: state
+            )
+        }
     }
 
     private func scheduleStartGitCapture(for sessionID: UUID, folderURL: URL) {
