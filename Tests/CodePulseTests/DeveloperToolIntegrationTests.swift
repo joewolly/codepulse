@@ -233,6 +233,33 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
     }
 
+    func testValidatedEventIsSurfacedBeforeProcessedAcknowledgement() throws {
+        let root = try temporaryDirectory()
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperToolInbox(paths: paths)
+        let event = event(
+            id: UUID(),
+            tool: .codex,
+            sessionID: "staged",
+            type: .activity,
+            path: root.path
+        )
+        try inbox.write(event)
+
+        let reader = DeveloperToolEventReader(inbox: inbox)
+        var state = AppState()
+        let pending = reader.drainPending(state: &state, now: now)
+
+        XCTAssertEqual(pending.map(\.event.id), [event.id])
+        XCTAssertTrue(state.developerToolIntegration?.processedEvents.isEmpty != false)
+
+        let first = try XCTUnwrap(pending.first)
+        XCTAssertTrue(reader.markProcessed(first, in: &state, at: now))
+        XCTAssertEqual(state.developerToolIntegration?.processedEvents.map { $0.id }, [event.id])
+        reader.cleanup(first)
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+    }
+
     func testNoProjectAndEventsOutsideSessionTimelineAreIgnored() throws {
         let root = try temporaryDirectory()
         let projectURL = root.appendingPathComponent("codepulse", isDirectory: true)

@@ -6,10 +6,12 @@
 
 CodePulse is a native macOS menu-bar timer, coding journal, and local insights
 tool for developers. It is lightweight and local-first: there are no accounts,
-cloud sync, telemetry, product analytics, or activity monitoring. CodePulse
-contacts GitHub only to check for and download authenticated app updates or to
-optionally enrich a local session with read-only repository, pull request, and
-developer-tool metadata.
+cloud sync, telemetry, product analytics, or application-usage history.
+Optional application automation observes only the current frontmost bundle
+identifier while an explicit rule is enabled; it does not inspect windows or
+retain app history. CodePulse contacts GitHub only to check for and
+download authenticated app updates or to optionally enrich a local session with
+read-only repository, pull request, and developer-tool metadata.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -25,6 +27,15 @@ developer-tool metadata.
   optionally their current pull request when the repository has a GitHub remote.
 - Optionally records that Codex and/or OpenCode participated in a selected
   project's session using only local lifecycle metadata.
+- Optionally starts, pauses, resumes, and saves a session from configured Codex
+  or OpenCode lifecycle signals. Session Automation is disabled by default and
+  never takes control of a manually started session.
+- Saves reusable Session Presets for one-action manual Quick Start or eligible
+  automation rules.
+- Optionally starts and maintains a session while a configured application is
+  frontmost, matching by bundle identifier rather than display name.
+- Provides the local `codepulsectl` command for scriptable status, preset/manual
+  start, pause, resume, and finish control while CodePulse is running.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
@@ -55,11 +66,56 @@ or allow the automatic update check.
 4. Finish the session, record an optional outcome, and save it to History.
 5. Open History to search, filter, or edit saved sessions, or open Insights to
    review local activity and context-derived summaries.
-6. If desired, open **Settings → Integrations** to enable Codex or OpenCode
-   context enrichment. Integrations are optional and never control the timer.
+6. If desired, create a **Settings → Session Presets** entry for a reusable
+   Quick Start, then open **Settings → Integrations** to enable Codex or OpenCode
+   context enrichment. Integrations are optional and separate from **Settings →
+   Session Automation**, which is also optional and disabled by default.
+7. For a shell, Shortcuts **Run Shell Script**, Raycast, Alfred, Stream Deck, or
+   IDE task, use the bundled `codepulsectl` command described below.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
+
+## External local control
+
+`codepulsectl` is a small local controller. It talks to the running CodePulse
+app through a versioned, CodePulse-owned local inbox and response path; it does
+not edit `state.json`, execute shell input, contact a service, or require root,
+Accessibility, or Screen Recording permission. The app validates each command,
+rejects commands older than 30 seconds, and records a bounded UUID ledger so a
+replayed command cannot run twice.
+
+The preferred form starts a configured Session Preset by its unique name:
+
+```sh
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl status
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl status --json
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl start --preset "CodePulse Coding"
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl pause
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl resume
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl finish
+```
+
+Direct manual start is also available when the project already exists in
+CodePulse:
+
+```sh
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl start \
+  --project "CodePulse" --type coding --goal "Fix release verification"
+```
+
+CLI starts are manual sessions. CLI pause, resume, and finish behave like the
+corresponding UI actions and take over an automatic session permanently for
+that session. `finish` enters the normal finishing screen and does not save an
+outcome automatically; save or discard it from the CodePulse UI.
+
+`status` prints concise human-readable state. `status --json` prints only a
+privacy-minimal versioned JSON status object. The command exits nonzero for
+invalid arguments, an unavailable app, invalid state transitions, missing or
+ambiguous presets/projects, expired/rejected commands, and local transport
+failures. A response timeout is exit code 7; a mutation may already have been
+applied, so re-read `status` before retrying. The embedded tool is not installed
+into `/usr/local/bin`; add a shell alias or use its bundle path explicitly.
 
 ## Screenshots
 
@@ -74,18 +130,30 @@ folder you select, allowing it to read local Git metadata for that project.
 ## Local data and privacy
 
 CodePulse stores its state as JSON under the user's Application Support
-directory. Session notes, project paths, settings, Git snapshots, GitHub context
-snapshots, developer-tool session metadata, and active session state stay on the
-Mac unless the user exports or shares a backup. Developer-tool metadata is
-limited to the tool name, external session identifier, working directory,
-timestamps, lifecycle event count, and optional model/profile labels. CodePulse
-also keeps a local deduplication ledger of processed event identifiers and
-timestamps (up to 2,048 entries; event processing prunes entries older than
-30 days), which may appear in exported backups. Inbox cleanup after processing
-is best effort, so a filesystem failure may leave a local event file. CodePulse
-does not collect prompts, responses, transcripts, source code, terminal command contents, command
-output, tool-call arguments or results, permission decisions, reasoning,
-conversation summaries, or credentials.
+directory. Session notes, project paths, settings, session presets, automation
+rules, configured application bundle identifiers, active automation ownership,
+Git snapshots, GitHub context snapshots, developer-tool session metadata, and
+active session state stay on the Mac unless the user exports or shares a backup.
+Developer-tool metadata is limited to the tool name,
+external session identifier, working directory, timestamps, lifecycle event
+count, and optional model/profile labels. When Session Automation is enabled,
+CodePulse uses only those local lifecycle signals and the working directory to
+match an explicit rule to a configured project. CodePulse also keeps a local
+deduplication ledger of processed event identifiers and timestamps (up to 2,048
+entries; event processing prunes entries older than 30 days), which may appear
+in exported backups. External CLI commands use a separate bounded local
+processing ledger and transient response files; backup export intentionally
+omits that control ledger and all command/response files. Inbox cleanup after
+processing is best effort, so a filesystem failure may leave a local event file.
+CodePulse does not collect
+prompts, messages, responses, transcripts, source code, terminal command
+contents, command output, tool-call arguments or results, permission decisions,
+reasoning, conversation summaries, or credentials. Application automation, when
+explicitly enabled, observes only which application is frontmost and compares
+its bundle identifier with local rules. CodePulse does not collect or retain
+application usage history, unrelated-app durations, window titles, document or
+file names, browser URLs, screen contents, keystrokes, mouse input, clipboard
+contents, or accessibility element contents.
 
 Sparkle checks CodePulse release assets on GitHub. When `gh` is installed, the
 optional GitHub Context feature uses the user's existing GitHub CLI setup for
@@ -152,7 +220,20 @@ inbox at `~/Library/Application Support/CodePulse/Integrations/Inbox/`.
 CodePulse associates an event only with the currently active, selected project
 when the canonical working directory is that project's folder or a child
 directory. No Project sessions and unrelated projects are ignored. Integration
-events never start, pause, resume, or finish a CodePulse session.
+context enrichment remains independent from Session Automation.
+
+CodePulse 0.8 adds optional Session Automation for Codex, OpenCode, and explicit
+frontmost-application rules. Session Presets hold reusable project, work type,
+and goal values; automation rules reference presets by stable ID. A matching
+developer-tool lifecycle signal or configured application bundle can start one
+locally owned session; later claims can keep it alive, resume an automatic
+pause, and finish and save it after the configured grace periods. Existing
+active sessions are never switched to another project, manual lifecycle actions
+take control immediately, and neither app activation changes nor raw event
+files are retained as an activity history. The global automation setting is off
+by default. `codepulsectl` adds bounded local manual control for status and the
+normal session lifecycle; it does not add a cloud API, webhook, or network
+control path.
 
 CodePulse 0.7 adds Session Intelligence to Insights. It derives active-time
 metrics from the existing local session history, supports calendar and rolling

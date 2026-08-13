@@ -255,6 +255,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
     var gitContext: GitSessionContext?
     var githubContext: GitHubSessionContext?
     var developerToolContexts: [DeveloperToolSessionContext]
+    var automationMetadata: SessionAutomationMetadata?
 
     init(
         id: UUID = UUID(),
@@ -265,7 +266,8 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         startedAt: Date,
         phase: SessionPhase = .running,
         githubContext: GitHubSessionContext? = nil,
-        developerToolContexts: [DeveloperToolSessionContext] = []
+        developerToolContexts: [DeveloperToolSessionContext] = [],
+        automationMetadata: SessionAutomationMetadata? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -280,11 +282,12 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         self.gitContext = nil
         self.githubContext = githubContext
         self.developerToolContexts = developerToolContexts
+        self.automationMetadata = automationMetadata
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, projectID, projectName, type, goal, startedAt, endedAt, phase
-        case pauseIntervals, outcome, gitContext, githubContext, developerToolContexts
+        case pauseIntervals, outcome, gitContext, githubContext, developerToolContexts, automationMetadata
     }
 
     init(from decoder: Decoder) throws {
@@ -305,6 +308,10 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             [DeveloperToolSessionContext].self,
             forKey: .developerToolContexts
         ) ?? []
+        // Automation ownership is recoverable metadata. If it is damaged or
+        // from a newer schema, preserve the active session itself and restore
+        // it without automatic control rather than discarding the session.
+        automationMetadata = try? container.decodeIfPresent(SessionAutomationMetadata.self, forKey: .automationMetadata)
     }
 
     var pausedAt: Date? {
@@ -595,6 +602,7 @@ struct CodePulseSettings: Codable, Equatable {
     var defaultProjectBehavior: DefaultProjectBehavior
     var specificProjectID: UUID?
     var globalShortcutEnabled: Bool
+    var automationEnabled: Bool
 
     init(
         launchAtLogin: Bool = false,
@@ -602,7 +610,8 @@ struct CodePulseSettings: Codable, Equatable {
         idleAppearance: IdleAppearance = .code,
         defaultProjectBehavior: DefaultProjectBehavior = .lastUsed,
         specificProjectID: UUID? = nil,
-        globalShortcutEnabled: Bool = true
+        globalShortcutEnabled: Bool = true,
+        automationEnabled: Bool = false
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -610,11 +619,12 @@ struct CodePulseSettings: Codable, Equatable {
         self.defaultProjectBehavior = defaultProjectBehavior
         self.specificProjectID = specificProjectID
         self.globalShortcutEnabled = globalShortcutEnabled
+        self.automationEnabled = automationEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
-        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled
+        case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, automationEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -625,15 +635,116 @@ struct CodePulseSettings: Codable, Equatable {
         defaultProjectBehavior = try container.decodeIfPresent(DefaultProjectBehavior.self, forKey: .defaultProjectBehavior) ?? .lastUsed
         specificProjectID = try container.decodeIfPresent(UUID.self, forKey: .specificProjectID)
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
+        automationEnabled = try container.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
     }
 }
 
 struct AppState: Codable, Equatable {
-    var projects: [ProjectRecord] = []
-    var completedSessions: [CompletedSession] = []
-    var activeSession: ActiveSession? = nil
-    var settings = CodePulseSettings()
-    var developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil
+    var projects: [ProjectRecord]
+    var completedSessions: [CompletedSession]
+    var activeSession: ActiveSession?
+    var settings: CodePulseSettings
+    var sessionPresets: [SessionPreset]
+    var developerToolIntegration: DeveloperToolIntegrationProcessingState?
+    var automationRules: [SessionAutomationRule]
+    var controlProcessing: CodePulseControlProcessingState?
+
+    init(
+        projects: [ProjectRecord] = [],
+        completedSessions: [CompletedSession] = [],
+        activeSession: ActiveSession? = nil,
+        settings: CodePulseSettings = CodePulseSettings(),
+        sessionPresets: [SessionPreset] = [],
+        developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
+        automationRules: [SessionAutomationRule] = [],
+        controlProcessing: CodePulseControlProcessingState? = nil
+    ) {
+        self.projects = projects
+        self.completedSessions = completedSessions
+        self.activeSession = activeSession
+        self.settings = settings
+        self.sessionPresets = Self.normalizedPresets(sessionPresets, rules: automationRules)
+        self.developerToolIntegration = developerToolIntegration
+        self.automationRules = automationRules.map { $0.canonicalized() }
+        self.controlProcessing = Self.normalizedControlProcessing(controlProcessing)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case projects, completedSessions, activeSession, settings
+        case sessionPresets, developerToolIntegration, automationRules, controlProcessing
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let projects = try container.decodeIfPresent([ProjectRecord].self, forKey: .projects) ?? []
+        let completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
+        let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
+        let settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
+        // Presets and automation rules are configuration, not irreplaceable
+        // history. A malformed or forward-incompatible collection must not
+        // make the whole state file unreadable.
+        let sessionPresets = (try? container.decode([SessionPreset].self, forKey: .sessionPresets)) ?? []
+        let developerToolIntegration = try container.decodeIfPresent(
+            DeveloperToolIntegrationProcessingState.self,
+            forKey: .developerToolIntegration
+        )
+        let automationRules = (try? container.decode([SessionAutomationRule].self, forKey: .automationRules)) ?? []
+        // Control bookkeeping is auxiliary recovery state. If it is damaged,
+        // keep the user's sessions and configuration and start with an empty
+        // ledger rather than treating the whole state file as corrupt.
+        let controlProcessing = try? container.decode(
+            CodePulseControlProcessingState.self,
+            forKey: .controlProcessing
+        )
+        self.init(
+            projects: projects,
+            completedSessions: completedSessions,
+            activeSession: activeSession,
+            settings: settings,
+            sessionPresets: sessionPresets,
+            developerToolIntegration: developerToolIntegration,
+            automationRules: automationRules,
+            controlProcessing: controlProcessing
+        )
+    }
+
+    private static func normalizedPresets(
+        _ explicitPresets: [SessionPreset],
+        rules: [SessionAutomationRule]
+    ) -> [SessionPreset] {
+        var presetsByID: [UUID: SessionPreset] = [:]
+        var orderedIDs: [UUID] = []
+
+        for preset in explicitPresets where presetsByID[preset.id] == nil {
+            presetsByID[preset.id] = preset
+            orderedIDs.append(preset.id)
+        }
+
+        for rule in rules {
+            guard let legacyPreset = rule.legacyPreset,
+                  presetsByID[legacyPreset.id] == nil else { continue }
+            presetsByID[legacyPreset.id] = legacyPreset
+            orderedIDs.append(legacyPreset.id)
+        }
+
+        return orderedIDs.compactMap { presetsByID[$0] }
+    }
+
+    private static func normalizedControlProcessing(
+        _ processing: CodePulseControlProcessingState?
+    ) -> CodePulseControlProcessingState? {
+        guard var processing,
+              !processing.processedCommands.isEmpty else {
+            return nil
+        }
+        processing.processedCommands.sort { $0.processedAt > $1.processedAt }
+        if processing.processedCommands.count > CodePulseControlLimits.maximumProcessedCommands {
+            processing.processedCommands.removeLast(
+                processing.processedCommands.count - CodePulseControlLimits.maximumProcessedCommands
+            )
+        }
+        return processing
+    }
 }
 
 struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
@@ -648,4 +759,14 @@ struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
 
 struct DeveloperToolIntegrationProcessingState: Codable, Equatable {
     var processedEvents: [DeveloperToolProcessedEvent] = []
+}
+
+struct CodePulseProcessedControlCommand: Codable, Equatable, Identifiable {
+    let id: UUID
+    let processedAt: Date
+    let response: CodePulseControlResponse
+}
+
+struct CodePulseControlProcessingState: Codable, Equatable {
+    var processedCommands: [CodePulseProcessedControlCommand] = []
 }

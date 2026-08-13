@@ -85,9 +85,9 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
         case .idle:
             accessibilityText = "CodePulse, ready to start a session"
         case .running:
-            accessibilityText = "CodePulse, running, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))"
+            accessibilityText = "CodePulse, running, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))" + (store.activeAutomationStatusLabel.map { ", \($0)" } ?? "")
         case .paused:
-            accessibilityText = "CodePulse, paused, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))"
+            accessibilityText = "CodePulse, paused, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))" + (store.activeAutomationStatusLabel.map { ", \($0)" } ?? "")
         case .finishing:
             accessibilityText = "CodePulse, session complete, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))"
         }

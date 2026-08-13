@@ -37,6 +37,7 @@ struct MenuBarPopoverView: View {
 
 private struct IdleSessionView: View {
     @EnvironmentObject private var store: SessionStore
+    @State private var selectedPresetID: UUID?
     @State private var selectedProjectID: UUID?
     @State private var selectedType: SessionType = .coding
     @State private var goal = ""
@@ -48,6 +49,44 @@ private struct IdleSessionView: View {
 
             Text("Ready to code?")
                 .font(.headline)
+
+            if !store.sessionPresetsSorted.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Quick Start")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Picker("Session preset", selection: $selectedPresetID) {
+                            Text("Choose a preset").tag(UUID?.none)
+                            ForEach(store.sessionPresetsSorted) { preset in
+                                Text(preset.name).tag(Optional(preset.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+
+                        Button {
+                            guard let selectedPresetID,
+                                  let preset = store.sessionPreset(id: selectedPresetID) else { return }
+                            _ = store.startSession(using: preset)
+                        } label: {
+                            Label("Start", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(selectedPresetID.flatMap { store.sessionPreset(id: $0) } == nil)
+                        .accessibilityLabel("Start selected session preset")
+                        .accessibilityHint("Starts a manual session using the selected preset, when it is still available")
+                    }
+
+                    if let selectedPresetID,
+                       store.sessionPreset(id: selectedPresetID) == nil {
+                        Label("The selected preset is no longer available.", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
 
             ProjectSelectionRow(selectedProjectID: $selectedProjectID)
 
@@ -117,6 +156,22 @@ private struct ActiveSessionView: View {
             Label(store.activeSession?.type.title ?? SessionType.coding.title, systemImage: store.activeSession?.type.systemImage ?? SessionType.coding.systemImage)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            if let automationStatus = store.activeAutomationStatusLabel {
+                Label(
+                    automationStatus,
+                    systemImage: "bolt.badge.clock"
+                )
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel(automationStatus)
+            } else if store.activeSession?.automationMetadata != nil {
+                Label("Manual control", systemImage: "hand.raised")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Manual control")
+                    .accessibilityHint("Automation no longer controls this session")
+            }
 
             Text(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
                 .font(.system(size: 34, weight: .medium, design: .monospaced))

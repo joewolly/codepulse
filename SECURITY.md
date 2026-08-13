@@ -24,7 +24,11 @@ their demonstrated impact.
 CodePulse is a local-first macOS application:
 
 - It has no account system, cloud sync, telemetry, product analytics, or remote
-  activity-monitoring service.
+  activity-monitoring service. Optional Session Automation performs local
+  workflow detection only when enabled, reacting to explicit Codex/OpenCode
+  lifecycle metadata and, for an application rule, the current frontmost
+  bundle identifier. It does not monitor application usage history, browsers,
+  keyboards, mice, clipboards, or general filesystem activity.
 - App state is stored locally in the user's Application Support directory.
 - Project access is limited to folders the user selects. CodePulse stores a
   security-scoped bookmark so that access can be restored across launches.
@@ -52,6 +56,36 @@ content-bearing events. CodePulse only associates an event with an active
 session whose selected project's canonical folder contains the event working
 directory; timestamps alone are never sufficient, and No Project sessions are
 excluded.
+
+When Session Automation is enabled, a validated event can influence only the
+CodePulse session lifecycle when it matches a user-created Codex/OpenCode rule
+for that configured project. An application rule can influence the same path
+only when the current frontmost application's bundle identifier matches its
+configured preset/project. Manual sessions have no automation ownership, and
+manual lifecycle actions disable control for an automatically started session.
+Automation never executes event content, invokes a developer tool, runs a path
+from an event, changes repository files, or performs GitHub mutations.
+
+### External control boundary
+
+`codepulsectl` is a same-user local client, not a privileged or network service.
+It writes only a versioned JSON envelope to the CodePulse-owned control inbox
+and waits for a bounded response. The envelope is limited to a schema version,
+UUID, issued-at timestamp, and an allowlisted lifecycle action. Preset names,
+project names, session types, and optional goals have bounded lengths and safe
+text validation; no shell command, path, credential, developer-tool session ID,
+or arbitrary file operation is accepted.
+
+The transport uses atomic writes, rejects symbolic-link redirection and files
+outside its direct command/response directories, caps pending command and
+response storage, and removes malformed input without interpreting it. Commands
+older than 30 seconds or issued before the current app launch are rejected.
+Mutation responses are persisted with the session-state transaction in a
+bounded UUID ledger, then acknowledged through the response inbox. If CodePulse
+relaunches before deleting a command, it replays the stored response rather than
+running the mutation again. Status requests do not enter the mutation ledger.
+The CLI never edits `state.json`, invokes private app files, installs a helper
+into a system path, or executes input as a process.
 
 Codex configuration changes are marked and merged with existing hook entries.
 An explicit user `hooks = false` setting is respected. OpenCode installation

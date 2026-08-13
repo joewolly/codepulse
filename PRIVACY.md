@@ -2,7 +2,10 @@
 
 CodePulse is designed as a local-first coding timer and journal. It does not
 require an account and does not include cloud sync, telemetry, product analytics,
-advertising, or activity monitoring.
+advertising, or application-usage history. Optional Session Automation performs
+local workflow detection only when the user enables it: it reacts to supported
+developer-tool lifecycle metadata and, when explicitly configured, the current
+frontmost application's bundle identifier.
 
 ## Data stored on the Mac
 
@@ -20,9 +23,18 @@ that state can include:
   lightweight pull request metadata (number, title, state, draft status, URL,
   and branch names).
 - App settings and any active session needed for relaunch recovery.
+- Session Presets, optional Session Automation rules, configured application
+  bundle identifiers/display names, the global automation setting, and the
+  bounded ownership/timing metadata needed to recover an automatically started
+  active session. Raw developer-tool event files and an unbounded application
+  activation history are not stored in backups.
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
   prunes entries older than 30 days during event processing.
+- A separate bounded internal ledger of processed `codepulsectl` mutation UUIDs
+  and privacy-minimal responses may be kept in the live state for exactly-once
+  relaunch recovery. It is not a permanent command history and is omitted from
+  exported backups. Raw control commands and response files are transient.
 
 CodePulse reads only the project folders the user selects. Git inspection uses
 the local `/usr/bin/git` executable and does not modify repositories.
@@ -30,7 +42,9 @@ the local `/usr/bin/git` executable and does not modify repositories.
 ## Optional Developer Integrations
 
 Codex and OpenCode integrations are disabled unless the user enables them in
-**Settings → Integrations**. When enabled, CodePulse records only the minimum
+**Settings → Integrations**. Session Automation is a separate setting in
+**Settings → Session Automation** and is disabled by default. When an
+integration is enabled, CodePulse records only the minimum
 metadata needed to answer which supported developer tool participated in an
 active session:
 
@@ -59,9 +73,37 @@ Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
 Developer-tool metadata and the processed-event ledger remain local as part of
-CodePulse state and normal JSON backups. Disabling an integration removes only
-the CodePulse-owned hook or plugin configuration; it does not delete user-owned
-tool configuration.
+CodePulse state and normal JSON backups. Automation rules and active-session
+ownership are local configuration/recovery state; transient claims are bounded
+and exist only to keep the current automatic session deterministic across a
+relaunch. When an application rule is enabled, CodePulse observes the current
+frontmost application through native workspace activation notifications and
+compares its bundle identifier against configured rules. It does not inspect
+windows or persist activation/deactivation history. Disabling an integration
+removes only the CodePulse-owned hook or plugin configuration; it does not
+delete user-owned tool configuration.
+
+Application automation does not collect or retain unrelated application
+durations, window titles, document names, file names, browser URLs, terminal
+contents, clipboard contents, keyboard or mouse input, screen contents, or
+accessibility element contents. It does not require Accessibility or Screen
+Recording permission.
+
+## External local control
+
+The optional `codepulsectl` executable communicates only with a running CodePulse
+app through a CodePulse-owned local command/response path under Application
+Support. It sends command metadata needed for the requested action: a version,
+UUID, timestamp, action, and—only for a requested start—the selected preset or
+existing project/type/optional goal. It does not send prompts, transcripts,
+source code, external developer-tool IDs, credentials, GitHub tokens, or
+filesystem locations to a service. There is no cloud or network control path.
+
+Commands expire after a short bounded window, malformed or unexpected fields
+are rejected, pending storage and response storage are capped, and a bounded
+UUID ledger prevents a mutation from executing twice after a relaunch. The
+ledger stores no raw command text, and command/response files are cleaned up on
+processing or timeout on a best-effort basis.
 
 ## Network access
 
@@ -87,9 +129,14 @@ score.
 
 Backup export creates a versioned JSON file at a location chosen by the user.
 The backup can contain the same local state described above, including freeform
-session text, filesystem paths, optional developer-tool metadata, and the
-processed-event ledger containing event identifiers and processing timestamps
-(up to 2,048 entries; event processing prunes entries older than 30 days).
+session text, filesystem paths, session presets, configured application
+identities, optional developer-tool metadata, automation rules, active
+automation ownership needed for recovery, and the processed-event ledger
+containing event identifiers and processing timestamps (up to 2,048 entries;
+event processing prunes entries older than 30 days). The separate bounded
+`codepulsectl` mutation ledger, raw control commands, response files, transient
+status requests, and application activation history are not intentionally
+added.
 CodePulse does not intentionally add credentials, conversation content, or file
 contents, but user-entered text may itself be sensitive. Protect backup files
 and review them before sharing.

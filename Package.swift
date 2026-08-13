@@ -9,7 +9,8 @@ let package = Package(
     ],
     products: [
         .executable(name: "CodePulse", targets: ["CodePulse"]),
-        .executable(name: "codepulse-integration", targets: ["CodePulseIntegrationCLI"])
+        .executable(name: "codepulse-integration", targets: ["CodePulseIntegrationCLI"]),
+        .executable(name: "codepulsectl", targets: ["CodePulseControlCLI"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2")
@@ -32,9 +33,19 @@ let package = Package(
             dependencies: ["CodePulseIntegration"],
             path: "Sources/CodePulseIntegrationCLI"
         ),
+        .target(
+            name: "CodePulseControlClient",
+            dependencies: ["CodePulseIntegration"],
+            path: "Sources/CodePulseControlClient"
+        ),
+        .executableTarget(
+            name: "CodePulseControlCLI",
+            dependencies: ["CodePulseControlClient"],
+            path: "Sources/CodePulseControlCLI"
+        ),
         .testTarget(
             name: "CodePulseTests",
-            dependencies: ["CodePulse", "CodePulseIntegration"],
+            dependencies: ["CodePulse", "CodePulseIntegration", "CodePulseControlClient"],
             path: "Tests/CodePulseTests"
         )
     ]

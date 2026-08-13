@@ -27,5 +27,8 @@ jobs:
       - name: Build package
         run: swift build --configuration debug
 
+      - name: Build codepulsectl
+        run: swift build --configuration debug --product codepulsectl
+
       - name: Run tests
         run: swift test --configuration debug

@@ -14,6 +14,7 @@ APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 APP_HELPER_BINARY="$APP_HELPERS/codepulse-integration"
+APP_CONTROL_BINARY="$APP_HELPERS/codepulsectl"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 VOLUME_NAME="CodePulse"
 
@@ -33,6 +34,9 @@ UNIVERSAL_BINARY=""
 ARM64_HELPER=""
 X86_64_HELPER=""
 UNIVERSAL_HELPER=""
+ARM64_CONTROL=""
+X86_64_CONTROL=""
+UNIVERSAL_CONTROL=""
 SPARKLE_FRAMEWORK=""
 
 usage() {
@@ -160,6 +164,12 @@ build_release() {
     --configuration release \
     --triple arm64-apple-macosx13.0 \
     --product codepulse-integration
+  swift build \
+    --package-path "$ROOT_DIR" \
+    --scratch-path "$arm64_scratch" \
+    --configuration release \
+    --triple arm64-apple-macosx13.0 \
+    --product codepulsectl
   arm64_bin_path="$(swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
@@ -168,9 +178,11 @@ build_release() {
     --show-bin-path)"
   ARM64_BINARY="$arm64_bin_path/$APP_NAME"
   ARM64_HELPER="$arm64_bin_path/codepulse-integration"
+  ARM64_CONTROL="$arm64_bin_path/codepulsectl"
   SPARKLE_FRAMEWORK="$arm64_bin_path/Sparkle.framework"
   [[ -x "$ARM64_BINARY" ]] || die "SwiftPM did not produce the arm64 release executable: $ARM64_BINARY"
   [[ -x "$ARM64_HELPER" ]] || die "SwiftPM did not produce the arm64 integration helper: $ARM64_HELPER"
+  [[ -x "$ARM64_CONTROL" ]] || die "SwiftPM did not produce the arm64 codepulsectl: $ARM64_CONTROL"
   [[ -d "$SPARKLE_FRAMEWORK" ]] || die "SwiftPM did not stage Sparkle.framework beside the arm64 release product"
 
   echo "Building optimized x86_64 release binary"
@@ -186,6 +198,12 @@ build_release() {
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
     --product codepulse-integration
+  swift build \
+    --package-path "$ROOT_DIR" \
+    --scratch-path "$x86_64_scratch" \
+    --configuration release \
+    --triple x86_64-apple-macosx13.0 \
+    --product codepulsectl
   x86_64_bin_path="$(swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
@@ -194,16 +212,21 @@ build_release() {
     --show-bin-path)"
   X86_64_BINARY="$x86_64_bin_path/$APP_NAME"
   X86_64_HELPER="$x86_64_bin_path/codepulse-integration"
+  X86_64_CONTROL="$x86_64_bin_path/codepulsectl"
   [[ -x "$X86_64_BINARY" ]] || die "SwiftPM did not produce the x86_64 release executable: $X86_64_BINARY"
   [[ -x "$X86_64_HELPER" ]] || die "SwiftPM did not produce the x86_64 integration helper: $X86_64_HELPER"
+  [[ -x "$X86_64_CONTROL" ]] || die "SwiftPM did not produce the x86_64 codepulsectl: $X86_64_CONTROL"
   [[ -d "$x86_64_bin_path/Sparkle.framework" ]] || die "SwiftPM did not stage Sparkle.framework beside the x86_64 release product"
 
   UNIVERSAL_BINARY="$TEMP_DIR/$APP_NAME-universal"
   /usr/bin/lipo -create -output "$UNIVERSAL_BINARY" "$ARM64_BINARY" "$X86_64_BINARY"
   UNIVERSAL_HELPER="$TEMP_DIR/codepulse-integration-universal"
   /usr/bin/lipo -create -output "$UNIVERSAL_HELPER" "$ARM64_HELPER" "$X86_64_HELPER"
+  UNIVERSAL_CONTROL="$TEMP_DIR/codepulsectl-universal"
+  /usr/bin/lipo -create -output "$UNIVERSAL_CONTROL" "$ARM64_CONTROL" "$X86_64_CONTROL"
   chmod 755 "$UNIVERSAL_BINARY"
   chmod 755 "$UNIVERSAL_HELPER"
+  chmod 755 "$UNIVERSAL_CONTROL"
 
   local architecture_info
   architecture_info="$(/usr/bin/lipo -info "$UNIVERSAL_BINARY")"
@@ -212,6 +235,9 @@ build_release() {
   architecture_info="$(/usr/bin/lipo -info "$UNIVERSAL_HELPER")"
   [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "Universal 2 helper validation failed: $architecture_info"
   echo "Integration helper architecture: $architecture_info"
+  architecture_info="$(/usr/bin/lipo -info "$UNIVERSAL_CONTROL")"
+  [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "Universal 2 codepulsectl validation failed: $architecture_info"
+  echo "codepulsectl architecture: $architecture_info"
 }
 
 stage_app_bundle() {
@@ -224,11 +250,13 @@ stage_app_bundle() {
   mkdir -p "$APP_MACOS" "$APP_HELPERS" "$APP_RESOURCES" "$APP_FRAMEWORKS"
   cp "$UNIVERSAL_BINARY" "$APP_BINARY"
   cp "$UNIVERSAL_HELPER" "$APP_HELPER_BINARY"
+  cp "$UNIVERSAL_CONTROL" "$APP_CONTROL_BINARY"
   cp "$INFO_TEMPLATE" "$INFO_PLIST"
   cp "$ICON_SOURCE" "$APP_RESOURCES/CodePulse.icns"
   /usr/bin/ditto "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
   chmod 755 "$APP_BINARY"
   chmod 755 "$APP_HELPER_BINARY"
+  chmod 755 "$APP_CONTROL_BINARY"
 
   /usr/bin/plutil -replace CFBundleShortVersionString -string "$VERSION" "$INFO_PLIST"
   /usr/bin/plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$INFO_PLIST"
@@ -259,6 +287,7 @@ verify_bundle() {
   [[ -f "$INFO_PLIST" ]] || die "missing app Info.plist"
   [[ -x "$APP_BINARY" ]] || die "missing executable: $APP_BINARY"
   [[ -x "$APP_HELPER_BINARY" ]] || die "missing integration helper: $APP_HELPER_BINARY"
+  [[ -x "$APP_CONTROL_BINARY" ]] || die "missing codepulsectl: $APP_CONTROL_BINARY"
   [[ -f "$APP_RESOURCES/CodePulse.icns" ]] || die "missing app icon resource"
   [[ -d "$APP_FRAMEWORKS/Sparkle.framework" ]] || die "missing embedded Sparkle.framework"
   [[ -L "$APP_FRAMEWORKS/Sparkle.framework/Versions/Current" ]] || die "Sparkle.framework symlinks were not preserved"
@@ -293,6 +322,8 @@ verify_bundle() {
   /usr/bin/file "$APP_BINARY"
   architecture_info="$(/usr/bin/lipo -info "$APP_HELPER_BINARY")"
   [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "final integration helper is not Universal 2: $architecture_info"
+  architecture_info="$(/usr/bin/lipo -info "$APP_CONTROL_BINARY")"
+  [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "final codepulsectl is not Universal 2: $architecture_info"
 
   /usr/bin/otool -L "$APP_BINARY" | /usr/bin/grep -F '@rpath/Sparkle.framework/' >/dev/null || die "final executable is not linked to Sparkle.framework"
   /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -F '@executable_path/../Frameworks' >/dev/null || die "final executable is missing the Sparkle framework rpath"
@@ -363,6 +394,7 @@ smoke_validate_artifact() {
   [[ -d "$MOUNT_POINT/$APP_NAME.app" ]] || die "DMG does not contain $APP_NAME.app"
   [[ -d "$MOUNT_POINT/$APP_NAME.app/Contents/Frameworks/Sparkle.framework" ]] || die "DMG app does not contain Sparkle.framework"
   [[ -x "$MOUNT_POINT/$APP_NAME.app/Contents/Helpers/codepulse-integration" ]] || die "DMG app does not contain the integration helper"
+  [[ -x "$MOUNT_POINT/$APP_NAME.app/Contents/Helpers/codepulsectl" ]] || die "DMG app does not contain codepulsectl"
   [[ -L "$MOUNT_POINT/Applications" ]] || die "DMG does not contain an Applications symlink"
   [[ "$(readlink "$MOUNT_POINT/Applications")" == "/Applications" ]] || die "Applications symlink does not point to /Applications"
 
