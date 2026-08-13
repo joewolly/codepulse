@@ -9,7 +9,7 @@ final class PricingCatalogTests: XCTestCase {
 
         XCTAssertEqual(snapshot.origin, .bundled)
         XCTAssertFalse(snapshot.isExpired)
-        XCTAssertEqual(snapshot.catalog.version, 1)
+        XCTAssertEqual(snapshot.catalog.version, 2)
         XCTAssertEqual(snapshot.catalog.resolve(model: "gpt-5-chat-latest", serviceMode: "priority")?.modelID, "gpt-5")
     }
 
@@ -18,9 +18,9 @@ final class PricingCatalogTests: XCTestCase {
         let store = try PricingCatalogStore(cacheURL: cacheURL)
         let refresher = PricingCatalogRefresher(store: store)
 
-        XCTAssertEqual(refresher.refresh(from: remoteManifestData), .updated(version: 2))
+        XCTAssertEqual(refresher.refresh(from: remoteManifestData), .updated(version: 3))
         XCTAssertEqual(try store.current(at: date("2026-08-14T00:00:00Z")).origin, .remote)
-        XCTAssertEqual(refresher.refresh(from: remoteManifestData), .ignored(reason: String(describing: PricingCatalogStoreError.rollbackRejected(currentVersion: 2, receivedVersion: 2))))
+        XCTAssertEqual(refresher.refresh(from: remoteManifestData), .ignored(reason: String(describing: PricingCatalogStoreError.rollbackRejected(currentVersion: 3, receivedVersion: 3))))
     }
 
     func testInvalidRefreshDoesNotReplaceOfflineCatalog() throws {
@@ -70,7 +70,7 @@ final class PricingCatalogTests: XCTestCase {
         XCTAssertEqual(cost?.amount, Decimal(string: "6.5"))
         XCTAssertEqual(cost?.currency, "USD")
         XCTAssertEqual(cost?.provenance.representation, .apiEquivalentEstimate)
-        XCTAssertEqual(cost?.provenance.catalogVersion, 1)
+        XCTAssertEqual(cost?.provenance.catalogVersion, 2)
         XCTAssertEqual(cost?.provenance.serviceMode, nil, "The catalog has no priority price, so effort/service mode cannot invent one.")
         XCTAssertEqual(UsageCostRepresentation.apiEquivalentEstimate.displayLabel, "API-equivalent estimate")
         XCTAssertNil(UsageCostCalculator.calculate(representation: .providerReported, sample: sample, catalog: snapshot, calculatedAt: Date()))
@@ -134,7 +134,7 @@ final class PricingCatalogTests: XCTestCase {
 
     private var remoteManifestData: Data {
         Data("""
-        {"catalogVersion":2,"expiresAt":"2026-09-13T00:00:00Z","issuedAt":"2026-08-13T00:00:00Z","keyID":"codepulse-pricing-p256-v1","models":[{"aliases":["gpt-5-chat-latest","gpt-5-2025-08-07"],"currency":"USD","effectiveDate":"2026-08-13T00:00:00Z","modelID":"gpt-5","providerSourceURL":"https://developers.openai.com/api/docs/models/gpt-5","rates":{"cachedInput":0.125,"input":1.25,"output":10}}],"schemaVersion":1,"signature":"OuZadkkJ3KJbKfkcY1P3fTfqAICOVqtrWkGEdLSJmSk9PiPiviplVJWz1yQrMyJ/jI7QM8jgc/7VIgTMvxqXiw=="}
+        {"catalogVersion":3,"expiresAt":"2026-09-13T00:00:00Z","issuedAt":"2026-08-13T00:00:00Z","keyID":"codepulse-pricing-p256-v1","models":[{"aliases":["gpt-5-chat-latest","gpt-5-2025-08-07"],"currency":"USD","effectiveDate":"2026-08-13T00:00:00Z","modelID":"gpt-5","providerSourceURL":"https://developers.openai.com/api/docs/models/gpt-5","rates":{"cachedInput":0.125,"input":1.25,"output":10}}],"schemaVersion":1,"signature":"HFX42IDcUMXqK8BVGg9bCdpkn/UrK98eg9w73Z4bkYtz3jPGzgu+gGtQX17UxQWI5BYCxL7czahTfgd08ERRmQ=="}
         """.utf8)
     }
 }

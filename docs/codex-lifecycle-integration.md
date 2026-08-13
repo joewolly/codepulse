@@ -28,6 +28,17 @@ responses, transcripts, source files, commands, tool arguments/results, hook
 output, or a permission decision. Persisted agent runs use an
 installation-scoped fingerprint rather than the external Codex session ID.
 
+## Optional token usage
+
+Lifecycle timing does not enable token usage tracking. **Track Codex token
+usage** is a second, off-by-default consent in Settings. Once enabled,
+CodePulse reads the minimum token-counter and model metadata from current
+`~/.codex/sessions` JSONL files, stores only salted identifiers and aggregated
+deltas, and stops reading immediately when disabled. It never reads transcript
+content or archived Codex sessions. See
+[`codex-usage-tracking.md`](codex-usage-tracking.md) for the exact fields,
+checkpointing, attribution, estimate labels, and retention behavior.
+
 ## Limits and recovery
 
 CodePulse correlates a local Codex run only when its working directory is

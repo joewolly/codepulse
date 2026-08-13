@@ -8,12 +8,14 @@ struct UsageTokenCounts: Codable, Equatable {
     var input: Int?
     var output: Int?
     var cachedInput: Int?
+    var cacheWriteInput: Int?
     var reasoning: Int?
 
-    init(input: Int? = nil, output: Int? = nil, cachedInput: Int? = nil, reasoning: Int? = nil) {
+    init(input: Int? = nil, output: Int? = nil, cachedInput: Int? = nil, cacheWriteInput: Int? = nil, reasoning: Int? = nil) {
         self.input = input
         self.output = output
         self.cachedInput = cachedInput
+        self.cacheWriteInput = cacheWriteInput
         self.reasoning = reasoning
     }
 }
@@ -84,6 +86,9 @@ struct UsageSample: Codable, Equatable, Identifiable {
     let id: UUID
     let integration: DeveloperTool
     let observedAt: Date
+    let sessionFingerprint: String?
+    let runID: UUID?
+    let workspaceID: UUID?
     let model: String?
     let effort: String?
     let serviceMode: String?
@@ -96,6 +101,9 @@ struct UsageSample: Codable, Equatable, Identifiable {
         id: UUID = UUID(),
         integration: DeveloperTool,
         observedAt: Date,
+        sessionFingerprint: String? = nil,
+        runID: UUID? = nil,
+        workspaceID: UUID? = nil,
         model: String? = nil,
         effort: String? = nil,
         serviceMode: String? = nil,
@@ -107,6 +115,9 @@ struct UsageSample: Codable, Equatable, Identifiable {
         self.id = id
         self.integration = integration
         self.observedAt = observedAt
+        self.sessionFingerprint = sessionFingerprint
+        self.runID = runID
+        self.workspaceID = workspaceID
         self.model = model
         self.effort = effort
         self.serviceMode = serviceMode
@@ -122,12 +133,14 @@ struct TokenRates: Codable, Equatable {
     let input: Decimal?
     let output: Decimal?
     let cachedInput: Decimal?
+    let cacheWriteInput: Decimal?
     let reasoning: Decimal?
 
-    init(input: Decimal? = nil, output: Decimal? = nil, cachedInput: Decimal? = nil, reasoning: Decimal? = nil) {
+    init(input: Decimal? = nil, output: Decimal? = nil, cachedInput: Decimal? = nil, cacheWriteInput: Decimal? = nil, reasoning: Decimal? = nil) {
         self.input = input
         self.output = output
         self.cachedInput = cachedInput
+        self.cacheWriteInput = cacheWriteInput
         self.reasoning = reasoning
     }
 }
@@ -369,12 +382,17 @@ enum UsageCostCalculator {
               let price = catalog.catalog.resolve(model: model, serviceMode: sample.serviceMode) else {
             return nil
         }
-        let components = [
-            priced(tokens: sample.tokens.input, rate: price.rates.input),
-            priced(tokens: sample.tokens.output, rate: price.rates.output),
-            priced(tokens: sample.tokens.cachedInput, rate: price.rates.cachedInput),
-            priced(tokens: sample.tokens.reasoning, rate: price.rates.reasoning)
-        ].compactMap { $0 }
+        let componentPairs = [
+            (sample.tokens.input, price.rates.input),
+            (sample.tokens.output, price.rates.output),
+            (sample.tokens.cachedInput, price.rates.cachedInput),
+            (sample.tokens.cacheWriteInput, price.rates.cacheWriteInput),
+            (sample.tokens.reasoning, price.rates.reasoning)
+        ]
+        guard componentPairs.allSatisfy({ tokens, rate in tokens == nil || tokens == 0 || rate != nil }) else {
+            return nil
+        }
+        let components = componentPairs.compactMap { priced(tokens: $0.0, rate: $0.1) }
         guard !components.isEmpty else { return nil }
         let total = components.reduce(Decimal.zero, +)
         let provenance = CostCalculationProvenance(

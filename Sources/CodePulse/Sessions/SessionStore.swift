@@ -42,6 +42,7 @@ final class SessionStore: ObservableObject {
     let developerToolEventConsumer: DeveloperToolEventConsuming
     let developerEventV2Consumer: DeveloperEventV2Consuming
     let developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating
+    let codexUsageTracking: CodexUsageTracking
     var calendar: Calendar
     private var refreshTimer: Timer?
     private var gitCaptureSessionID: UUID?
@@ -56,6 +57,7 @@ final class SessionStore: ObservableObject {
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
         developerEventV2Consumer: DeveloperEventV2Consuming = DeveloperEventV2Consumer(),
         developerToolLifecycleCoordinator: DeveloperToolLifecycleCoordinating = DeveloperToolLifecycleCoordinator(),
+        codexUsageTracking: CodexUsageTracking = CodexUsageTrackingService(),
         automaticallyRefresh: Bool = true
     ) {
         self.persistence = persistence
@@ -65,6 +67,7 @@ final class SessionStore: ObservableObject {
         self.developerToolEventConsumer = developerToolEventConsumer
         self.developerEventV2Consumer = developerEventV2Consumer
         self.developerToolLifecycleCoordinator = developerToolLifecycleCoordinator
+        self.codexUsageTracking = codexUsageTracking
         self.calendar = calendar
         self.state = persistence.load()
         self.persistenceRecoveryIssue = (persistence as? StatePersistenceRecoveryProviding)?.recoveryIssue
@@ -77,6 +80,7 @@ final class SessionStore: ObservableObject {
         }
 
         processPendingIntegrationEvents(force: true)
+        processCodexUsage()
         reconcileAgentRuns()
 
         if automaticallyRefresh {
@@ -166,6 +170,7 @@ final class SessionStore: ObservableObject {
     func refresh() {
         now = clock.now
         processPendingIntegrationEvents()
+        processCodexUsage()
         reconcileAgentRuns()
     }
 
@@ -873,6 +878,12 @@ final class SessionStore: ObservableObject {
     private func reconcileAgentRuns() {
         var nextState = state
         guard developerToolLifecycleCoordinator.reconcile(state: &nextState, now: clock.now) else { return }
+        commit(nextState)
+    }
+
+    private func processCodexUsage() {
+        var nextState = state
+        guard codexUsageTracking.process(state: &nextState, now: clock.now) else { return }
         commit(nextState)
     }
 

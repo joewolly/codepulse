@@ -1,5 +1,5 @@
 {
-  "catalogVersion" : 1,
+  "catalogVersion" : 2,
   "expiresAt" : "2026-09-13T00:00:00Z",
   "issuedAt" : "2026-08-13T00:00:00Z",
   "keyID" : "codepulse-pricing-p256-v1",
@@ -18,8 +18,32 @@
         "input" : 1.25,
         "output" : 10
       }
+    },
+    {
+      "aliases" : [],
+      "currency" : "USD",
+      "effectiveDate" : "2026-08-13T00:00:00Z",
+      "modelID" : "gpt-5.3-codex",
+      "providerSourceURL" : "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+      "rates" : {
+        "cachedInput" : 0.175,
+        "input" : 1.75,
+        "output" : 14
+      }
+    },
+    {
+      "aliases" : [],
+      "currency" : "USD",
+      "effectiveDate" : "2026-08-13T00:00:00Z",
+      "modelID" : "gpt-5.2-codex",
+      "providerSourceURL" : "https://developers.openai.com/api/docs/models/gpt-5.2-codex",
+      "rates" : {
+        "cachedInput" : 0.175,
+        "input" : 1.75,
+        "output" : 14
+      }
     }
   ],
   "schemaVersion" : 1,
-  "signature" : "77udD189MyRFHl23jeHSlrq2YN+Wr3LxQ+/vtQGkIFn4RZ6BJ6IhQqM/RuhF2nPtJm3o6MBGzhWeKxI4PIJ8bg=="
+  "signature" : "vw6BwS7sU61E+3MvIOppuTSlpS7hUMGRUggJO1vFEjUUCZ5YZou/W6tuTdGaoQNEppNtdtg5BPONxtN2kxImYg=="
 }

@@ -44,6 +44,12 @@ Before Feature 01 a missing or malformed file silently produced an empty
 - **Integration configuration:** CodePulse-managed Codex/OpenCode hook/plugin
   files live in the respective developer-tool configuration locations. They
   are not decoded as CodePulse state.
+- **Codex usage reader (Feature 13):** the `AppState` payload contains the
+  off-by-default consent, privacy-safe usage samples, and bounded checkpoints
+  holding only salted source/session fingerprints, offsets, model labels, and
+  cumulative counters. It never persists raw Codex JSONL paths, IDs, or
+  content. Newly added optional/defaulted fields remain backward decodable;
+  they do not require a new envelope migration.
 
 ## v1 fixture policy
 
