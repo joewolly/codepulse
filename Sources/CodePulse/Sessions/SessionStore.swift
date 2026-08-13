@@ -829,6 +829,10 @@ final class SessionStore: ObservableObject {
         nextState.activityGraph.runs.removeAll { deletedRunIDs.contains($0.id) }
         nextState.usageSamples.removeAll { $0.integration == tool }
         nextState.developerEventDiagnostics?.entries.removeAll { $0.integration == rawValue }
+        nextState.activeSession?.developerToolContexts.removeAll { $0.tool == tool }
+        for index in nextState.completedSessions.indices {
+            nextState.completedSessions[index].developerToolContexts.removeAll { $0.tool == tool }
+        }
 
         switch tool {
         case .codex:

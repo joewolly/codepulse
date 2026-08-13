@@ -53,7 +53,7 @@ final class SessionStoreTests: XCTestCase {
             startedAt: start,
             agentMetadata: AgentRunMetadata(integration: .claudeCode, sessionFingerprint: "claude", lastEventAt: start)
         )
-        let state = AppState(
+        var state = AppState(
             settings: CodePulseSettings(),
             developerEventDiagnostics: DeveloperEventDiagnosticsJournal(entries: [
                 DeveloperEventDiagnostic(receivedAt: start, status: .accepted, integration: "codex"),
@@ -68,6 +68,23 @@ final class SessionStoreTests: XCTestCase {
             codexUsageProcessing: CodexUsageProcessingState(),
             claudeUsageProcessing: ClaudeUsageProcessingState()
         )
+        state.activeSession = ActiveSession(
+            projectID: nil,
+            projectName: nil,
+            startedAt: start,
+            developerToolContexts: [
+                DeveloperToolSessionContext(tool: .codex, externalSessionID: "codex-active", workingDirectory: "/tmp/codex", firstActivityAt: start, lastActivityAt: start),
+                DeveloperToolSessionContext(tool: .claudeCode, externalSessionID: "claude-active", workingDirectory: "/tmp/claude", firstActivityAt: start, lastActivityAt: start)
+            ]
+        )
+        state.completedSessions = [CompletedSession(
+            id: UUID(), projectID: nil, projectName: nil, goal: nil, outcome: nil,
+            startedAt: start, endedAt: start.addingTimeInterval(1), pauseIntervals: [],
+            developerToolContexts: [
+                DeveloperToolSessionContext(tool: .codex, externalSessionID: "codex-completed", workingDirectory: "/tmp/codex", firstActivityAt: start, lastActivityAt: start),
+                DeveloperToolSessionContext(tool: .claudeCode, externalSessionID: "claude-completed", workingDirectory: "/tmp/claude", firstActivityAt: start, lastActivityAt: start)
+            ]
+        )]
         let store = makeStore(clock: clock, persistence: InMemoryPersistence(state))
 
         store.deleteIntegrationData(for: DeveloperTool.codex)
@@ -79,6 +96,8 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.state.usageSamples.map { $0.integration }, [DeveloperTool.claudeCode])
         XCTAssertEqual(store.activityGraph.runs.map { $0.agentMetadata?.integration }, [DeveloperEventIntegration.claudeCode])
         XCTAssertEqual(store.state.developerEventDiagnostics?.entries.map { $0.integration }, ["claude-code", nil])
+        XCTAssertEqual(store.state.activeSession?.developerToolContexts.map(\.tool), [.claudeCode])
+        XCTAssertEqual(store.state.completedSessions[0].developerToolContexts.map(\.tool), [.claudeCode])
     }
 
     func testRedactedSupportBundleContainsOnlyAggregateIntegrationEvidence() throws {
