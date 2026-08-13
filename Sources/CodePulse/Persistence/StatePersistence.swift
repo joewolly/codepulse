@@ -106,6 +106,57 @@ enum StatePersistenceError: LocalizedError {
     }
 }
 
+struct AutomaticRecoveryBackupFilename: Equatable {
+    let timestamp: Date
+    let collisionSuffix: Int
+
+    static func parse(_ fileName: String) -> AutomaticRecoveryBackupFilename? {
+        let range = NSRange(fileName.startIndex..<fileName.endIndex, in: fileName)
+        guard let match = pattern.firstMatch(in: fileName, options: [], range: range),
+              match.range.location == 0,
+              match.range.length == range.length,
+              let timestampRange = Range(match.range(at: 1), in: fileName) else {
+            return nil
+        }
+
+        let timestampText = String(fileName[timestampRange])
+        guard let timestamp = parseTimestamp(timestampText) else { return nil }
+
+        let collisionSuffix: Int
+        if match.range(at: 2).location == NSNotFound {
+            collisionSuffix = 0
+        } else if let suffixRange = Range(match.range(at: 2), in: fileName),
+                  let suffix = Int(fileName[suffixRange]) {
+            collisionSuffix = suffix
+        } else {
+            return nil
+        }
+
+        return AutomaticRecoveryBackupFilename(
+            timestamp: timestamp,
+            collisionSuffix: collisionSuffix
+        )
+    }
+
+    private static let pattern = try! NSRegularExpression(
+        pattern: #"^Pre-Restore Backup ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z)(?:-([1-9][0-9]*))?\.json$"#
+    )
+
+    private static func parseTimestamp(_ value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss'Z'"
+        formatter.isLenient = false
+        guard let date = formatter.date(from: value),
+              formatter.string(from: date) == value else {
+            return nil
+        }
+        return date
+    }
+}
+
 final class JSONFilePersistence: StatePersisting, StateRestoring {
     let fileURL: URL
     private let encoder: JSONEncoder
@@ -218,9 +269,9 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
 
         // Retention is deliberately after a new recovery file has been
-        // durably written and verified. Only our exact automatic filename
-        // prefix is eligible; user-exported JSON is never scanned or pruned.
-        pruneAutomaticRecoveryBackups(in: recoveryDirectory)
+        // durably written and verified. Only exact generated filenames are
+        // eligible; user-exported JSON is never scanned or pruned.
+        pruneAutomaticRecoveryBackups(in: recoveryDirectory, preserving: recoveryURL)
 
         let candidateData: Data
         do {
@@ -413,34 +464,40 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         throw ManagedStoragePathError.unsafePath
     }
 
-    private func pruneAutomaticRecoveryBackups(in directory: URL) {
+    private func pruneAutomaticRecoveryBackups(in directory: URL, preserving recoveryURL: URL) {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
             options: [.skipsHiddenFiles]
         ) else {
             return
         }
 
-        let automatic = urls.filter { url in
-            guard url.pathExtension.lowercased() == "json",
-                  url.lastPathComponent.hasPrefix("Pre-Restore Backup "),
+        let automatic = urls.compactMap { url -> (url: URL, name: AutomaticRecoveryBackupFilename)? in
+            guard let name = AutomaticRecoveryBackupFilename.parse(url.lastPathComponent),
                   !CodePulseManagedStorage.isSymbolicLink(url),
                   (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
-                return false
+                return nil
             }
-            return true
+            return (url, name)
         }
-        let newestFirst = automatic.sorted { lhs, rhs in
-            let leftDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-                ?? .distantPast
-            let rightDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-                ?? .distantPast
-            if leftDate != rightDate { return leftDate > rightDate }
-            return lhs.lastPathComponent > rhs.lastPathComponent
-        }
-        for url in newestFirst.dropFirst(Self.automaticRecoveryRetentionCount) {
-            try? fileManager.removeItem(at: url)
+
+        let preservedPath = recoveryURL.standardizedFileURL
+        let newestOtherFirst = automatic
+            .filter { $0.url.standardizedFileURL != preservedPath }
+            .sorted { lhs, rhs in
+                if lhs.name.timestamp != rhs.name.timestamp {
+                    return lhs.name.timestamp > rhs.name.timestamp
+                }
+                if lhs.name.collisionSuffix != rhs.name.collisionSuffix {
+                    return lhs.name.collisionSuffix > rhs.name.collisionSuffix
+                }
+                return lhs.url.lastPathComponent > rhs.url.lastPathComponent
+            }
+
+        let olderRetentionCount = max(0, Self.automaticRecoveryRetentionCount - 1)
+        for entry in newestOtherFirst.dropFirst(olderRetentionCount) {
+            try? fileManager.removeItem(at: entry.url)
         }
     }
 

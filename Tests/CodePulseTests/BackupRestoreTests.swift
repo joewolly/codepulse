@@ -458,7 +458,10 @@ final class BackupRestoreTests: XCTestCase {
             at: backupDirectory,
             includingPropertiesForKeys: [.isRegularFileKey]
         )
-        XCTAssertEqual(files.filter { $0.lastPathComponent.hasPrefix("Pre-Restore Backup ") }.count, 5)
+        XCTAssertEqual(
+            files.compactMap { AutomaticRecoveryBackupFilename.parse($0.lastPathComponent) }.count,
+            5
+        )
         XCTAssertTrue(FileManager.default.fileExists(atPath: userBackup.path))
         for receipt in receipts.prefix(2) {
             XCTAssertFalse(
@@ -472,6 +475,110 @@ final class BackupRestoreTests: XCTestCase {
                 "Expected \(receipt.recoveryBackupURL.lastPathComponent) to be retained"
             )
         }
+    }
+
+    func testAutomaticRecoveryFilenameMatcherUsesExactGeneratedGrammar() {
+        let matching: [(String, Int)] = [
+            ("Pre-Restore Backup 2026-08-13T22-15-01Z.json", 0),
+            ("Pre-Restore Backup 2026-08-13T22-15-01Z-1.json", 1),
+            ("Pre-Restore Backup 2026-08-13T22-15-01Z-999.json", 999)
+        ]
+        for (fileName, suffix) in matching {
+            XCTAssertEqual(
+                AutomaticRecoveryBackupFilename.parse(fileName)?.collisionSuffix,
+                suffix,
+                fileName
+            )
+        }
+
+        let nonMatching = [
+            "Pre-Restore Backup important-copy.json",
+            "Pre-Restore Backup 2026-08-13.json",
+            "Pre-Restore Backup 2026-08-13T22-15-01Z-manual.json",
+            "Pre-Restore Backup 2026-08-13T22-15-01Z.txt",
+            "my Pre-Restore Backup 2026-08-13T22-15-01Z.json"
+        ]
+        for fileName in nonMatching {
+            XCTAssertNil(AutomaticRecoveryBackupFilename.parse(fileName), fileName)
+        }
+    }
+
+    func testRecoveryRetentionProtectsCurrentBackupAndIgnoresManualPrefixCollisions() throws {
+        let root = try temporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let stateA = AppState()
+        let stateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        persistence.save(stateA)
+
+        let backupDirectory = stateURL.deletingLastPathComponent().appendingPathComponent("Backups")
+        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        let manualFiles = [
+            "Pre-Restore Backup important-copy.json",
+            "Pre-Restore Backup 2026-08-13T22-15-01Z-manual.json"
+        ]
+        for name in manualFiles {
+            try Data("user-owned".utf8).write(to: backupDirectory.appendingPathComponent(name))
+        }
+
+        var receipts: [StateRestoreReceipt] = []
+        for offset in 0..<5 {
+            receipts.append(try persistence.replaceStateTransactionally(
+                with: offset.isMultiple(of: 2) ? stateA : stateB,
+                recoverySnapshot: stateA,
+                exportedAt: now.addingTimeInterval(TimeInterval(offset))
+            ))
+        }
+
+        let manipulatedDate = Date(timeIntervalSince1970: 4_000_000_000)
+        try FileManager.default.setAttributes(
+            [.modificationDate: manipulatedDate],
+            ofItemAtPath: receipts[0].recoveryBackupURL.path
+        )
+
+        let current = try persistence.replaceStateTransactionally(
+            with: stateB,
+            recoverySnapshot: stateA,
+            exportedAt: now.addingTimeInterval(5)
+        )
+        let files = try FileManager.default.contentsOfDirectory(
+            at: backupDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        )
+        let automatic = files.compactMap { AutomaticRecoveryBackupFilename.parse($0.lastPathComponent) }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: current.recoveryBackupURL.path))
+        XCTAssertEqual(automatic.count, JSONFilePersistence.automaticRecoveryRetentionCount)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receipts[0].recoveryBackupURL.path))
+        for receipt in receipts.dropFirst() {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path))
+        }
+        for name in manualFiles {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: backupDirectory.appendingPathComponent(name).path))
+        }
+    }
+
+    func testRecoveryFilenamesUseCollisionSuffixesForSameExportTimestamp() throws {
+        let root = try temporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let state = AppState()
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        persistence.save(state)
+
+        let receipts = try (0..<3).map { _ in
+            try persistence.replaceStateTransactionally(
+                with: state,
+                recoverySnapshot: state,
+                exportedAt: now
+            )
+        }
+
+        XCTAssertEqual(
+            receipts.compactMap {
+                AutomaticRecoveryBackupFilename.parse($0.recoveryBackupURL.lastPathComponent)?.collisionSuffix
+            },
+            [0, 1, 2]
+        )
     }
 
     func testManagedSymlinkPathIsRejected() throws {
