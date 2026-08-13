@@ -150,7 +150,7 @@ not exist yet.
 | 04 | @ZacharyRW | `feature/04-agent-aware-timing` | [#7](https://github.com/ZacharyRW/codepulse/pull/7) | Merged | 2026-08-12 |
 | 05 | @ZacharyRW | `feature/05-codex-lifecycle` | [#9](https://github.com/ZacharyRW/codepulse/pull/9) | Merged | 2026-08-13 |
 | 06 | @ZacharyRW | `feature/06-claude-lifecycle` | [#10](https://github.com/ZacharyRW/codepulse/pull/10) | In review | — |
-| 07 | — | `feature/07-opencode-lifecycle` | — | Not started | — |
+| 07 | @ZacharyRW | `feature/07-opencode-lifecycle` | [#11](https://github.com/ZacharyRW/codepulse/pull/11) | In review | — |
 | 08 | — | `feature/08-git-workspace-discovery` | — | Not started | — |
 | 09 | — | `feature/09-local-task-discovery` | — | Not started | — |
 | 10 | — | `feature/10-concurrent-activity-ui` | — | Not started | — |

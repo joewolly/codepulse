@@ -628,6 +628,54 @@ final class SessionStoreTests: XCTestCase {
         })?.agentMetadata?.state, .ended)
     }
 
+    func testOpenCodeConcurrentRunsAndRestartReconciliation() throws {
+        let clock = TestClock(start)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("CodePulse-opencode-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperEventV2Inbox(paths: paths, fingerprintSalt: Data(repeating: 7, count: 32))
+        let workspacePath = "/tmp/codepulse-opencode"
+        let persistence = InMemoryPersistence()
+        var store: SessionStore? = SessionStore(
+            persistence: persistence,
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            developerEventV2Consumer: DeveloperEventV2Consumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        let workspaceID = try XCTUnwrap(store?.addWorkspace(
+            name: "CodePulse",
+            roots: [WorkspaceRoot(path: workspacePath, addedAt: start)],
+            at: start
+        ))
+        for (session, key) in [("open-1", "opencode-one-start-0123456789"), ("open-2", "opencode-two-start-0123456789")] {
+            let event = developerEvent(
+                integration: .openCode,
+                kind: .sessionStarted,
+                at: start,
+                key: key,
+                path: workspacePath,
+                session: session
+            )
+            XCTAssertEqual(try inbox.receive(DeveloperEventV2Codec.encode(event), now: start), .accepted)
+        }
+        clock.advance(5)
+        store?.refresh()
+        XCTAssertEqual(store?.runs(workspaceID: workspaceID).filter { $0.agentMetadata?.state == .active }.count, 2)
+
+        store = nil
+        clock.advance(16 * 60)
+        let restored = SessionStore(
+            persistence: persistence,
+            clock: clock,
+            calendar: Calendar(identifier: .gregorian),
+            developerEventV2Consumer: DeveloperEventV2Consumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        restored.refresh()
+        XCTAssertEqual(restored.activityGraph.runs.filter { $0.agentMetadata?.state == .orphaned }.count, 2)
+    }
+
     private func makeStore(
         clock: TestClock,
         persistence: InMemoryPersistence = InMemoryPersistence(),

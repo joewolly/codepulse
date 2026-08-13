@@ -59,6 +59,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Text("OpenCode tracking uses a CodePulse-owned global plugin in its documented plugin directory. It reads local plugin session events only; no OpenCode database, project configuration, prompts, messages, tool data, or transcripts are read. Restart OpenCode after changing this integration.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 ForEach(DeveloperTool.allCases) { tool in
                     DeveloperToolIntegrationRow(
                         tool: tool,

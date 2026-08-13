@@ -39,6 +39,13 @@ struct CodePulseIntegrationCLI {
                 return
             }
             _ = try? inbox.receive(encoded)
+        case "--opencode-hook":
+            guard let event = OpenCodeLifecycleEventMapper.map(input),
+                  let encoded = try? DeveloperEventV2Codec.encode(event) else {
+                inbox.recordRejected(code: "opencode-hook-rejected")
+                return
+            }
+            _ = try? inbox.receive(encoded)
         default:
             return
         }
