@@ -132,9 +132,48 @@ private struct ActivityDetailView: View {
             LabeledContent("Agent runtime", value: CodePulseFormatting.duration(metrics.agentRuntime, includeSeconds: true))
             LabeledContent("Agent waiting", value: CodePulseFormatting.duration(metrics.agentWaiting, includeSeconds: true))
             LabeledContent("Combined wall-active", value: CodePulseFormatting.duration(metrics.combinedWallActive, includeSeconds: true))
+            Divider()
+            ActivityTimelineView(activityID: activityID)
         }
         .padding(20)
         .frame(minWidth: 360)
+    }
+}
+
+private struct ActivityTimelineView: View {
+    @EnvironmentObject private var store: SessionStore
+    let activityID: UUID
+
+    var body: some View {
+        let entries = ActivityTimelineProjection.entries(activityID: activityID, in: store.activityGraph)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Timeline")
+                .font(.headline)
+            if entries.isEmpty {
+                Text("No recorded intervals")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(entries) { entry in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(CodePulseFormatting.time(entry.startedAt))
+                                    .monospacedDigit()
+                                Text(entry.runLabel)
+                                Spacer()
+                                Text(entry.stateLabel)
+                                    .foregroundStyle(entry.state == .waiting ? .orange : .secondary)
+                            }
+                            .font(.caption)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("\(CodePulseFormatting.time(entry.startedAt)), \(entry.runLabel), \(entry.stateLabel)")
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
     }
 }
 
