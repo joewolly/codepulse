@@ -199,6 +199,7 @@ final class DeveloperToolIntegrationManager: ObservableObject {
     private static func defaultInstallers() -> [DeveloperTool: DeveloperToolIntegrationInstalling] {
         [
             .codex: CodexIntegrationInstaller(),
+            .claudeCode: ClaudeCodeIntegrationInstaller(),
             .opencode: OpenCodeIntegrationInstaller()
         ]
     }
