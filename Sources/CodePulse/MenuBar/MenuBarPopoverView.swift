@@ -287,6 +287,7 @@ private struct ActiveSessionView: View {
 private struct FinishingSessionView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var outcome = ""
+    @State private var outcomeSaveWorkItem: DispatchWorkItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -356,7 +357,17 @@ private struct FinishingSessionView: View {
             outcome = store.activeSession?.outcome ?? ""
         }
         .onChange(of: outcome) { newValue in
-            _ = store.updateFinishingOutcome(newValue)
+            outcomeSaveWorkItem?.cancel()
+            let workItem = DispatchWorkItem {
+                _ = store.updateFinishingOutcome(newValue)
+            }
+            outcomeSaveWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
+        }
+        .onDisappear {
+            outcomeSaveWorkItem?.cancel()
+            outcomeSaveWorkItem = nil
+            _ = store.updateFinishingOutcome(outcome)
         }
     }
 }

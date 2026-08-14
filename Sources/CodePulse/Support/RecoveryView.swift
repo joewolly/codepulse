@@ -8,9 +8,11 @@ struct RecoveryView: View {
     @State private var restoreError: String?
 
     private let onRecovered: () -> Void
+    private let onDismiss: () -> Void
 
-    init(onRecovered: @escaping () -> Void) {
+    init(onRecovered: @escaping () -> Void, onDismiss: @escaping () -> Void) {
         self.onRecovered = onRecovered
+        self.onDismiss = onDismiss
     }
 
     var body: some View {
@@ -58,7 +60,13 @@ struct RecoveryView: View {
             }
         }
         .padding(30)
-        .frame(width: 620, height: 300)
+        .frame(
+            minWidth: 620,
+            idealWidth: 620,
+            maxWidth: 620,
+            minHeight: 300,
+            alignment: .topLeading
+        )
         .alert(
             "Restore CodePulse Backup?",
             isPresented: Binding(
@@ -83,7 +91,7 @@ struct RecoveryView: View {
             Text(restoreConfirmationMessage)
         }
         .onExitCommand {
-            NSApp.terminate(nil)
+            onDismiss()
         }
     }
 

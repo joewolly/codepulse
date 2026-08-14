@@ -108,14 +108,18 @@ final class AppWindowCoordinator: ObservableObject {
         if let recoveryWindow, recoveryWindow.isVisible {
             window = recoveryWindow
         } else {
-            let content = RecoveryView { [weak self] in
+            let closeRecovery: () -> Void = { [weak self] in
                 self?.recoveryWindow?.close()
             }
+            let content = RecoveryView(
+                onRecovered: closeRecovery,
+                onDismiss: closeRecovery
+            )
             .environmentObject(store)
             let hostingController = NSHostingController(rootView: content)
             let newWindow = NSWindow(contentViewController: hostingController)
             newWindow.title = "CodePulse Recovery"
-            newWindow.styleMask = [.titled, .closable]
+            newWindow.styleMask = [.titled, .closable, .resizable]
             newWindow.setContentSize(NSSize(width: 620, height: 300))
             newWindow.minSize = NSSize(width: 620, height: 300)
             newWindow.isReleasedWhenClosed = false

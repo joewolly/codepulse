@@ -285,7 +285,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
 
         do {
             let data = try encoder.encode(state)
-            try writeStateDataCritically(data)
+            try writeStateDataCritically(data, expectedState: state)
             loadStatus = .loaded
         } catch let error as StatePersistenceError {
             throw error
@@ -501,7 +501,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         try replaceLiveState(with: temporary, in: storageDirectory)
     }
 
-    private func writeStateDataCritically(_ data: Data) throws {
+    private func writeStateDataCritically(_ data: Data, expectedState: AppState) throws {
         let storageDirectory = try CodePulseManagedStorage.validateStateFile(fileURL)
         try CodePulseManagedStorage.ensurePrivateDirectory(
             storageDirectory,
@@ -515,7 +515,6 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             previousData = nil
         }
 
-        let expectedState = try decoder.decode(AppState.self, from: data)
         let temporary = storageDirectory.appendingPathComponent(
             ".state.critical-\(UUID().uuidString).tmp",
             isDirectory: false
