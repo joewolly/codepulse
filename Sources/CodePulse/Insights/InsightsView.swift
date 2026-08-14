@@ -438,7 +438,7 @@ private struct ActivityChart: View {
                 }
             }
             .frame(height: 190)
-            .accessibilityElement(children: .contain)
+            .accessibilityElement(children: buckets.count <= 31 ? .contain : .ignore)
             .accessibilityLabel(usesWeeklyBuckets ? "Weekly active time chart" : "Daily active time chart")
             .accessibilityValue(accessibilitySummary)
         }
