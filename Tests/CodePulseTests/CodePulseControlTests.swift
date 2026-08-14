@@ -517,6 +517,35 @@ final class CodePulseControlTests: XCTestCase {
         _ = transport.removeResponse(for: postRestore.id)
     }
 
+    func testRecoveryStatusCommandUsesReadOnlyFailureMessage() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{ invalid CodePulse state".utf8).write(to: stateURL, options: .atomic)
+
+        let store = SessionStore(
+            persistence: JSONFilePersistence(fileURL: stateURL),
+            clock: FixedControlClock(start),
+            automaticallyRefresh: false
+        )
+        XCTAssertTrue(store.isInRecoveryMode)
+
+        let response = store.processControlCommand(
+            CodePulseControlCommand(issuedAt: start, action: .status),
+            at: start
+        )
+        XCTAssertEqual(response.result, .internalFailure)
+        XCTAssertEqual(
+            response.message,
+            "CodePulse saved data is unavailable; recover it before requesting status."
+        )
+    }
+
     func testNeverProcessedPreRestoreCommandIsRejectedAfterRelaunch() throws {
         let root = try makeTemporaryDirectory()
         let stateURL = root.appendingPathComponent("CodePulse/state.json")

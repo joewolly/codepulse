@@ -685,11 +685,13 @@ final class SessionStore: ObservableObject {
         let date = date ?? clock.now
         let isMutation = isControlMutation(rawCommand.action)
         if isInRecoveryMode {
-            controlCommandNeedsRetry = true
+            controlCommandNeedsRetry = isMutation
             return CodePulseControlResponse(
                 commandID: rawCommand.id,
                 result: .internalFailure,
-                message: "CodePulse saved data is unavailable; recover it before sending lifecycle commands.",
+                message: isMutation
+                    ? "CodePulse saved data is unavailable; recover it before sending lifecycle commands."
+                    : "CodePulse saved data is unavailable; recover it before requesting status.",
                 status: controlStatus(at: date)
             )
         }
