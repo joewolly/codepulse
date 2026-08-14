@@ -96,7 +96,12 @@ verified recovery backup has been created. Backups can contain paths, bookmarks,
 session notes, and metadata, so treat both exported and automatic recovery files
 as potentially sensitive. No backup is uploaded to CodePulse or a cloud
 service. A moved project whose bookmark cannot resolve remains stored and is
-shown as needing relinking; CodePulse does not silently retarget it.
+shown as needing relinking; CodePulse does not silently retarget it. If the
+existing primary state cannot be decoded, CodePulse keeps the original bytes
+unchanged, disables normal writes, and offers a local recovery window instead
+of showing fresh-install onboarding. An explicit restore preserves those
+unreadable bytes in a private local recovery copy; that copy is not treated as
+a portable backup and is not uploaded.
 
 ## CSV and Markdown exports
 

@@ -112,6 +112,16 @@ CodePulse atomically attempts rollback from the verified pre-restore state and
 reports separately if rollback also fails. User-selected input paths are read
 only; they are not used as managed write destinations.
 
+If an existing primary `state.json` cannot be read, CodePulse enters a
+read-only recovery mode instead of replacing it with a blank state. Explicit
+backup restore first copies the malformed bytes byte-for-byte into a private
+`Backups/Unreadable State ...json` recovery file, verifies that copy, and then
+uses the same candidate validation, atomic replacement, readback, and rollback
+boundaries. Until that explicit restore succeeds, lifecycle, onboarding,
+automation, control-command, and integration writes are blocked. An
+unreadable-state copy is not a portable backup and is not accepted by the
+normal backup decoder.
+
 Codex configuration changes are marked and merged with existing hook entries.
 An explicit user `hooks = false` setting is respected. OpenCode installation
 uses one marked CodePulse-owned file in the global plugin directory and refuses

@@ -105,6 +105,22 @@ The newest five automatic pre-restore recovery backups are retained. A failed
 restore leaves the current data in place or reports whether automatic rollback
 succeeded.
 
+Lifecycle changes are durably committed before CodePulse publishes start,
+pause, resume, finish, save, or discard in memory. A failed lifecycle commit
+leaves the prior session state available for retry. Finishing sessions and
+pending automatic saves remain recoverable across relaunches, and repeated
+save/replay attempts cannot create a second completed record for the same
+session.
+
+If an existing `state.json` cannot be read, CodePulse does not treat the
+installation as fresh and does not overwrite the file. It opens a small
+read-only recovery window with **Restore Backup…**, **Show Data Folder**, and
+**Quit CodePulse**. Before an explicit restore, normal lifecycle, onboarding,
+automation, and local-control writes are disabled. The original unreadable
+bytes are preserved as a private local recovery copy when an explicit restore
+is confirmed, under
+`~/Library/Application Support/CodePulse/Backups/Unreadable State ...json`.
+
 Restore is local-only and does not contact a cloud service. Session Automation
 is restored but left disabled until it is reviewed and deliberately enabled
 again. A backup moved to another Mac may contain project names and saved
