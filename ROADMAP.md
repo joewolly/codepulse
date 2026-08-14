@@ -398,11 +398,19 @@ Add an explicitly redacted export separate from the complete recovery backup.
 Preview included categories, use versioned schema, exclude raw identifiers/paths
 by default, and retain the existing aggregate-only support bundle for diagnostics.
 
+`PORT-003` delivers the shared export infrastructure and the history and Insights
+exporters ahead of this; the redaction and category-preview requirements remain
+this item's own.
+
 ### FEAT-003 — Safe backup import and recovery preview
 
 Only after `PRIV-001` and `PERF-003`: validate format/version/size, show a summary,
 offer non-destructive merge or replace semantics, write a rollback copy, and
 never silently replace newer state.
+
+`PORT-002` is the executable plan for this item, adopting the peer's restore
+workflow and transactional replacement. Non-destructive merge semantics remain
+open; the peer offers replacement only.
 
 ### FEAT-004 — Retention controls
 
@@ -598,6 +606,159 @@ behavioral risk and no user-visible benefit.
 - Separating usage attribution changes the published Insights screenshot; plan the
   replacement images in the same change.
 
+## Phase 3c: Upstream Feature Ports
+
+The peer repository has diverged: this fork is 129 commits ahead and 54 behind.
+Upstream spent those 54 commits on session automation and data portability while
+this line spent its 129 on agent-aware activity tracking and the Phase 0 security
+program. Several upstream results answer work already planned here, so this
+program adopts them deliberately rather than rebuilding them.
+
+**Rebasing or merging upstream history is rejected, not merely deferred.** It
+would rewrite the history `v0.9.0` and `v0.9.1` were released from and invalidate
+Sparkle update provenance for shipped builds; `docs/fork-release-line.md` already
+records that upstream is not a release authority; both remotes carry `v0.8.0` and
+`v0.9.0` tags resolving to different objects, so a rebase leaves tag ancestry
+incoherent; and the two persistence designs are structurally different — this line
+carries a versioned envelope with a migration chain, while upstream's equivalent
+file has no schema versioning at all and instead offers transactional replacement.
+Conflicts there are design decisions, not text merges. Each port is therefore an
+independent, reviewable, revertible branch, using the no-tags fetch discipline
+already documented.
+
+Analysis found less duplication than expected. Upstream has no activity graph, so
+nothing there competes with this line's agent tracking. The export work is
+complementary rather than competing: this line exports usage, token, and cost
+analytics, while upstream exports session history and Insights reports. The backup
+format is shared ancestry that upstream extended and this line did not, making it a
+genuine three-way merge. Only the file-writing infrastructure is true duplication.
+
+Relationship to existing items: `PORT-002` and `PORT-003` substantially deliver
+`FEAT-003` and part of `FEAT-002`; `PORT-004` and `PORT-005` deliver the peer
+capabilities named in `FEAT-006`. Those entries remain the statements of intent;
+these are the executable plans.
+
+### PORT-001 — Project archive state
+
+Pilot the port procedure on the smallest, fully additive change. Archiving stamps
+an optional date on a project and clears it on restore; archived projects leave
+active pickers and default selection while retaining all history. Because the field
+is optional, existing projects decode as active and no migration is required. Adopt
+the peer's tests, which already assert identity preservation across a round trip and
+correct decoding of records written before the field existed.
+
+### PORT-002 — Backup restore and transactional state replacement
+
+Answers `FEAT-003`. This line can already write backups but cannot read them back.
+Adopt the peer's restore workflow, managed storage path, transactional replacement,
+and its more precise error messages, which distinguish a backup written by a newer
+application version from a generally unsupported one.
+
+**The migration chain is a correctness requirement, not a refinement.** The peer's
+restore assumes an unversioned state file. Here, a backup may hold any earlier
+schema version, so restore must decode, run the existing migration chain on the
+restored state, and only then replace transactionally. Adopting transactional
+replacement as written would bypass migration and produce a state file the
+application cannot read.
+
+Backups embed whole application state, so the activity graph round-trips without
+special handling — but nothing upstream exercises that, so prove it with an explicit
+test. Adopt the peer's pre-restore input-replay rejection and recovery-backup
+retention hardening alongside the feature.
+
+### PORT-003 — Exports module
+
+Answers part of `FEAT-002`. Adopt the peer's export infrastructure first — save
+panel handling, deterministic filenames, and file writing — because this line
+currently performs that work inline inside an Insights view. Then move the existing
+usage export onto the shared infrastructure rather than maintaining two paths.
+
+Adopt the peer's history and Insights exporters, but wire them to this line's richer
+history filtering so exports honor the active filter set, and extend them to carry
+developer-tool context, which peer sessions do not have. Preserve this line's export
+privacy posture, where context labels stay behind an opt-in. Verify the peer's field
+escaping neutralizes leading spreadsheet formula characters before adopting it;
+`SEC-004` governs that behavior here and the peer's escaping may only quote fields.
+
+### PORT-004 — Session presets and application automation
+
+Answers the presets and application-automation half of `FEAT-006`. Adopt the whole
+cluster, off by default and explicitly opt-in.
+
+What persists is a user-configured list of application identities. The automation
+model holds no history, log, or recently-used store, and the frontmost-application
+monitor subscribes to a workspace notification, matches against the configured list,
+and retains nothing. It observes transiently to react; it records nothing about what
+was used.
+
+That distinction must reach the documentation. Run a `PRIV-001`-style truthfulness
+pass over the README, privacy, and security documents: the current claim of no
+activity monitoring needs scoping language separating observing-to-react from
+recording, and must state that the subscription exists only while automation is
+enabled. Adopt the peer's five follow-up fixes — malformed state recovery, status
+label preservation, rule validation accessibility, atomic event acknowledgement, and
+rejection of unusable preset targets — rather than rediscovering them.
+
+Sequencing: this cluster touches the session store and settings hardest, and
+`UI-002`/`UI-008` relocate settings sections into the new window. Landing it first
+means integrating its settings twice. The port is unaffected either way; only
+placement is.
+
+### PORT-005 — External control command line
+
+Answers the control-transport half of `FEAT-006`, and depends on `PORT-004` because
+two of its actions start a named preset. Adopt the command-line client, its transport
+client, and the shared protocol, exposing status, preset and manual session start,
+pause, resume, and finish, with machine-readable status output.
+
+Transport is file-based rather than a network socket, and the peer's protocol already
+bounds message size, pending command count and bytes, command age, future clock skew,
+and processed-command retention.
+
+This is the only port that adds a new local attack surface, so it takes a security
+review under this line's own policy **before** merge. Adopt all three peer hardening
+fixes — restricted transport permissions, cleanup of abandoned temporaries, and
+statusless lifecycle responses. Confirm that the transport directory is created with
+restrictive permissions, and that malformed, oversized, or flooded commands cannot
+stall the refresh loop or corrupt state, since every accepted command triggers a full
+synchronous state write.
+
+### Phase 3c verification gate
+
+- Each port is a separate branch off current `main`, with the full suite plus the
+  adopted peer tests green, and a reviewed diff confirming no unintended change to
+  release automation.
+- No port introduces changes under the activity graph; nothing upstream touches it.
+- Records written before an added field still decode, for every port that adds one.
+- Restoring a backup written at an older schema version runs the migration chain
+  before replacement; a truncated or newer-version backup is rejected and leaves live
+  state untouched; a recovery copy is written first; and the activity graph survives a
+  backup and restore cycle intact.
+- Exported fields beginning with spreadsheet formula characters are inert, exports
+  honor active filters, and existing usage export output is unchanged after moving to
+  shared infrastructure.
+- Automation is off after both fresh install and upgrade; disabling it removes the
+  workspace observer; and a session of application switching leaves no observed
+  application data in persisted state, verified by diffing the state file.
+- Control transport restricts directory permissions to the current user, rejects
+  oversized, stale, and future-skewed commands without touching state, and survives a
+  flood beyond its pending limit without stalling refresh or corrupting state.
+- Once all ports land: fresh install, upgrade from the previous release with a real
+  state file, a full backup and restore cycle, automation enabled and disabled, and a
+  disposable-key release preflight confirming `SEC-001` and `SEC-002` still hold.
+
+### Phase 3c risks
+
+- **Regressing Phase 0 security is the top risk.** This line's release hardening lives
+  in the validation workflow, the packaging script, and the release guide — three files
+  the peer also modified, substantially. Never adopt peer versions of these wholesale;
+  port individual improvements only after diffing against `SEC-001` and `SEC-002`.
+- Both remotes carry colliding `v0.8.0` and `v0.9.0` tags, so any fetch without the
+  no-tags discipline creates ambiguous local tags. Use the namespaced inspection form
+  already documented when a peer tag needs local review.
+- Restore is the only port that can destroy user data, because it replaces live state.
+- Divergence keeps growing while these ports land; re-compare before each one.
+
 ## Phase 4: Strategic Expansion
 
 ### FEAT-006 — Selective peer-repository feature porting
@@ -613,6 +774,10 @@ Dependencies: Phase 0–2 stability and a migration design. The independent
 ownership/release decision is already recorded in Phase 0. Risk: duplicated
 automation/timing authority and a new local control boundary. Strategic fit:
 High if kept local, explicit, and reversible.
+
+`PORT-004` and `PORT-005` are the executable plans for the named capabilities,
+and record the decision to adopt them opt-in with a privacy-wording pass. This
+entry remains the standing policy for any future peer evaluation.
 
 ### REL-002 — Developer ID signing and notarization
 
@@ -797,6 +962,11 @@ deletion.
 | UI-007 | Graph-owned session context | P3 | L | UI-005, UI-006, PERF-001 | 3b–4 | Context migrated under a new schema version with verified backfill; legacy fallback deleted. |
 | UI-008 | Management surfaces out of preferences | P2 | M | UI-002 | 3b | Configuration and deletion surfaces sit in the window; preferences hold only preferences. |
 | UI-009 | Shared interface primitives and retirement | P2 | M | UI-002, UI-005 | 3b | Primitives reusable outside Insights; shims removed; screenshot fixture populates the activity graph. |
+| PORT-001 | Project archive state | P2 | S | None | 3c | Optional field; pre-existing records decode as active; round trip preserves identity. |
+| PORT-002 | Backup restore and transactional replace | P2 | L | PRIV-001, PORT-001 | 3c | Older-schema backups migrate before replacement; activity graph survives a round trip; rejected backups leave state untouched. |
+| PORT-003 | Exports module | P2 | M | PORT-002 | 3c | Shared export infrastructure; formula-safe fields; filters honored; existing usage export output unchanged. |
+| PORT-004 | Session presets and application automation | P2 | L | PRIV-001, PORT-003 | 3c | Off by default; no observed-application data persisted; privacy claims match shipped behavior. |
+| PORT-005 | External control command line | P3 | M | PORT-004, security review | 3c | Restricted transport permissions; bounded commands cannot stall refresh or corrupt state. |
 | FEAT-006 | Selective peer feature porting | P3 | XL | Phase 0–2 | 4 | Individually ported features with migrations/security tests. |
 | REL-002 | Developer ID/notarization | P3 | L | Apple authority, SEC-002 | 4 | Signed, notarized, stapled app passes clean-machine Gatekeeper. |
 | FEAT-007 | Validated budgets/alerts | P3 | L | PERF-001, attribution/pricing validation | 4 | Opt-in thresholds never imply balance or billed total. |
@@ -835,6 +1005,10 @@ operational project, XL = coordinated product-line integration.
   surface has a tested assistive-technology equivalent.
 - Starting, finishing, and recording the outcome of a session never require the
   main window.
+- Every adopted peer capability arrives as its own reviewed port with its tests,
+  and no port weakens a Phase 0 security fix or imports peer tags.
+- A backup written by any released version of this line restores into the current
+  version with its activity graph intact.
 
 ## Recommended Execution Order
 
@@ -862,6 +1036,10 @@ operational project, XL = coordinated product-line integration.
     pull-request correlation, the preferences relocation, and finally primitive
     extraction and screenshot regeneration. Defer graph-owned session context
     until retention is defined.
-14. Decide whether to port individual capabilities from the peer repository.
+14. Adopt peer capabilities as individual ports, smallest first: project archive
+    to prove the procedure, then backup restore, exports, presets and application
+    automation, and finally external control. Never adopt peer versions of the
+    validation workflow, packaging script, or release guide wholesale, and always
+    fetch the peer without tags.
 14. Prepare the next version, optionally complete Developer ID/notarization,
     and publish only under separate explicit release authority.
