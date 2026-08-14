@@ -62,6 +62,20 @@ if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then
   echo "error: SwiftPM did not stage Sparkle.framework beside the CodePulse product" >&2
   exit 1
 fi
+if [[ ! -d "$SPARKLE_FRAMEWORK/Versions/Current/Updater.app" ]]; then
+  # SwiftPM's debug staging can omit Sparkle's nested updater app even though
+  # the resolved macOS artifact is complete. Use that artifact so development
+  # bundles exercise the same updater layout as the release packager.
+  SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build/artifacts/sparkle" \
+    -path '*/macos-arm64_x86_64/Sparkle.framework' \
+    -type d \
+    -print \
+    -quit 2>/dev/null || true)"
+fi
+if [[ -z "$SPARKLE_FRAMEWORK" || ! -d "$SPARKLE_FRAMEWORK/Versions/Current/Updater.app" ]]; then
+  echo "error: Sparkle.framework is missing its nested updater app" >&2
+  exit 1
+fi
 if [[ ! -x "$BUILD_HELPER" ]]; then
   echo "error: SwiftPM did not produce the codepulse-integration helper" >&2
   exit 1
@@ -107,7 +121,10 @@ fi
   exit 1
 }
 
-/usr/bin/xattr -cr "$STAGED_APP_BUNDLE"
+# Sparkle's framework contains relative app symlinks that can be reported as
+# missing while xattr recursively walks the temporary bundle. Strict codesign
+# verification below remains the authoritative integrity check.
+/usr/bin/xattr -cr "$STAGED_APP_BUNDLE" >/dev/null 2>&1 || true
 /usr/bin/xattr -r -d com.apple.FinderInfo "$STAGED_APP_BUNDLE" >/dev/null 2>&1 || true
 /usr/bin/xattr -r -d 'com.apple.fileprovider.fpfs#P' "$STAGED_APP_BUNDLE" >/dev/null 2>&1 || true
 /usr/bin/codesign --force --sign - "$STAGED_APP_BUNDLE"

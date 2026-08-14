@@ -1751,12 +1751,19 @@ final class SessionStore: ObservableObject {
                     lifecycleErrorMessage = "CodePulse couldn't save this lifecycle change. Your previous session state is unchanged. Try again or dismiss this message."
                     NSLog("CodePulse critical lifecycle commit failed: %@", error.localizedDescription)
                 }
+                if persistence.loadStatus.requiresRecovery {
+                    isInRecoveryMode = true
+                }
                 return false
             }
             lastCriticalCommitFailed = false
             lifecycleErrorMessage = nil
         } else {
             persistence.save(normalizedState)
+            guard !persistence.loadStatus.requiresRecovery else {
+                isInRecoveryMode = true
+                return false
+            }
         }
 
         state = normalizedState
