@@ -94,7 +94,8 @@ or allow the automatic update check.
    **Export** menu writes the selected period locally; workspace and activity
    labels are opt-in, and paths/source identifiers are never exported.
 10. In **Settings → Integration Data**, review the stored metadata categories,
-    remove one integration's CodePulse-held records when needed, or export a
+    remove one integration's CodePulse-held records when needed, export a
+    full-fidelity recovery backup only for private recovery, or export a
     redacted support bundle for local troubleshooting.
 
 Projects are optional. Adding a project grants CodePulse access only to the
@@ -151,6 +152,11 @@ the macOS `open` command. To verify that the process starts:
 
 For release packaging, use `./script/package_release.sh` and follow
 [`docs/releasing.md`](docs/releasing.md).
+
+This fork has its own release line and treats the historical parent as a peer
+for selective, reviewed feature ports. See
+[`docs/fork-release-line.md`](docs/fork-release-line.md) for the collision-safe
+tag workflow and the reserved `0.9.0` release line.
 
 README screenshots are rendered from the real SwiftUI views with deterministic,
 privacy-safe sample data. Regenerate them with:

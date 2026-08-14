@@ -175,7 +175,7 @@ final class CodexUsageReader {
                   let sessionFingerprint = checkpoint.sessionFingerprint,
                   let info = payload["info"] as? [String: Any],
                   let total = info["total_token_usage"] as? [String: Any] else { return }
-            let totals = tokenCounts(from: total)
+            guard let totals = tokenCounts(from: total) else { return }
             let delta = totals.subtracting(checkpoint.cumulativeTokens)
             checkpoint.cumulativeTokens = totals
             guard delta.hasTokens else { return }
@@ -190,18 +190,21 @@ final class CodexUsageReader {
         }
     }
 
-    private func tokenCounts(from object: [String: Any]) -> UsageTokenCounts {
+    private func tokenCounts(from object: [String: Any]) -> UsageTokenCounts? {
         func token(_ key: String) -> Int? {
             guard let number = object[key] as? NSNumber else { return nil }
-            return max(0, number.intValue)
+            guard let value = Int(exactly: number.int64Value),
+                  Decimal(value) == number.decimalValue else { return nil }
+            return value
         }
-        return UsageTokenCounts(
+        let tokens = UsageTokenCounts(
             input: token("input_tokens"),
             output: token("output_tokens"),
             cachedInput: token("cached_input_tokens"),
             cacheWriteInput: token("cache_write_input_tokens"),
             reasoning: token("reasoning_output_tokens")
         )
+        return UsageResourcePolicy.accepts(tokens) ? tokens : nil
     }
 
     private func date(from value: Any?) -> Date? {

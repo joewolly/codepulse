@@ -77,6 +77,17 @@ the app a Gatekeeper-trusted Apple developer identity. See
 [`docs/releasing.md`](docs/releasing.md) for the packaging, verification, and
 first-launch details.
 
+### 0.9.0 Sparkle signing-key recovery
+
+The private key corresponding to the prior update public key could not be
+recovered from maintainer Keychains or backups. The fork therefore generated a
+new Ed25519 key pair for `0.9.0`; the private half is stored only in the
+protected `production-signing` environment and encrypted maintainer backup.
+Because prior builds are unsigned and cannot authenticate a key transition,
+existing users must manually download and install `0.9.0`. Automatic updates
+resume after that installation. The historical `v0.8.0` tag and release remain
+unchanged.
+
 Release workflows use read-only validation permissions, bounded jobs, cancelled
 superseded validation, SHA-pinned third-party actions, and a manual
 non-publishing preflight. The preflight can validate a Sparkle signing key but

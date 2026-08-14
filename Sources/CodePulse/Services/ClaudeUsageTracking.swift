@@ -150,7 +150,7 @@ final class ClaudeUsageReader {
               let sessionID = (object["sessionId"] ?? object["session_id"]) as? String,
               let message = object["message"] as? [String: Any],
               let usage = message["usage"] as? [String: Any] else { return }
-        let tokens = tokenCounts(from: usage)
+        guard let tokens = tokenCounts(from: usage) else { return }
         guard tokens.hasTokens else { return }
         let recordFingerprint = fingerprint(recordIdentity(sessionID: sessionID, object: object, message: message, tokens: tokens))
         guard !state.processedRecordFingerprints.contains(recordFingerprint) else { return }
@@ -179,18 +179,31 @@ final class ClaudeUsageReader {
         return "claude-usage:" + parts.joined(separator: "\u{1F}")
     }
 
-    private func tokenCounts(from usage: [String: Any]) -> UsageTokenCounts {
+    private func tokenCounts(from usage: [String: Any]) -> UsageTokenCounts? {
         func token(_ key: String) -> Int? {
             guard let number = usage[key] as? NSNumber else { return nil }
-            return max(0, number.intValue)
+            guard let value = Int(exactly: number.int64Value),
+                  Decimal(value) == number.decimalValue else { return nil }
+            return value
         }
-        let nestedCacheCreation = (usage["cache_creation"] as? [String: Any])?.values.compactMap { ($0 as? NSNumber)?.intValue }.reduce(0, +)
-        return UsageTokenCounts(
+        let nestedValues = (usage["cache_creation"] as? [String: Any])?.values.compactMap { value -> Int? in
+            guard let number = value as? NSNumber,
+                  let value = Int(exactly: number.int64Value),
+                  Decimal(value) == number.decimalValue else { return nil }
+            return value
+        } ?? []
+        let nestedCacheCreation = nestedValues.reduce(into: Optional(0)) { total, value in
+            guard let current = total else { return }
+            let (next, overflow) = current.addingReportingOverflow(value)
+            total = overflow ? nil : next
+        }
+        let tokens = UsageTokenCounts(
             input: token("input_tokens"),
             output: token("output_tokens"),
             cachedInput: token("cache_read_input_tokens"),
             cacheWriteInput: token("cache_creation_input_tokens") ?? nestedCacheCreation
         )
+        return UsageResourcePolicy.accepts(tokens) ? tokens : nil
     }
 
     private func decimal(from value: Any?) -> Decimal? {
@@ -256,6 +269,7 @@ final class ClaudeUsageTrackingService: ClaudeUsageTracking {
                     ), catalog: snapshot, calculatedAt: now).map { [$0] } ?? []
                 } ?? []
             )
+            guard sample.isWithinResourceLimits else { continue }
             state.usageSamples.append(sample)
             changed = true
         }
@@ -303,9 +317,16 @@ enum ClaudeUsageRollupCalculator {
             let childSamples = samples.filter { sample in children.contains(where: { $0.id == sample.runID }) }
             let aggregate = direct.filter(\.includesSubagentUsage).max { $0.observedAt < $1.observedAt }
             let included = aggregate.map { [$0] } ?? (direct + childSamples)
-            guard let tokens = included.map(\.tokens).reduce(nil, { partial, next in
-                partial.map { $0.adding(next) } ?? next
-            }) else { return nil }
+            var tokens: UsageTokenCounts?
+            for next in included.map(\.tokens) {
+                if let current = tokens {
+                    guard let combined = current.adding(next) else { return nil }
+                    tokens = combined
+                } else {
+                    tokens = next
+                }
+            }
+            guard let tokens else { return nil }
             return ClaudeUsageRollup(
                 parentRunID: parent.id,
                 childRunIDs: children.map(\.id).sorted { $0.uuidString < $1.uuidString },
@@ -321,17 +342,25 @@ private extension UsageTokenCounts {
         [input, output, cachedInput, cacheWriteInput, reasoning].contains { ($0 ?? 0) > 0 }
     }
 
-    func adding(_ other: UsageTokenCounts) -> UsageTokenCounts {
-        func sum(_ lhs: Int?, _ rhs: Int?) -> Int? {
-            guard lhs != nil || rhs != nil else { return nil }
-            return (lhs ?? 0) + (rhs ?? 0)
+    func adding(_ other: UsageTokenCounts) -> UsageTokenCounts? {
+        func sum(_ lhs: Int?, _ rhs: Int?) -> (value: Int?, valid: Bool) {
+            guard lhs != nil || rhs != nil else { return (nil, true) }
+            let (value, overflow) = (lhs ?? 0).addingReportingOverflow(rhs ?? 0)
+            return (overflow ? nil : value, !overflow)
         }
-        return UsageTokenCounts(
-            input: sum(input, other.input),
-            output: sum(output, other.output),
-            cachedInput: sum(cachedInput, other.cachedInput),
-            cacheWriteInput: sum(cacheWriteInput, other.cacheWriteInput),
-            reasoning: sum(reasoning, other.reasoning)
+        let input = sum(input, other.input)
+        let output = sum(output, other.output)
+        let cachedInput = sum(cachedInput, other.cachedInput)
+        let cacheWriteInput = sum(cacheWriteInput, other.cacheWriteInput)
+        let reasoning = sum(reasoning, other.reasoning)
+        guard input.valid, output.valid, cachedInput.valid, cacheWriteInput.valid, reasoning.valid else { return nil }
+        let result = UsageTokenCounts(
+            input: input.value,
+            output: output.value,
+            cachedInput: cachedInput.value,
+            cacheWriteInput: cacheWriteInput.value,
+            reasoning: reasoning.value
         )
+        return UsageResourcePolicy.accepts(result) ? result : nil
     }
 }

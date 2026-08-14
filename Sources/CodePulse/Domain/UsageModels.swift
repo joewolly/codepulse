@@ -31,6 +31,34 @@ struct UsageTokenCounts: Codable, Equatable {
     }
 }
 
+enum UsageResourcePolicy {
+    static let maximumLabelLength = 256
+    static let earliestObservedAt = Date(timeIntervalSince1970: 946_684_800) // 2000-01-01
+    static let latestObservedAt = Date(timeIntervalSince1970: 4_102_444_800) // 2100-01-01
+
+    static func accepts(_ tokens: UsageTokenCounts) -> Bool {
+        let values = [tokens.input, tokens.output, tokens.cachedInput, tokens.cacheWriteInput, tokens.reasoning]
+        var total = 0
+        for value in values {
+            guard let value else { continue }
+            guard value >= 0, value <= DeveloperToolIntegrationLimits.maximumUsageTokensPerField else { return false }
+            let (nextTotal, overflow) = total.addingReportingOverflow(value)
+            guard !overflow, nextTotal <= DeveloperToolIntegrationLimits.maximumUsageTokensPerSample else { return false }
+            total = nextTotal
+        }
+        return true
+    }
+
+    static func accepts(_ sample: UsageSample) -> Bool {
+        guard accepts(sample.tokens),
+              sample.providerReportedCost.map({ $0 >= 0 && $0 <= DeveloperToolIntegrationLimits.maximumUsageReportedCostUSD }) ?? true,
+              sample.observedAt >= earliestObservedAt,
+              sample.observedAt <= latestObservedAt else { return false }
+        return [sample.model, sample.provider, sample.effort, sample.serviceMode, sample.providerReportedCurrency]
+            .allSatisfy { $0?.count ?? 0 <= maximumLabelLength }
+    }
+}
+
 /// These cases deliberately carry the label with the value. Callers cannot
 /// render an estimate as a provider-reported charge by changing display text.
 enum UsageCostRepresentation: String, Codable, CaseIterable, Identifiable {
@@ -147,6 +175,8 @@ struct UsageSample: Codable, Equatable, Identifiable {
         self.calculatedCosts = calculatedCosts
     }
 
+    var isWithinResourceLimits: Bool { UsageResourcePolicy.accepts(self) }
+
     private enum CodingKeys: String, CodingKey {
         case id, integration, observedAt, sessionFingerprint, runID, workspaceID
         case model, provider, effort, serviceMode, tokens, providerReportedCost
@@ -180,6 +210,7 @@ enum UsageCostPresentation: Equatable {
     case unpriced
 
     static func resolve(sample: UsageSample, preferred: UsageCostRepresentation) -> UsageCostPresentation {
+        guard sample.isWithinResourceLimits else { return .unpriced }
         switch preferred {
         case .providerReported:
             if let amount = sample.providerReportedCost {

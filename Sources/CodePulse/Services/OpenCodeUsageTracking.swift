@@ -122,6 +122,12 @@ final class OpenCodeUsageTrackingService: OpenCodeUsageTracking {
                 providerReportedCost: event.providerReportedCost,
                 providerReportedCurrency: event.providerReportedCost == nil ? nil : "USD"
             )
+            guard base.isWithinResourceLimits else {
+                processing.status = .malformedEvent
+                processing.updatedAt = now
+                changed = true
+                continue
+            }
             let estimates = catalog.flatMap {
                 UsageCostCalculator.calculate(representation: .apiEquivalentEstimate, sample: base, catalog: $0, calculatedAt: now)
             }.map { [$0] } ?? []

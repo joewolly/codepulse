@@ -143,8 +143,12 @@ public final class OpenCodeUsageInbox {
               !event.pluginVersion.isEmpty else { throw OpenCodeUsageInboxError.invalidEvent }
         let counts = [event.inputTokens, event.outputTokens, event.cacheReadTokens, event.cacheWriteTokens, event.reasoningTokens]
         guard counts.contains(where: { ($0 ?? 0) > 0 }),
-              counts.allSatisfy({ ($0 ?? 0) >= 0 }),
-              event.providerReportedCost.map({ $0 >= 0 }) ?? true else {
+              counts.allSatisfy({ value in
+                  guard let value else { return true }
+                  return value >= 0 && value <= DeveloperToolIntegrationLimits.maximumUsageTokensPerField
+              }),
+              counts.reduce(into: 0, { total, value in total += value ?? 0 }) <= DeveloperToolIntegrationLimits.maximumUsageTokensPerSample,
+              event.providerReportedCost.map({ $0 >= 0 && $0 <= DeveloperToolIntegrationLimits.maximumUsageReportedCostUSD }) ?? true else {
             throw OpenCodeUsageInboxError.invalidEvent
         }
     }

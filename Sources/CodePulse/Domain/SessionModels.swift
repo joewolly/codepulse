@@ -422,7 +422,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
     let pauseIntervals: [PauseInterval]
     let gitContext: GitSessionContext?
     let githubContext: GitHubSessionContext?
-    let developerToolContexts: [DeveloperToolSessionContext]
+    var developerToolContexts: [DeveloperToolSessionContext]
 
     init(
         id: UUID,

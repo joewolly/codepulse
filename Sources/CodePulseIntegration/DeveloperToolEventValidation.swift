@@ -9,10 +9,15 @@ public enum DeveloperToolIntegrationLimits {
     public static let maximumPendingEventsPerScan = 256
     public static let maximumInboxFiles = 2_048
     public static let maximumInboxBytes = 16 * 1024 * 1024
+    public static let maximumReceiptFiles = 2_048
+    public static let maximumReceiptBytes = 4 * 1024 * 1024
     public static let maximumEventAge: TimeInterval = 7 * 24 * 60 * 60
     public static let maximumFutureSkew: TimeInterval = 5 * 60
     public static let maximumContextsPerSession = 64
     public static let maximumEventsPerContext = 100_000
+    public static let maximumUsageTokensPerField = 100_000_000
+    public static let maximumUsageTokensPerSample = 100_000_000
+    public static let maximumUsageReportedCostUSD = Decimal(1_000_000)
 }
 
 public enum DeveloperToolEventValidationError: Error, Equatable {

@@ -76,6 +76,28 @@ final class GitServiceTests: XCTestCase {
         )
     }
 
+    func testRepositoryConfiguredHelpersNeverExecuteDuringGitCapture() throws {
+        let repository = try makeRepository()
+        let marker = repository.appendingPathComponent("helper-executed")
+        let helper = repository.appendingPathComponent("hostile-git-helper")
+        try Data("#!/bin/sh\ntouch '\(marker.path)'\n".utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        try write(".gitattributes", contents: "*.txt diff=hostile\n", in: repository)
+        try write("tracked.txt", contents: "before\n", in: repository)
+        try runGit(["add", "--", ".gitattributes", "tracked.txt"], at: repository)
+        try runGit(["commit", "-m", "Configure hostile diff driver"], at: repository)
+        try runGit(["config", "core.fsmonitor", helper.path], at: repository)
+        try runGit(["config", "diff.external", helper.path], at: repository)
+        try runGit(["config", "diff.hostile.textconv", helper.path], at: repository)
+
+        let service = SystemGitService()
+        let start = try XCTUnwrap(service.captureStartSnapshot(at: repository))
+        try write("tracked.txt", contents: "after\n", in: repository)
+        _ = try XCTUnwrap(service.captureFinishSnapshot(for: start))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
     func testDetachedHeadIsRepresentedWithoutManufacturingBranchName() throws {
         let repository = try makeRepository()
         try runGit(["checkout", "--detach", "HEAD"], at: repository)

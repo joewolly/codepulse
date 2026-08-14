@@ -65,6 +65,16 @@ final class CodexUsageTrackingTests: XCTestCase {
         XCTAssertEqual(afterRotation.first?.sessionFingerprint, "session-digest-b")
     }
 
+    func testReaderQuarantinesOutOfRangeCumulativeTokenRecords() throws {
+        let file = try makeFile(contents: sessionLog([
+            token(total: ["input_tokens": 100_000_001])
+        ]))
+        let reader = CodexUsageReader(source: TestSource([file]), fingerprint: testFingerprint)
+        var processing = CodexUsageProcessingState()
+
+        XCTAssertTrue(reader.read(state: &processing, now: Date()).isEmpty)
+    }
+
     func testTrackingCorrelatesOnlyOneMatchingRunAndCalculatesClearlyLabeledEstimates() throws {
         let file = try makeFile(contents: sessionLog([token(total: ["input_tokens": 1_000_000, "output_tokens": 1_000_000, "cached_input_tokens": 1_000_000])]))
         let reader = CodexUsageReader(source: TestSource([file]), fingerprint: testFingerprint)

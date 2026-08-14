@@ -110,6 +110,19 @@ final class ClaudeUsageTrackingTests: XCTestCase {
         XCTAssertEqual(Set(rollup?.childRunIDs ?? []), Set([first.id, second.id]))
     }
 
+    func testRollupQuarantinesCumulativeTokenLimitOverflow() {
+        let parent = makeRun(session: "digest-parent", startedAt: Date())
+        let child = makeRun(session: "digest-child", parent: "digest-parent", startedAt: Date())
+        let graph = state(parent: parent, children: [child]).activityGraph
+
+        let rollups = ClaudeUsageRollupCalculator.rollups(
+            samples: [sample(runID: parent.id, input: 60_000_000), sample(runID: child.id, input: 60_000_000)],
+            graph: graph
+        )
+
+        XCTAssertTrue(rollups.isEmpty)
+    }
+
     func testCostPresentationKeepsReportedSubscriptionAndEstimateStatesDistinct() {
         let reported = sample(runID: nil, input: 1, cost: Decimal(string: "0.50"))
         XCTAssertEqual(UsageCostPresentation.resolve(sample: reported, preferred: .providerReported), .providerReported(amount: Decimal(string: "0.50")!, currency: "USD"))

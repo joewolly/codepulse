@@ -129,9 +129,9 @@ struct SettingsView: View {
                     Label("Export Backup…", systemImage: "arrow.down.doc")
                 }
                 .accessibilityLabel("Export CodePulse Backup")
-                .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
+                .accessibilityHint("Saves a full-fidelity recovery backup that can contain sensitive local CodePulse data")
 
-                Text("Backups include local projects, settings, saved sessions, and any active session. No secrets or external data are included.")
+                Text("Recovery backups include full local state: projects and paths, settings, saved and active sessions, Git/GitHub metadata, and legacy developer-tool identifiers. They exclude credentials and source transcript/file contents, but may contain sensitive user-entered text. Review before sharing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

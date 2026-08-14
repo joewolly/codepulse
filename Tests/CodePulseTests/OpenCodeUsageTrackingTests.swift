@@ -21,6 +21,25 @@ final class OpenCodeUsageTrackingTests: XCTestCase {
         }
         XCTAssertEqual(inbox.pendingEventURLs().count, 1)
     }
+
+    func testUsageInboxRejectsOutOfRangeNumericInput() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("codepulse-opencode-numeric-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let project = directory.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let inbox = OpenCodeUsageInbox(paths: DeveloperToolIntegrationPaths(applicationSupportDirectory: directory))
+
+        for event in [
+            OpenCodeUsageEvent(sessionID: "session", workingDirectory: project.path, messageID: "field", observedAt: Date(), inputTokens: 100_000_001, pluginVersion: OpenCodeUsageEventMapper.parserVersion),
+            OpenCodeUsageEvent(sessionID: "session", workingDirectory: project.path, messageID: "sample", observedAt: Date(), inputTokens: 60_000_000, outputTokens: 60_000_000, pluginVersion: OpenCodeUsageEventMapper.parserVersion),
+            OpenCodeUsageEvent(sessionID: "session", workingDirectory: project.path, messageID: "cost", observedAt: Date(), inputTokens: 1, providerReportedCost: Decimal(1_000_001), pluginVersion: OpenCodeUsageEventMapper.parserVersion)
+        ] {
+            XCTAssertThrowsError(try inbox.write(event)) { error in
+                XCTAssertEqual(error as? OpenCodeUsageInboxError, .invalidEvent)
+            }
+        }
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+    }
     func testConsentDefaultsOffRoundTripsAndDisabledServiceNeverReadsPluginHandoffs() throws {
         XCTAssertFalse(try JSONDecoder().decode(CodePulseSettings.self, from: Data("{}".utf8)).openCodeUsageTrackingEnabled)
         let enabled = try JSONDecoder().decode(

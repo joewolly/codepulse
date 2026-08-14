@@ -80,6 +80,23 @@ final class UsageAttributionTests: XCTestCase {
         XCTAssertEqual(report.timing.combinedWallActive, 3_600, accuracy: 0.001)
     }
 
+    func testReportQuarantinesPersistedOutOfRangeUsageSamples() {
+        let fixture = Fixture()
+        let observedAt = fixture.date("2026-08-13T12:30:00Z")
+        let valid = fixture.sample(runID: fixture.run.id, workspaceID: fixture.workspace.id, observedAt: observedAt, model: "gpt-5", provider: "openai", tokens: UsageTokenCounts(input: 10))
+        let invalid = fixture.sample(runID: fixture.run.id, workspaceID: fixture.workspace.id, observedAt: observedAt, model: "gpt-5", provider: "openai", tokens: UsageTokenCounts(input: 100_000_001), reportedCost: Decimal(1_000_001))
+        let report = UsageAttributionService.report(
+            state: AppState(activityGraph: ActivityGraph(workspaces: [fixture.workspace], activities: [fixture.activity], runs: [fixture.run]), usageSamples: [valid, invalid]),
+            calendar: fixture.calendar,
+            referenceDate: fixture.date("2026-08-13T13:00:00Z"),
+            window: .day
+        )
+
+        XCTAssertEqual(report.samples.count, 1)
+        XCTAssertEqual(report.tokens.total, 10)
+        XCTAssertTrue(UsageCostPresentation.resolve(sample: invalid, preferred: .providerReported) == .unpriced)
+    }
+
     func testCalendarWindowsRespectDayAndMonthBoundaries() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/Denver")!

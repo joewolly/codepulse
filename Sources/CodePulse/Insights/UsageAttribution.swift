@@ -88,15 +88,35 @@ struct UsageTokenTotals: Equatable {
     var cachedInput = 0
     var cacheWriteInput = 0
     var reasoning = 0
+    private(set) var isComplete = true
 
-    var total: Int { input + output + cachedInput + cacheWriteInput + reasoning }
+    var total: Int {
+        [input, output, cachedInput, cacheWriteInput, reasoning].reduce(0) { total, value in
+            let (nextTotal, overflow) = total.addingReportingOverflow(value)
+            return overflow ? Int.max : nextTotal
+        }
+    }
 
     mutating func add(_ tokens: UsageTokenCounts) {
-        input += tokens.input ?? 0
-        output += tokens.output ?? 0
-        cachedInput += tokens.cachedInput ?? 0
-        cacheWriteInput += tokens.cacheWriteInput ?? 0
-        reasoning += tokens.reasoning ?? 0
+        guard isComplete, UsageResourcePolicy.accepts(tokens),
+              let input = Self.add(input, tokens.input ?? 0),
+              let output = Self.add(output, tokens.output ?? 0),
+              let cachedInput = Self.add(cachedInput, tokens.cachedInput ?? 0),
+              let cacheWriteInput = Self.add(cacheWriteInput, tokens.cacheWriteInput ?? 0),
+              let reasoning = Self.add(reasoning, tokens.reasoning ?? 0) else {
+            isComplete = false
+            return
+        }
+        self.input = input
+        self.output = output
+        self.cachedInput = cachedInput
+        self.cacheWriteInput = cacheWriteInput
+        self.reasoning = reasoning
+    }
+
+    private static func add(_ lhs: Int, _ rhs: Int) -> Int? {
+        let (total, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? nil : total
     }
 }
 
@@ -162,6 +182,7 @@ enum UsageAttributionService {
     ) -> UsageAnalyticsReport {
         let interval = window.interval(calendar: calendar, referenceDate: referenceDate)
         let attributed = attribute(samples: state.usageSamples, graph: state.activityGraph)
+            .filter { $0.sample.isWithinResourceLimits }
             .filter { interval.contains($0.sample.observedAt) }
             .filter { matches($0, project: project) }
             .sorted { $0.sample.observedAt < $1.sample.observedAt }

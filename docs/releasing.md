@@ -8,8 +8,8 @@ use Electron, Catalyst, or an installer package.
 
 The current release remains intentionally unsigned and non-notarized. No Apple
 Developer Program account or Developer ID signing credentials are required to
-build it. Starting with v0.4.2, Sparkle provides authenticated in-app updates
-using an Ed25519 update-signing key.
+build it. Sparkle provides authenticated in-app updates using an Ed25519
+update-signing key.
 
 ## Requirements
 
@@ -54,7 +54,7 @@ The version and build number can be overridden without editing source files.
 app bundle; use the GitHub repository that will host the release assets:
 
 ```sh
-CODEPULSE_VERSION=0.4.3 CODEPULSE_BUILD=403 \
+CODEPULSE_VERSION=<version> CODEPULSE_BUILD=<numeric-build> \
 CODEPULSE_RELEASE_REPOSITORY=owner/codepulse \
   ./script/package_release.sh
 ```
@@ -66,7 +66,7 @@ The default release writes:
 ```text
 dist/release/
 ├── CodePulse.app
-├── CodePulse-0.4.3.dmg
+├── CodePulse-<version>.dmg
 └── checksums.txt
 ```
 
@@ -76,9 +76,9 @@ its icon in `Contents/Resources`, and embeds Sparkle in `Contents/Frameworks`.
 
 ## Sparkle updates
 
-CodePulse uses Sparkle for update discovery and installation starting with
-v0.4.2. Existing v0.4.1 installations need to install v0.4.2 manually once;
-subsequent releases can be discovered and installed through Sparkle.
+CodePulse uses Sparkle for update discovery and installation. Existing builds
+published before Sparkle support need one manual update; subsequent compatible
+releases can be discovered and installed through Sparkle.
 
 The source configuration is stored in `Resources/Info.plist`. During release
 packaging, `CODEPULSE_RELEASE_REPOSITORY` determines the staged app's feed URL;
@@ -92,9 +92,9 @@ The staged app contains:
 - `SUPublicEDKey` contains only the public Ed25519 verification key
 - `SUEnableAutomaticChecks` enables scheduled background update checks
 
-The Sparkle private key must never be committed to the repository. The tag
-release workflow expects the exported private key to be stored as a base64
-GitHub Actions repository secret named:
+The Sparkle private key must never be committed to the repository or stored as
+a repository-wide Actions secret. The protected production publish job expects
+the exported private key to be stored as a base64 environment secret named:
 
 ```text
 SPARKLE_PRIVATE_KEY_BASE64
@@ -105,15 +105,34 @@ For example, after exporting the Sparkle private key locally:
 ```sh
 base64 < "$HOME/.config/codepulse/sparkle-private-key" \
   | tr -d '\n' \
-  | gh secret set SPARKLE_PRIVATE_KEY_BASE64 --repo owner/codepulse
+  | gh secret set SPARKLE_PRIVATE_KEY_BASE64 \
+      --repo owner/codepulse \
+      --env production-signing
 ```
 
-The release workflow refuses to publish a release if this secret is missing.
-Each repository that publishes releases needs its own configured secret matching
-the public key embedded in `Resources/Info.plist`.
+Before adding the secret, configure the `production-signing` environment with
+an independent reviewer or a solo-maintainer wait timer, then restrict it to
+protected `v*` release tags. This fork uses a 30-minute wait timer while it has
+one maintainer. Protect `main` with pull-request review and the `macOS
+validation` check, while keeping the bypass list minimal. The unprivileged
+prepare job validates the tag, runs tests, packages, and uploads a short-lived
+candidate. Only after the protected environment gate passes does the publish
+job download the candidate, re-verify the tagged commit is in `main`, and
+access the production key.
+
+Each repository that publishes releases needs its own environment secret
+matching the public key embedded in `Resources/Info.plist`.
 It uses Sparkle's `sign_update` utility with the private key passed over stdin,
 creates `appcast.xml`, uploads the appcast with the DMG and checksum, and then
 downloads the published assets again for verification.
+
+### 0.9.0 signing-key recovery
+
+`0.9.0` begins a new fork signing-key line after the previous private key could
+not be recovered. It is a manual-upgrade release: users of earlier builds must
+download and install `0.9.0` from GitHub Releases. After that installation,
+Sparkle updates resume under the new key. Do not replace, move, or delete the
+historical `v0.8.0` tag or release.
 
 Each appcast item uses the immutable version-tagged GitHub Release asset URL
 for its DMG. The app itself reads the appcast through GitHub's stable latest
@@ -125,11 +144,17 @@ A release is initiated only after its version/build change has been merged to
 `main`:
 
 ```sh
-git checkout main
-git pull --ff-only
-git tag v0.4.3
-git push origin v0.4.3
+git fetch origin main --no-tags
+git switch main
+git pull --ff-only origin main
+git tag v<version>
+git push origin v<version>
 ```
+
+This repository is an independent release line. Do not use an unqualified tag
+fetch from the peer repository: see
+[`fork-release-line.md`](fork-release-line.md) for safe remote inspection and
+selective feature-port procedures.
 
 The `GitHub Release` workflow then:
 
@@ -145,14 +170,16 @@ The `GitHub Release` workflow then:
 
 Do not manually replace release assets after a successful automated release;
 the appcast signature and published archive are expected to stay in sync.
+Every release requires a committed `docs/releases/<version>.md` file; its text
+is published as the GitHub Release notes.
 
 Before creating a real tag, manually dispatch the **Release preflight** GitHub
-Actions workflow with a synthetic semantic version and numeric build. It has
-read-only repository permissions, creates no GitHub Release, and validates the
-test suite, ad-hoc-signed package, DMG checksum, and Sparkle signature before
-uploading a seven-day diagnostic artifact. The workflow requires the same
-`SPARKLE_PRIVATE_KEY_BASE64` secret as a real release, so it validates that the
-key is usable without broadening a pull request's access to that secret.
+Actions workflow with a synthetic semantic version and numeric build. Its inputs
+are validated as environment data before checkout, it has read-only repository
+permissions, creates no GitHub Release, and validates the test suite,
+ad-hoc-signed package, DMG checksum, and Sparkle sign/verify flow with a
+per-run disposable key. It never reads the production signing environment or
+its secret.
 
 All GitHub Actions are pinned to reviewed commit SHAs. Dependabot opens weekly
 Swift and GitHub Actions updates; review these like any release-related change
@@ -187,7 +214,7 @@ flow is also an appropriate way to make the explicit first-launch decision.
 The checksum file uses the release filename:
 
 ```text
-SHA256 (CodePulse-0.4.3.dmg) = <64 hexadecimal characters>
+SHA256 (CodePulse-<version>.dmg) = <64 hexadecimal characters>
 ```
 
 Useful local checks include:
@@ -197,7 +224,7 @@ plutil -p dist/release/CodePulse.app/Contents/Info.plist
 file dist/release/CodePulse.app/Contents/MacOS/CodePulse
 lipo -info dist/release/CodePulse.app/Contents/MacOS/CodePulse
 otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
-shasum -a 256 dist/release/CodePulse-0.4.3.dmg
+shasum -a 256 dist/release/CodePulse-<version>.dmg
 ```
 
 The default package is intentionally unsigned, so `codesign --verify` is
