@@ -265,13 +265,7 @@ final class SessionStore: ObservableObject {
     }
 
     var sessionPresetsAvailableForAutomation: [SessionPreset] {
-        sessionPresetsSorted.filter { preset in
-            guard let projectID = preset.projectID,
-                  let project = state.projects.first(where: { $0.id == projectID }) else {
-                return false
-            }
-            return project.isActive
-        }
+        sessionPresetsSorted.filter(isPresetUsableForAutomation)
     }
 
     func projectsForPresetEditing(_ preset: SessionPreset?) -> [ProjectRecord] {
@@ -285,12 +279,17 @@ final class SessionStore: ObservableObject {
 
     func presetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
         sessionPresetsSorted.filter { preset in
-            guard let projectID = preset.projectID,
-                  let project = state.projects.first(where: { $0.id == projectID }) else {
-                return true
-            }
-            return project.isActive || preset.id == rule?.presetID
+            isPresetUsableForAutomation(preset) || preset.id == rule?.presetID
         }
+    }
+
+    func isPresetUsableForAutomation(_ preset: SessionPreset) -> Bool {
+        guard let projectID = preset.projectID,
+              let project = state.projects.first(where: { $0.id == projectID }),
+              project.isActive else {
+            return false
+        }
+        return DeveloperToolProjectResolver.isUsableFolder(for: project)
     }
 
     func refresh() {
@@ -422,9 +421,7 @@ final class SessionStore: ObservableObject {
         guard state.activeSession == nil,
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
-              let project = state.projects.first(where: { $0.id == projectID }),
-              project.isActive,
-              DeveloperToolProjectResolver.isUsableFolder(for: project),
+              isPresetUsableForAutomation(preset),
               isAutomationTriggerValid(rule.trigger),
               sourceMatchesTrigger(source, trigger: rule.trigger) else {
             return false
@@ -1368,30 +1365,21 @@ final class SessionStore: ObservableObject {
         guard rule.isValid,
               isAutomationTriggerValid(rule.trigger),
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
-              let projectID = preset.projectID,
-              let project = state.projects.first(where: { $0.id == projectID }),
-              project.isActive,
-              let folderPath = DeveloperToolProjectResolver.folderPath(for: project),
-              DeveloperToolProjectResolver.isUsableFolder(for: project) else {
+              isPresetUsableForAutomation(preset) else {
             return false
         }
-        return !folderPath.isEmpty
+        return true
     }
 
     @discardableResult
     func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
         guard rule.isValid,
-              state.sessionPresets.contains(where: { $0.id == rule.presetID }),
+              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               isAutomationTriggerValid(rule.trigger) else { return false }
 
-        if let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
-           let projectID = preset.projectID,
-           let project = state.projects.first(where: { $0.id == projectID }),
-           project.isArchived,
-           state.automationRules.first(where: { $0.id == rule.id })?.presetID != rule.presetID {
-            // Keep an existing rule attached to an archived project so it can
-            // become eligible again after restore, but do not create or
-            // retarget a rule to an archived project.
+        let preservesExistingPreset = state.automationRules
+            .first(where: { $0.id == rule.id })?.presetID == rule.presetID
+        if !preservesExistingPreset && !isPresetUsableForAutomation(preset) {
             return false
         }
         var nextState = state

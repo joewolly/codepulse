@@ -72,6 +72,215 @@ final class SessionPresetAutomationTests: XCTestCase {
         XCTAssertNil(store.activeSession?.automationMetadata)
     }
 
+    func testUpsertAutomationRuleAcceptsNewRuleForUsablePreset() throws {
+        let project = try makeProject(name: "Usable Automation Project")
+        let preset = SessionPreset(name: "Usable Automation Preset", projectID: project.record.id)
+        let rule = SessionAutomationRule(
+            name: "Usable automation rule",
+            trigger: .developerTool(.codex),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [project.record],
+            sessionPresets: [preset]
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        XCTAssertTrue(store.isPresetUsableForAutomation(preset))
+        XCTAssertTrue(store.upsertAutomationRule(rule))
+        XCTAssertTrue(store.isAutomationRuleUsable(rule))
+        XCTAssertEqual(persistence.state.automationRules, [rule])
+    }
+
+    func testUpsertAutomationRuleRejectsNewRuleForUnusablePresetTargets() throws {
+        let validProject = try makeProject(name: "Valid Automation Project")
+        let archivedFolder = try makeProject(name: "Archived Automation Project")
+        let missingFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseMissingRelink-\(UUID().uuidString)", isDirectory: true)
+        let archivedProject = ProjectRecord(
+            id: archivedFolder.record.id,
+            name: archivedFolder.record.name,
+            folderPath: archivedFolder.url.path,
+            createdAt: start,
+            archivedAt: start.addingTimeInterval(-1)
+        )
+        let relinkProject = ProjectRecord(
+            name: "Needs Relink Automation Project",
+            folderPath: missingFolder.path,
+            createdAt: start
+        )
+        let missingProjectID = UUID()
+        let presets = [
+            SessionPreset(name: "No Project", projectID: nil),
+            SessionPreset(name: "Missing Project", projectID: missingProjectID),
+            SessionPreset(name: "Archived Project", projectID: archivedProject.id),
+            SessionPreset(name: "Needs Relink Project", projectID: relinkProject.id)
+        ]
+        let persistence = PresetTestPersistence(AppState(
+            projects: [validProject.record, archivedProject, relinkProject],
+            sessionPresets: presets
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        for preset in presets {
+            let rule = SessionAutomationRule(
+                name: "New \(preset.name) rule",
+                trigger: .developerTool(.codex),
+                presetID: preset.id,
+                minimumSavedDuration: 0
+            )
+
+            XCTAssertFalse(store.isPresetUsableForAutomation(preset), preset.name)
+            XCTAssertFalse(store.upsertAutomationRule(rule), preset.name)
+        }
+        XCTAssertTrue(persistence.state.automationRules.isEmpty)
+    }
+
+    func testExistingRulePreservesArchivedAndNeedsRelinkPresetWhenEdited() throws {
+        let project = try makeProject(name: "Preserved Automation Project")
+        let preset = SessionPreset(name: "Preserved Automation Preset", projectID: project.record.id)
+        let rule = SessionAutomationRule(
+            id: UUID(),
+            name: "Preserved automation rule",
+            isEnabled: true,
+            trigger: .developerTool(.codex),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [project.record],
+            sessionPresets: [preset]
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        XCTAssertTrue(store.upsertAutomationRule(rule))
+
+        _ = try store.archiveProject(id: project.record.id, at: start.addingTimeInterval(1))
+        XCTAssertFalse(store.isAutomationRuleUsable(rule))
+        var archivedEdit = rule
+        archivedEdit.name = "Edited while archived"
+        XCTAssertTrue(store.upsertAutomationRule(archivedEdit))
+        XCTAssertEqual(persistence.state.automationRules.first?.id, rule.id)
+        XCTAssertEqual(persistence.state.automationRules.first?.presetID, preset.id)
+
+        _ = try store.restoreProject(id: project.record.id)
+        let missingFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseRelinkFailure-\(UUID().uuidString)", isDirectory: true)
+        XCTAssertTrue(store.updateProjectFolder(id: project.record.id, folderURL: missingFolder))
+        XCTAssertFalse(store.isAutomationRuleUsable(archivedEdit))
+        var relinkEdit = archivedEdit
+        relinkEdit.name = "Edited while needing relink"
+        XCTAssertTrue(store.upsertAutomationRule(relinkEdit))
+
+        let savedRule = try XCTUnwrap(persistence.state.automationRules.first)
+        XCTAssertEqual(savedRule.id, rule.id)
+        XCTAssertEqual(savedRule.presetID, preset.id)
+        XCTAssertTrue(savedRule.isEnabled)
+    }
+
+    func testExistingRuleRejectsRetargetingToUnusablePresetTargets() throws {
+        let validProject = try makeProject(name: "Retarget Source Project")
+        let archivedFolder = try makeProject(name: "Retarget Archived Project")
+        let archivedProject = ProjectRecord(
+            id: archivedFolder.record.id,
+            name: archivedFolder.record.name,
+            folderPath: archivedFolder.url.path,
+            createdAt: start,
+            archivedAt: start.addingTimeInterval(-1)
+        )
+        let relinkProject = ProjectRecord(
+            name: "Retarget Needs Relink Project",
+            folderPath: FileManager.default.temporaryDirectory
+                .appendingPathComponent("CodePulseRetargetRelink-\(UUID().uuidString)", isDirectory: true)
+                .path,
+            createdAt: start
+        )
+        let validPreset = SessionPreset(name: "Retarget Source Preset", projectID: validProject.record.id)
+        let unusablePresets = [
+            SessionPreset(name: "Retarget No Project", projectID: nil),
+            SessionPreset(name: "Retarget Missing Project", projectID: UUID()),
+            SessionPreset(name: "Retarget Archived Project", projectID: archivedProject.id),
+            SessionPreset(name: "Retarget Needs Relink Project", projectID: relinkProject.id)
+        ]
+        let rule = SessionAutomationRule(
+            name: "Retargetable automation rule",
+            trigger: .developerTool(.codex),
+            presetID: validPreset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [validProject.record, archivedProject, relinkProject],
+            sessionPresets: [validPreset] + unusablePresets
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        XCTAssertTrue(store.upsertAutomationRule(rule))
+        for preset in unusablePresets {
+            var retargetedRule = rule
+            retargetedRule.name = "Retargeted to \(preset.name)"
+            retargetedRule.presetID = preset.id
+
+            XCTAssertFalse(store.upsertAutomationRule(retargetedRule), preset.name)
+            XCTAssertEqual(persistence.state.automationRules, [rule])
+        }
+    }
+
+    func testPresetsForAutomationEditingFiltersUnusableTargetsExceptCurrentPreset() throws {
+        let validProject = try makeProject(name: "Editor Valid Project")
+        let archivedFolder = try makeProject(name: "Editor Archived Project")
+        let archivedProject = ProjectRecord(
+            id: archivedFolder.record.id,
+            name: archivedFolder.record.name,
+            folderPath: archivedFolder.url.path,
+            createdAt: start,
+            archivedAt: start.addingTimeInterval(-1)
+        )
+        let relinkProject = ProjectRecord(
+            name: "Editor Needs Relink Project",
+            folderPath: FileManager.default.temporaryDirectory
+                .appendingPathComponent("CodePulseEditorRelink-\(UUID().uuidString)", isDirectory: true)
+                .path,
+            createdAt: start
+        )
+        let validPreset = SessionPreset(name: "Editor Valid Preset", projectID: validProject.record.id)
+        let unusablePresets = [
+            SessionPreset(name: "Editor No Project", projectID: nil),
+            SessionPreset(name: "Editor Missing Project", projectID: UUID()),
+            SessionPreset(name: "Editor Archived Project", projectID: archivedProject.id),
+            SessionPreset(name: "Editor Needs Relink Project", projectID: relinkProject.id)
+        ]
+        let persistence = PresetTestPersistence(AppState(
+            projects: [validProject.record, archivedProject, relinkProject],
+            sessionPresets: [validPreset] + unusablePresets
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        XCTAssertEqual(
+            Set(store.sessionPresetsAvailableForAutomation.map(\.id)),
+            Set([validPreset.id])
+        )
+        XCTAssertEqual(
+            Set(store.presetsForAutomationEditing(nil).map(\.id)),
+            Set([validPreset.id])
+        )
+
+        for preset in unusablePresets {
+            let rule = SessionAutomationRule(
+                name: "Current \(preset.name) rule",
+                trigger: .developerTool(.codex),
+                presetID: preset.id,
+                minimumSavedDuration: 0
+            )
+
+            XCTAssertEqual(
+                Set(store.presetsForAutomationEditing(rule).map(\.id)),
+                Set([validPreset.id, preset.id]),
+                preset.name
+            )
+        }
+    }
+
     func testApplicationRuleStartsAndSwitchesWithinOneSession() async throws {
         let project = try makeProject(name: "Application Project")
         let preset = SessionPreset(name: "Application Coding", projectID: project.record.id)
