@@ -416,6 +416,188 @@ Provide a local or CI-generated, non-secret report for version/tag alignment,
 tests, package contents, signature verification, manual checklist, and known
 limitations. It should not become an alternate publishing mechanism.
 
+## Phase 3b: Interface Architecture
+
+CodePulse records two overlapping streams of work — the person, and the agents
+they set running — as `Run`s and `Interval`s in the activity graph. The interface
+does not show it. The popover renders four modes into one resizing column, three
+of the four interval states are visually indistinguishable, and navigation is four
+link buttons opening separate windows, one of which is not a scene at all.
+
+This program replaces that with one sidebar window whose **Now** section is a
+swimlane timeline drawn from interval data, and a menu-bar item carrying a live
+day ribbon so the app stays useful without opening anything. `UI-001` comes first
+because the timeline and the ribbon both need interval math, and it retires an
+existing duplication before a third copy appears.
+
+Recorded decisions: the app switches to `.regular` activation only while the main
+window is open; Insights migrates its timing measures onto the activity graph
+while session facts remain joined from `completedSessions` behind one seam;
+`⌥⌘T` opens the window at the last used section; and the ribbon reports all-work
+wall-active time. Keep the menu bar independently sufficient throughout — starting,
+finishing, and capturing an outcome must never require the window.
+
+### UI-001 — Establish interval arithmetic and one state palette
+
+Extract the interval-union algorithm duplicated in `ActivityTimingMetricsCalculator`
+and `ConcurrentActivityMetricsCalculator` into a single `IntervalArithmetic`, preserving
+current behavior exactly — including its dropped zero-length spans, merged touching
+spans, and its unclamped end dates, which disagree with `Interval.duration(at:)`.
+Record that divergence separately rather than fixing it inline. Add graph-wide lane
+and hourly-bucket projections, and one palette mapping each `(RunKind, IntervalState)`
+pair to a color, a symbol, and a fill style, so no state is distinguished by color
+alone. Hourly bucketing must merge before bucketing so concurrent agents cannot
+double-count. Preserve the unused `.ended` interval case; it is persisted and
+removing it breaks decode.
+
+Precondition: publish a monotonic graph-revision signal from the store so interface
+work can invalidate on data change rather than on the one-second clock.
+
+### UI-002 — Consolidate windows into one navigation shell
+
+Replace the popover-plus-three-windows model with a single sidebar window covering
+Now, Journal, Insights, Usage, and Integrations. Own the window from the existing
+coordinator rather than a SwiftUI scene: both real entry points are a Carbon hotkey
+callback and an AppKit popover button, neither of which has a SwiftUI environment,
+and coordinator ownership is single-instance by construction. This retires the
+title-matching reconciliation that can currently produce duplicate Insights windows.
+
+Remove the competing minimum-size and navigation-title modifiers from the re-hosted
+views; the window owns sizing and titling. Contribute an app menu so section
+shortcuts are reachable, and centralize the scattered activation calls into one
+ordered open path — from an accessory app, ordering a window front before activating
+leaves it behind other applications. Retitle the shortcut preference to match its
+new meaning.
+
+### UI-003 — Draw the activity timeline as the Now section
+
+One lane per workspace, with concurrent runs expanding into sub-tracks rather than
+compositing into one bar. Compositing would hide exactly what the activity graph
+exists to record. Offer fixed window presets rather than free zoom, auto-fit within
+the day, and degrade to a real empty state on sparse days rather than an empty grid.
+
+Recompute structure on graph revision and window change only, never on the clock;
+scope the one-second tick to open segments and the playhead. Prefer Swift Charts in
+the window for its accessibility descriptor, with a canvas fallback if mark diffing
+proves slow. Never derive a displayed number from pixel geometry — narrow segments
+are width-clamped and non-additive, so all figures come from `UI-001`.
+
+Ship a list presentation of the same model alongside the graphic. It is both the
+accessible equivalent and the fallback for pathological data.
+
+### UI-004 — Render the menu-bar ribbon and compact popover
+
+Draw the hourly day ribbon as a template status-item image. A template image is a
+mask, so magnitude must be encoded as bar height and alpha, never hue — and the
+numeric total must remain in the button title so the ribbon is never the only way
+to read it. Add a new menu-bar display case rather than repurposing an existing one;
+the setting is persisted and redefining a case silently rewrites user preferences.
+
+Gate redraws behind an explicit refresh policy keyed on hour rollover, graph
+revision, and a minimum interval. The current status item recomputes from whole
+application state at one hertz; left unchanged, a ribbon would regenerate tens of
+thousands of images per day.
+
+The popover keeps the live run list beneath the new strip — the strip summarizes,
+the list carries the affordances.
+
+### UI-005 — Move Insights timing onto the activity graph
+
+Rebuild the seven timing measures of the Insights summary on the activity graph so
+the window's sections stop disagreeing about time; agent work exists only in the
+graph, so today's legacy-backed figures omit it.
+
+The three session-fact sections cannot follow: Git and GitHub context exist only on
+completed sessions, with no counterpart on activities, runs, or workspaces. Keep them
+reading completed sessions through the existing legacy-session join, but place that
+join behind one lookup seam so `UI-007` becomes a backfill plus a deleted fallback
+rather than a scattered edit. State the source of each figure in the interface.
+
+### UI-006 — Correlate agent runs with their pull request
+
+A standalone agent run currently has no GitHub context. Lifecycle events adopt an
+existing activity only when exactly one manual activity is open in the workspace;
+otherwise a fresh activity is minted with no session behind it and nothing to join to.
+The timeline makes that gap conspicuous, because an unattributed agent lane is
+something the user looks at all day.
+
+The inputs already exist graph-side — discovered workspace roots carry a normalized
+repository and branch identity, which is what the existing GitHub context service
+takes. Add an optional GitHub context field to activities and capture it on agent-run
+creation through the existing service and its existing debounce. The field is additive
+and forward-only; historical files decode as absent and require no backfill. Honor the
+established privacy posture: normalized public repository names only, no credentials,
+no unrecognized remotes.
+
+### UI-007 — Extend the graph to own session context
+
+Follow-on to `UI-005` and `UI-006`. Move Git, GitHub, and developer-tool context onto
+the activity graph under a new schema version, backfilling historical activities from
+their completed sessions, then delete the legacy lookup fallback. Sequence this after
+the interface has settled, and treat the backfill as the risk: it must be correct
+against every existing state file, and the whole file is rewritten on every commit.
+
+### UI-008 — Relocate management surfaces out of preferences
+
+Integration configuration, integration data deletion, and workspace discovery are
+management surfaces that need width and grow over time; move them into the window.
+Activity measures are read-only metrics and belong with Insights, not preferences.
+Genuine preferences — launch at login, updates, menu bar, default project, the global
+shortcut, and data recovery — stay in the settings scene. Project management is the
+borderline case; it fights the fixed preferences width but the sidebar is fixed at
+five sections, so record a sixth section as a follow-on rather than forcing it now.
+
+### UI-009 — Extract shared interface primitives
+
+Lift the Insights section, metric, and distribution primitives out of file-private
+scope so other sections can use them, and relocate the shared GitHub context view out
+of the history folder. Separating the usage attribution section is not a mechanical
+move: it owns export state and depends on filter state currently held by its parent,
+so it needs its own. Retire the window-coordinator compatibility shims and regenerate
+the documentation screenshots, whose fixture must first populate the activity graph —
+it currently does not, so today's menu-bar screenshot renders the idle state.
+
+Explicitly deferred: unifying the history and insights project-filter enumerations.
+They appear identical but their option builders differ, so unification carries real
+behavioral risk and no user-visible benefit.
+
+### Phase 3b verification gate
+
+- Interval union, hourly bucketing, lane projection, refresh policy, and palette
+  mapping are unit tested against fixed clocks, including daylight-saving days of
+  twenty-three and twenty-five hours.
+- The union extraction is proven behavior-preserving by porting existing timing
+  expectations before refactoring, not by assertion.
+- Hourly buckets sum exactly to the reported day total under concurrent agent runs.
+- Every run-activity state has a distinct fill style and symbol, enforced by test.
+- A hand-built `.ended` interval produces no drawn segment.
+- Graph-backed Insights timing matches the timeline for a fixture containing both
+  manual and agent runs; existing session-fact expectations still pass.
+- A state file written before `UI-006` decodes with absent activity GitHub context.
+- The main window is constructible from environment objects alone, so screenshots
+  and tests never require a real window.
+- Manual matrix: the global shortcut from another application; repeated presses
+  producing no duplicate window; close and reopen preserving frame; dock icon
+  appearing and disappearing with the window; the ribbon in light, dark, and
+  highlighted states across Retina and non-Retina displays; VoiceOver over the
+  timeline and the status item; increased contrast and differentiate-without-color;
+  and days with zero, one minute, and many concurrent workspaces.
+
+### Phase 3b risks
+
+- Persistence, not rendering, is the latency hazard. Committing state performs a
+  synchronous whole-file encode on the main thread from a one-second tick. The
+  timeline does not cause this but will make it visible. Measure it under signposts;
+  repairing it belongs to `PERF-001` and `ARCH-002`, not here.
+- Retained history is unbounded and the timeline makes that legible to users. Do not
+  bundle a destructive retention change into interface work; it is `PERF-001`.
+- Canvas drawing is invisible to assistive technology. The list presentation and
+  per-lane accessibility summaries are requirements, not enhancements.
+- Activation-policy switching is user-visible: a dock icon and application-switcher
+  entry appear while the window is open.
+- Separating usage attribution changes the published Insights screenshot; plan the
+  replacement images in the same change.
+
 ## Phase 4: Strategic Expansion
 
 ### FEAT-006 — Selective peer-repository feature porting
@@ -606,6 +788,15 @@ deletion.
 | FEAT-003 | Safe backup import | P3 | L | PRIV-001, PERF-003 | 3 | Previewed, bounded, rollback-safe import. |
 | FEAT-004 | User-facing retention controls | P2 | M | PERF-001 | 3 | Transparent defaults and export-before-delete. |
 | FEAT-005 | Release readiness report | P2 | M | SEC-001/002, DOC-002 | 3 | Non-secret evidence bundle gates tagging. |
+| UI-001 | Interval arithmetic and state palette | P2 | M | TEST-001 | 3b | One union implementation with ported expectations; buckets sum to day total; every state distinct without color. |
+| UI-002 | Unified navigation shell | P2 | L | UI-001 | 3b | One window replaces popover-plus-three-windows; duplicate Insights window impossible; shortcut and menu routing verified. |
+| UI-003 | Activity timeline as Now section | P2 | L | UI-001, UI-002 | 3b | Concurrent runs render as distinct tracks; structure recomputes on graph revision only; list presentation equivalent ships with it. |
+| UI-004 | Menu-bar ribbon and compact popover | P2 | M | UI-001 | 3b | Template ribbon legible highlighted and in both appearances; redraws bounded by policy; menu bar remains independently sufficient. |
+| UI-005 | Graph-backed Insights timing | P2 | L | UI-001, TEST-001 | 3b | Timing measures agree with the timeline; session facts reach legacy data through one seam; every figure states its source. |
+| UI-006 | Agent-run pull-request correlation | P2 | M | UI-005 | 3b | Standalone agent runs carry repository and pull request; pre-change state files decode unchanged. |
+| UI-007 | Graph-owned session context | P3 | L | UI-005, UI-006, PERF-001 | 3b–4 | Context migrated under a new schema version with verified backfill; legacy fallback deleted. |
+| UI-008 | Management surfaces out of preferences | P2 | M | UI-002 | 3b | Configuration and deletion surfaces sit in the window; preferences hold only preferences. |
+| UI-009 | Shared interface primitives and retirement | P2 | M | UI-002, UI-005 | 3b | Primitives reusable outside Insights; shims removed; screenshot fixture populates the activity graph. |
 | FEAT-006 | Selective peer feature porting | P3 | XL | Phase 0–2 | 4 | Individually ported features with migrations/security tests. |
 | REL-002 | Developer ID/notarization | P3 | L | Apple authority, SEC-002 | 4 | Signed, notarized, stapled app passes clean-machine Gatekeeper. |
 | FEAT-007 | Validated budgets/alerts | P3 | L | PERF-001, attribution/pricing validation | 4 | Opt-in thresholds never imply balance or billed total. |
@@ -638,6 +829,12 @@ operational project, XL = coordinated product-line integration.
 - README/privacy/security/release/integration docs pass links and match current
   behavior; only one document is labeled the current roadmap.
 - No branch is deleted without a later explicit authorization and fresh review.
+- One interval-union implementation remains, and reported timing measures agree
+  across the menu bar, the timeline, and Insights for the same period.
+- Every activity state is distinguishable without color, and every graphic
+  surface has a tested assistive-technology equivalent.
+- Starting, finishing, and recording the outcome of a session never require the
+  main window.
 
 ## Recommended Execution Order
 
@@ -659,6 +856,12 @@ operational project, XL = coordinated product-line integration.
 10. Define and benchmark retention before refactoring storage or `SessionStore`.
 11. Add architecture/contribution docs and GitHub public/security metadata.
 12. Select Phase 3 product work based on user value and measured limits.
-13. Decide whether to port individual capabilities from the peer repository.
+13. Land the interface program in dependency order: interval arithmetic and the
+    state palette first, then the navigation shell, then the timeline and the
+    menu-bar ribbon in either order, then graph-backed Insights timing, agent
+    pull-request correlation, the preferences relocation, and finally primitive
+    extraction and screenshot regeneration. Defer graph-owned session context
+    until retention is defined.
+14. Decide whether to port individual capabilities from the peer repository.
 14. Prepare the next version, optionally complete Developer ID/notarization,
     and publish only under separate explicit release authority.
