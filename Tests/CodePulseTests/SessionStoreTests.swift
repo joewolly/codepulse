@@ -71,6 +71,23 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.elapsedDuration, 75, accuracy: 0.001)
     }
 
+    func testStateRevisionChangesForStateMutationsButNotClockRefreshes() {
+        let clock = TestClock(start)
+        let store = makeStore(clock: clock)
+        let initialRevision = store.stateRevision
+
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+        XCTAssertGreaterThan(store.stateRevision, initialRevision)
+        let runningRevision = store.stateRevision
+
+        clock.advance(60)
+        store.refresh()
+        XCTAssertEqual(store.stateRevision, runningRevision)
+
+        XCTAssertTrue(store.pause())
+        XCTAssertGreaterThan(store.stateRevision, runningRevision)
+    }
+
     func testPauseStopsActiveDurationAccumulation() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)
@@ -197,6 +214,12 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.startSession(projectID: nil, goal: nil))
         XCTAssertEqual(store.phase, .idle)
         XCTAssertNil(persistence.state.activeSession)
+        XCTAssertEqual(
+            store.lifecycleErrorMessage,
+            "CodePulse couldn't save this lifecycle change. Your previous session state is unchanged. Try again or dismiss this message."
+        )
+        store.dismissLifecycleError()
+        XCTAssertNil(store.lifecycleErrorMessage)
 
         persistence.failCriticalSaves = false
         XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
