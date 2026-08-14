@@ -461,6 +461,14 @@ limitations. It should not become an alternate publishing mechanism.
 
 ## Phase 3b: Interface Architecture
 
+> **Design reference:** [`docs/design/three-design-directions.html`](docs/design/three-design-directions.html) —
+> "CodePulse — Three Design Directions," a self-contained mockup document
+> (open it directly in a browser) comparing three redesign directions for
+> the popover/window (Pulse, Command Deck, and a timeline-forward
+> direction), with effort/gains/costs per direction. Source:
+> https://claude.ai/code/artifact/a382c836-0a40-41b3-a748-704d359e879d.
+> Consult before starting UI-002/UI-003/UI-004 implementation.
+
 CodePulse records two overlapping streams of work — the person, and the agents
 they set running — as `Run`s and `Interval`s in the activity graph. The interface
 does not show it. The popover renders four modes into one resizing column, three
