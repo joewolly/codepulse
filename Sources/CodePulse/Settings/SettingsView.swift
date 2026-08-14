@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @EnvironmentObject private var updateController: SparkleUpdateController
     @EnvironmentObject private var integrationManager: DeveloperToolIntegrationManager
     @State private var projectToRename: ProjectRecord?
@@ -31,6 +32,13 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Button {
+                    windowCoordinator.showOnboarding()
+                } label: {
+                    Label("Show Introduction…", systemImage: "sparkles")
+                }
+                .accessibilityHint("Reopens the CodePulse introduction without resetting settings or session data")
             }
 
             Section("Updates") {
@@ -71,7 +79,7 @@ struct SettingsView: View {
             }
 
             Section("Integrations") {
-                Text("Optional local context enrichment for Codex and OpenCode. CodePulse records only tool/session metadata, timestamps, project directory, and optional model/profile details.")
+                Text("Optional local context enrichment for Codex and OpenCode. CodePulse records only lifecycle/context metadata, timestamps, project directory, and optional model/profile details. It does not collect prompts, messages, transcripts, command output, or source code.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -142,9 +150,7 @@ struct SettingsView: View {
 
             Section("Projects") {
                 if store.state.projects.isEmpty {
-                    Text("Projects are optional. Add one when you want to associate a folder with a session.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    EmptyStateView(content: EmptyStateCopy.projects)
                 } else {
                     if !store.activeProjectsSortedByRecentUse.isEmpty {
                         Text("Active")
@@ -316,13 +322,7 @@ struct SettingsView: View {
     }
 
     private func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = store.addProject(name: url.lastPathComponent, folderURL: url)
+        _ = ProjectFolderSelection.chooseAndAddProject(to: store, prompt: "Add Project")
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {

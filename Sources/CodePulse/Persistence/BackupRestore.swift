@@ -121,6 +121,10 @@ enum BackupRestoreNormalizer {
         var restored = state
         restored.settings.launchAtLogin = launchAtLogin
         restored.settings.automationEnabled = false
+        // Onboarding is informational machine state. Restoring local data
+        // must never turn that data replacement into a mandatory first-run
+        // flow, including when a backup was exported before the flag existed.
+        restored.settings.hasCompletedOnboarding = true
         restored.controlProcessing = nil
         restored.developerToolIntegration = nil
         restored.localInputAcceptanceDate = nil

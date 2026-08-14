@@ -158,6 +158,10 @@ final class SessionStore: ObservableObject {
         state.activeSession?.phase ?? .idle
     }
 
+    var shouldPresentOnboarding: Bool {
+        !state.settings.hasCompletedOnboarding
+    }
+
     var activeAutomationStatusLabel: String? {
         guard let metadata = state.activeSession?.automationMetadata,
               metadata.controlEnabled else {
@@ -1312,6 +1316,13 @@ final class SessionStore: ObservableObject {
         update(&nextState.settings)
         relinquishInvalidAutomation(in: &nextState)
         commit(nextState)
+    }
+
+    func markOnboardingCompleted() {
+        guard !state.settings.hasCompletedOnboarding else { return }
+        updateSettings { settings in
+            settings.hasCompletedOnboarding = true
+        }
     }
 
     var sessionPresetsSorted: [SessionPreset] {

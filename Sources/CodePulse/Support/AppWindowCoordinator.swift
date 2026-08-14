@@ -6,6 +6,7 @@ final class AppWindowCoordinator: ObservableObject {
     private let store: SessionStore
     private var historyWindow: NSWindow?
     private var insightsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
 
     init(store: SessionStore) {
         self.store = store
@@ -58,6 +59,37 @@ final class AppWindowCoordinator: ObservableObject {
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             insightsWindow = newWindow
+            window = newWindow
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func showOnboardingIfNeeded() {
+        guard store.shouldPresentOnboarding else { return }
+        showOnboarding()
+    }
+
+    func showOnboarding() {
+        let window: NSWindow
+        if let onboardingWindow, onboardingWindow.isVisible {
+            window = onboardingWindow
+        } else {
+            let content = OnboardingView { [weak self] in
+                self?.onboardingWindow?.close()
+            }
+            .environmentObject(store)
+            let hostingController = NSHostingController(rootView: content)
+            let newWindow = NSWindow(contentViewController: hostingController)
+            newWindow.title = "Getting Started with CodePulse"
+            newWindow.styleMask = [.titled, .closable]
+            newWindow.setContentSize(NSSize(width: 540, height: 470))
+            newWindow.minSize = NSSize(width: 540, height: 470)
+            newWindow.isReleasedWhenClosed = false
+            newWindow.isRestorable = false
+            newWindow.center()
+            onboardingWindow = newWindow
             window = newWindow
         }
 
