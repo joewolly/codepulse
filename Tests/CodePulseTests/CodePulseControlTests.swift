@@ -660,6 +660,42 @@ final class CodePulseControlTests: XCTestCase {
         XCTAssertTrue(transport.pendingCommandURLs().isEmpty)
     }
 
+    func testMutationCommitFailureRetainsCommandForRetryWithoutRecordingSuccess() throws {
+        let (store, transport, persistence, clock) = makeStore()
+        let command = CodePulseControlCommand(
+            issuedAt: clock.now,
+            action: .startManual(projectName: "CodePulse", sessionType: "coding", goal: nil)
+        )
+
+        persistence.failCriticalSaves = true
+        try transport.writeCommand(command)
+        store.processPendingControlCommands(force: true)
+        let failed = try XCTUnwrap(transport.readResponse(for: command.id))
+        XCTAssertEqual(failed.result, .internalFailure)
+        XCTAssertTrue(transport.pendingCommandURLs().contains { $0.lastPathComponent.contains(command.id.uuidString.lowercased()) })
+        XCTAssertNil(store.activeSession)
+        XCTAssertNil(persistence.state.controlProcessing)
+        _ = transport.removeResponse(for: command.id)
+
+        persistence.failCriticalSaves = false
+        store.processPendingControlCommands(force: true)
+        let succeeded = try XCTUnwrap(transport.readResponse(for: command.id))
+        XCTAssertEqual(succeeded.result, .success)
+        XCTAssertNotNil(store.activeSession)
+        XCTAssertTrue(transport.pendingCommandURLs().isEmpty)
+        XCTAssertEqual(persistence.state.controlProcessing?.processedCommands.count, 1)
+        _ = transport.removeResponse(for: command.id)
+
+        // Re-retaining the same command replays the stored result and cannot
+        // create a second active session.
+        try transport.writeCommand(command)
+        store.processPendingControlCommands(force: true)
+        let replayed = try XCTUnwrap(transport.readResponse(for: command.id))
+        XCTAssertEqual(replayed, succeeded)
+        XCTAssertEqual(store.state.controlProcessing?.processedCommands.count, 1)
+        _ = transport.removeResponse(for: command.id)
+    }
+
     private func makeStore(
         state: AppState? = nil,
         persistence: ControlPersistence? = nil,
@@ -722,6 +758,7 @@ private final class FixedControlClock: SessionClock {
 
 private final class ControlPersistence: StatePersisting {
     var state: AppState
+    var failCriticalSaves = false
 
     init(_ state: AppState) {
         self.state = state
@@ -732,7 +769,16 @@ private final class ControlPersistence: StatePersisting {
     func save(_ state: AppState) {
         self.state = state
     }
+
+    func saveCritical(_ state: AppState) throws {
+        if failCriticalSaves {
+            throw ControlCriticalSaveFailure()
+        }
+        self.state = state
+    }
 }
+
+private struct ControlCriticalSaveFailure: Error {}
 
 private extension CodePulseControlStatus {
     func jsonObject() throws -> [String: Any] {

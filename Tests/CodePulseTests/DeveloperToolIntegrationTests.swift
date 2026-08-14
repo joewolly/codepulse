@@ -661,6 +661,73 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertEqual(store.state.completedSessions.count, 1)
     }
 
+    @MainActor
+    func testEventCommitFailureRetainsInboxAndRelaunchDeduplicatesContext() throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperToolInbox(paths: paths)
+        let project = ProjectRecord(
+            name: "CodePulse",
+            folderPath: projectURL.path,
+            createdAt: now
+        )
+        let event = event(
+            id: UUID(),
+            tool: .codex,
+            sessionID: "retained-event",
+            type: .activity,
+            path: projectURL.path,
+            timestamp: now
+        )
+        try inbox.write(event)
+
+        let active = ActiveSession(
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: now.addingTimeInterval(-60)
+        )
+        let persistence = TestPersistence(AppState(
+            projects: [project],
+            activeSession: active
+        ))
+        persistence.failCriticalSaves = true
+        let firstStore = SessionStore(
+            persistence: persistence,
+            clock: IntegrationTestClock(now),
+            gitService: NoOpGitService(),
+            developerToolEventConsumer: DeveloperToolEventConsumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+
+        XCTAssertTrue(inbox.pendingEventURLs().count == 1)
+        XCTAssertTrue(firstStore.activeSession?.developerToolContexts.isEmpty == true)
+        XCTAssertTrue(persistence.state.activeSession?.developerToolContexts.isEmpty == true)
+
+        persistence.failCriticalSaves = false
+        let relaunched = SessionStore(
+            persistence: persistence,
+            clock: IntegrationTestClock(now.addingTimeInterval(1)),
+            gitService: NoOpGitService(),
+            developerToolEventConsumer: DeveloperToolEventConsumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+        XCTAssertEqual(relaunched.activeSession?.developerToolContexts.first?.eventCount, 1)
+        XCTAssertEqual(relaunched.state.developerToolIntegration?.processedEvents.count, 1)
+
+        let secondRelaunch = SessionStore(
+            persistence: persistence,
+            clock: IntegrationTestClock(now.addingTimeInterval(2)),
+            gitService: NoOpGitService(),
+            developerToolEventConsumer: DeveloperToolEventConsumer(inbox: inbox),
+            automaticallyRefresh: false
+        )
+        XCTAssertEqual(secondRelaunch.activeSession?.developerToolContexts.first?.eventCount, 1)
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+    }
+
     func testCodexInstallerPreservesUserHooksAndIsIdempotent() throws {
         let root = try temporaryDirectory()
         let codexDirectory = root.appendingPathComponent(".codex", isDirectory: true)
@@ -943,6 +1010,7 @@ private extension JSONDecoder {
 
 private final class TestPersistence: StatePersisting {
     var state: AppState
+    var failCriticalSaves = false
 
     init(_ state: AppState = AppState()) {
         self.state = state
@@ -950,6 +1018,23 @@ private final class TestPersistence: StatePersisting {
 
     func load() -> AppState { state }
     func save(_ state: AppState) { self.state = state }
+
+    func saveCritical(_ state: AppState) throws {
+        if failCriticalSaves {
+            throw IntegrationCriticalSaveFailure()
+        }
+        self.state = state
+    }
+}
+
+private struct IntegrationCriticalSaveFailure: Error {}
+
+private final class IntegrationTestClock: SessionClock {
+    let now: Date
+
+    init(_ now: Date) {
+        self.now = now
+    }
 }
 
 private final class NoOpGitService: GitServicing, @unchecked Sendable {
