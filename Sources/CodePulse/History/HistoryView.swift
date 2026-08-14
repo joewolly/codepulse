@@ -256,27 +256,12 @@ private struct HistoryEmptyState: View {
     let clearFilters: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: hasAnySessions ? "line.3.horizontal.decrease.circle" : "clock")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(hasAnySessions ? "No Matching Sessions" : "No Sessions Yet")
-                .font(.headline)
-            Text(hasAnySessions
-                 ? "Try changing your search or filters."
-                 : "Saved coding sessions will appear here.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            if canClearFilters {
-                Button("Clear Filters", action: clearFilters)
-                    .buttonStyle(.link)
-                    .accessibilityLabel("Clear History Filters")
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(30)
-        .accessibilityElement(children: .combine)
+        EmptyStateView(
+            content: EmptyStateCopy.history(hasAnySessions: hasAnySessions),
+            actionTitle: canClearFilters ? "Clear Filters" : nil,
+            action: canClearFilters ? clearFilters : nil
+        )
+        .frame(maxHeight: .infinity)
     }
 }
 

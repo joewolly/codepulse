@@ -65,7 +65,7 @@ struct InsightsView: View {
                         timeframe: timeframe,
                         projectTitle: project.title(options: projectOptions),
                         isAllProjects: project == .allProjects,
-                        hasAnySessions: hasAnySessions
+                        hasSavedSessions: hasSavedSessions
                     )
                 }
             }
@@ -81,8 +81,8 @@ struct InsightsView: View {
         .frame(minWidth: 700, idealWidth: 760, minHeight: 560, idealHeight: 620)
     }
 
-    private var hasAnySessions: Bool {
-        !store.state.completedSessions.isEmpty || store.state.activeSession != nil
+    private var hasSavedSessions: Bool {
+        !store.state.completedSessions.isEmpty
     }
 
     private func exportReport() {
@@ -579,32 +579,17 @@ private struct InsightsEmptyState: View {
     let timeframe: InsightsTimeframe
     let projectTitle: String
     let isAllProjects: Bool
-    let hasAnySessions: Bool
+    let hasSavedSessions: Bool
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: hasAnySessions ? "chart.bar.xaxis" : "clock")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(hasAnySessions ? "No Active Time in This Selection" : "No Sessions Yet")
-                .font(.headline)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        EmptyStateView(
+            content: EmptyStateCopy.insights(
+                hasSavedSessions: hasSavedSessions,
+                timeframeTitle: timeframe.title,
+                projectTitle: projectTitle,
+                isAllProjects: isAllProjects
+            )
+        )
         .frame(maxWidth: .infinity, minHeight: 260)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var message: String {
-        if !hasAnySessions {
-            return "Start a session from the menu bar and your local activity will appear here."
-        }
-        if isAllProjects {
-            return "There is no active session overlap in \(timeframe.title.lowercased()). Try another timeframe."
-        }
-        return "There is no active session overlap for \(projectTitle) in \(timeframe.title.lowercased()). Try another project or timeframe."
     }
 }

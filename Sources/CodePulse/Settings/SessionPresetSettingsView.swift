@@ -13,9 +13,7 @@ struct SessionPresetSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if store.sessionPresetsSorted.isEmpty {
-                Text("No session presets yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                EmptyStateView(content: EmptyStateCopy.presets)
             } else {
                 ForEach(store.sessionPresetsSorted) { preset in
                     let project = preset.projectID.flatMap { id in

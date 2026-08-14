@@ -21,10 +21,10 @@ struct AutomationSettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if store.automationRulesSorted.isEmpty {
-                Text("No automation rules yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let emptyState = EmptyStateCopy.automationEmptyState(
+                ruleCount: store.automationRulesSorted.count
+            ) {
+                EmptyStateView(content: emptyState)
             } else {
                 ForEach(store.automationRulesSorted) { rule in
                     let preset = store.sessionPreset(id: rule.presetID)

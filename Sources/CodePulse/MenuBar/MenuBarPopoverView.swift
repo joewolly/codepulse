@@ -56,10 +56,11 @@ private struct IdleSessionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if store.sessionPresetsAvailableForManualStart.isEmpty {
-                        Label("Saved presets are unavailable until their projects are restored or repaired.", systemImage: "archivebox")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
+                    if EmptyStateCopy.presetAvailability(
+                        savedCount: store.sessionPresetsSorted.count,
+                        availableCount: store.sessionPresetsAvailableForManualStart.count
+                    ) == .savedButUnavailable {
+                        EmptyStateView(content: EmptyStateCopy.unavailablePresets)
                     }
 
                     HStack {

@@ -81,6 +81,13 @@ or allow the automatic update check.
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
 
+## Getting started
+
+On a fresh installation, CodePulse shows a short native introduction covering
+local storage, optional Projects, and the first-session workflow. Accounts,
+developer integrations, and Session Automation are optional. You can revisit
+the introduction later from **Settings → General → Show Introduction…**.
+
 ## Backup and restore
 
 Use **Settings → Data → Export Backup…** to save a portable, pretty-printed JSON
