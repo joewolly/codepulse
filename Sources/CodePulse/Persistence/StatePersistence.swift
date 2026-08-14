@@ -1,8 +1,30 @@
 import Foundation
 
+enum StateLoadStatus: Equatable {
+    case notLoaded
+    case missing
+    case loaded
+    case unreadable
+
+    var isUnreadable: Bool {
+        self == .unreadable
+    }
+}
+
 protocol StatePersisting: AnyObject {
+    var loadStatus: StateLoadStatus { get }
+
     func load() -> AppState
     func save(_ state: AppState)
+    func saveCritical(_ state: AppState) throws
+}
+
+extension StatePersisting {
+    var loadStatus: StateLoadStatus { .loaded }
+
+    func saveCritical(_ state: AppState) throws {
+        save(state)
+    }
 }
 
 struct StateRestoreReceipt {
@@ -33,6 +55,9 @@ enum StateRestoreFailurePoint {
 
 enum StatePersistenceError: LocalizedError {
     case unsafeStoragePath
+    case unreadablePrimaryState
+    case criticalCommitFailed(Error)
+    case criticalCommitRollbackFailed(Error, Error)
     case recoveryBackupWriteFailed(URL, Error)
     case recoveryBackupVerificationFailed(URL, Error)
     case candidateWriteFailed(Error)
@@ -46,6 +71,12 @@ enum StatePersistenceError: LocalizedError {
         switch self {
         case .unsafeStoragePath:
             return "CodePulse could not safely access its local storage path, so your current data was not changed."
+        case .unreadablePrimaryState:
+            return "CodePulse could not safely write while its existing saved data is unreadable. Restore a valid backup first."
+        case .criticalCommitFailed:
+            return "CodePulse could not durably save this lifecycle change. The previous session state remains available."
+        case .criticalCommitRollbackFailed:
+            return "CodePulse could not durably save this lifecycle change or verify the previous session state. Use recovery before continuing."
         case .recoveryBackupWriteFailed:
             return "CodePulse could not create a recovery backup, so your current data was not changed."
         case .recoveryBackupVerificationFailed:
@@ -63,6 +94,12 @@ enum StatePersistenceError: LocalizedError {
         switch self {
         case .unsafeStoragePath:
             return errorDescription ?? "unsafe storage path"
+        case .unreadablePrimaryState:
+            return errorDescription ?? "unreadable primary state"
+        case .criticalCommitFailed(let error):
+            return "critical commit: \(error.localizedDescription)"
+        case .criticalCommitRollbackFailed(let error, let rollbackError):
+            return "critical commit failed (\(error.localizedDescription)); rollback failed: \(rollbackError.localizedDescription)"
         case .recoveryBackupWriteFailed(let url, let error):
             return "recovery backup write at \(url.path): \(error.localizedDescription)"
         case .recoveryBackupVerificationFailed(let url, let error):
@@ -86,6 +123,12 @@ enum StatePersistenceError: LocalizedError {
         switch self {
         case .unsafeStoragePath:
             return "unsafe-storage-path"
+        case .unreadablePrimaryState:
+            return "unreadable-primary-state"
+        case .criticalCommitFailed:
+            return "critical-commit-failed"
+        case .criticalCommitRollbackFailed:
+            return "critical-commit-rollback-failed"
         case .recoveryBackupWriteFailed:
             return "recovery-backup-write-failed"
         case .recoveryBackupVerificationFailed:
@@ -159,6 +202,7 @@ struct AutomaticRecoveryBackupFilename: Equatable {
 
 final class JSONFilePersistence: StatePersisting, StateRestoring {
     let fileURL: URL
+    private(set) var loadStatus: StateLoadStatus = .notLoaded
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let fileManager: FileManager
@@ -186,14 +230,31 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
     }
 
     func load() -> AppState {
-        guard (try? CodePulseManagedStorage.validateStateFile(fileURL)) != nil else {
+        do {
+            _ = try CodePulseManagedStorage.validateStateFile(fileURL)
+        } catch {
+            loadStatus = .unreadable
             NSLog("CodePulse refused to load an unsafe local state path.")
             return AppState()
         }
-        guard let data = try? Data(contentsOf: fileURL),
-              let state = try? decoder.decode(AppState.self, from: data) else {
+
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            loadStatus = .missing
             return AppState()
         }
+
+        let data: Data
+        let state: AppState
+        do {
+            data = try Data(contentsOf: fileURL)
+            state = try decoder.decode(AppState.self, from: data)
+        } catch {
+            loadStatus = .unreadable
+            NSLog("CodePulse could not decode its existing local state; the file was left unchanged.")
+            return AppState()
+        }
+
+        loadStatus = .loaded
         if Self.requiresAutomationMigration(data) {
             // AppState has already normalized legacy rules into stable preset
             // references. Persist that canonical representation once so the
@@ -204,11 +265,32 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
     }
 
     func save(_ state: AppState) {
+        guard !loadStatus.isUnreadable else {
+            NSLog("CodePulse refused to replace an unreadable local state file with a new state.")
+            return
+        }
         do {
             let data = try encoder.encode(state)
             try writeStateDataAtomically(data)
+            loadStatus = .loaded
         } catch {
             NSLog("CodePulse could not save local state: %@", error.localizedDescription)
+        }
+    }
+
+    func saveCritical(_ state: AppState) throws {
+        guard !loadStatus.isUnreadable else {
+            throw StatePersistenceError.unreadablePrimaryState
+        }
+
+        do {
+            let data = try encoder.encode(state)
+            try writeStateDataCritically(data)
+            loadStatus = .loaded
+        } catch let error as StatePersistenceError {
+            throw error
+        } catch {
+            throw StatePersistenceError.criticalCommitFailed(error)
         }
     }
 
@@ -237,9 +319,25 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             throw StatePersistenceError.unsafeStoragePath
         }
 
+        let unreadablePrimaryData: Data?
+        if loadStatus.isUnreadable {
+            do {
+                guard fileManager.fileExists(atPath: fileURL.path) else {
+                    throw ManagedStoragePathError.targetIsNotRegularFile
+                }
+                unreadablePrimaryData = try Data(contentsOf: fileURL)
+            } catch {
+                throw StatePersistenceError.recoveryBackupWriteFailed(fileURL, error)
+            }
+        } else {
+            unreadablePrimaryData = nil
+        }
+
         let recoveryURL: URL
         do {
-            recoveryURL = try nextRecoveryURL(in: recoveryDirectory, exportedAt: exportedAt)
+            recoveryURL = try (unreadablePrimaryData == nil
+                ? nextRecoveryURL(in: recoveryDirectory, exportedAt: exportedAt)
+                : nextUnreadableStateURL(in: recoveryDirectory, exportedAt: exportedAt))
         } catch {
             throw StatePersistenceError.recoveryBackupWriteFailed(
                 recoveryDirectory,
@@ -248,10 +346,14 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
 
         let recoveryData: Data
-        do {
-            recoveryData = try CodePulseBackupCodec.encode(state: recoverySnapshot, exportedAt: exportedAt)
-        } catch {
-            throw StatePersistenceError.recoveryBackupWriteFailed(recoveryURL, error)
+        if let unreadablePrimaryData {
+            recoveryData = unreadablePrimaryData
+        } else {
+            do {
+                recoveryData = try CodePulseBackupCodec.encode(state: recoverySnapshot, exportedAt: exportedAt)
+            } catch {
+                throw StatePersistenceError.recoveryBackupWriteFailed(recoveryURL, error)
+            }
         }
 
         do {
@@ -263,7 +365,13 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
 
         do {
             try inject(.recoveryVerification)
-            try verifyRecoveryBackup(at: recoveryURL, expectedState: recoverySnapshot)
+            if let unreadablePrimaryData {
+                guard try Data(contentsOf: recoveryURL) == unreadablePrimaryData else {
+                    throw VerificationMismatch()
+                }
+            } else {
+                try verifyRecoveryBackup(at: recoveryURL, expectedState: recoverySnapshot)
+            }
         } catch {
             throw StatePersistenceError.recoveryBackupVerificationFailed(recoveryURL, error)
         }
@@ -271,7 +379,9 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         // Retention is deliberately after a new recovery file has been
         // durably written and verified. Only exact generated filenames are
         // eligible; user-exported JSON is never scanned or pruned.
-        pruneAutomaticRecoveryBackups(in: recoveryDirectory, preserving: recoveryURL)
+        if unreadablePrimaryData == nil {
+            pruneAutomaticRecoveryBackups(in: recoveryDirectory, preserving: recoveryURL)
+        }
 
         let candidateData: Data
         do {
@@ -326,7 +436,11 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             guard liveReplacementStarted else { throw error }
 
             do {
-                try rollbackState(to: recoverySnapshot, in: storageDirectory)
+                if let unreadablePrimaryData {
+                    try rollbackRawState(to: unreadablePrimaryData, in: storageDirectory)
+                } else {
+                    try rollbackState(to: recoverySnapshot, in: storageDirectory)
+                }
             } catch let rollbackError as StatePersistenceError {
                 throw StatePersistenceError.restoreFailedRollbackFailed(
                     recoveryURL,
@@ -344,7 +458,11 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         } catch let restoreError {
             if liveReplacementStarted {
                 do {
-                    try rollbackState(to: recoverySnapshot, in: storageDirectory)
+                    if let unreadablePrimaryData {
+                        try rollbackRawState(to: unreadablePrimaryData, in: storageDirectory)
+                    } else {
+                        try rollbackState(to: recoverySnapshot, in: storageDirectory)
+                    }
                 } catch let rollbackError {
                     throw StatePersistenceError.restoreFailedRollbackFailed(
                         recoveryURL,
@@ -357,6 +475,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             throw StatePersistenceError.candidateWriteFailed(restoreError)
         }
 
+        loadStatus = .loaded
         return StateRestoreReceipt(recoveryBackupURL: recoveryURL)
     }
 
@@ -380,6 +499,57 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         defer { try? fileManager.removeItem(at: temporary) }
         try writeTemporaryFile(data, to: temporary, in: storageDirectory)
         try replaceLiveState(with: temporary, in: storageDirectory)
+    }
+
+    private func writeStateDataCritically(_ data: Data) throws {
+        let storageDirectory = try CodePulseManagedStorage.validateStateFile(fileURL)
+        try CodePulseManagedStorage.ensurePrivateDirectory(
+            storageDirectory,
+            through: storageDirectory.deletingLastPathComponent()
+        )
+
+        let previousData: Data?
+        if fileManager.fileExists(atPath: fileURL.path) {
+            previousData = try Data(contentsOf: fileURL)
+        } else {
+            previousData = nil
+        }
+
+        let expectedState = try decoder.decode(AppState.self, from: data)
+        let temporary = storageDirectory.appendingPathComponent(
+            ".state.critical-\(UUID().uuidString).tmp",
+            isDirectory: false
+        )
+        defer { try? fileManager.removeItem(at: temporary) }
+
+        var liveReplacementStarted = false
+        do {
+            try inject(.candidateWrite)
+            try writeTemporaryFile(data, to: temporary, in: storageDirectory)
+            try inject(.candidateVerification)
+            try verifyStateFile(at: temporary, expectedState: expectedState)
+
+            try inject(.liveReplacement)
+            liveReplacementStarted = true
+            try replaceLiveState(with: temporary, in: storageDirectory)
+            try inject(.afterLiveReplacement)
+            try inject(.liveVerification)
+            try verifyStateFile(at: fileURL, expectedState: expectedState)
+        } catch let commitError {
+            guard liveReplacementStarted else {
+                throw StatePersistenceError.criticalCommitFailed(commitError)
+            }
+
+            do {
+                try rollbackRawState(to: previousData, in: storageDirectory)
+            } catch let rollbackError {
+                throw StatePersistenceError.criticalCommitRollbackFailed(
+                    commitError,
+                    rollbackError
+                )
+            }
+            throw StatePersistenceError.criticalCommitFailed(commitError)
+        }
     }
 
     private func writeNewFileAtomically(_ data: Data, to target: URL, in directory: URL) throws {
@@ -451,8 +621,49 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         try verifyStateFile(at: fileURL, expectedState: state)
     }
 
+    private func rollbackRawState(to data: Data?, in directory: URL) throws {
+        try inject(.rollbackWrite)
+        if let data {
+            let temporary = directory.appendingPathComponent(
+                ".state.rollback-\(UUID().uuidString).tmp",
+                isDirectory: false
+            )
+            defer { try? fileManager.removeItem(at: temporary) }
+            try writeTemporaryFile(data, to: temporary, in: directory)
+            try replaceLiveState(with: temporary, in: directory)
+        } else {
+            _ = try CodePulseManagedStorage.validateStateFile(fileURL)
+            if fileManager.fileExists(atPath: fileURL.path) {
+                try fileManager.removeItem(at: fileURL)
+            }
+        }
+        try inject(.rollbackVerification)
+        if let data {
+            guard try Data(contentsOf: fileURL) == data else {
+                throw VerificationMismatch()
+            }
+        } else {
+            guard !fileManager.fileExists(atPath: fileURL.path) else {
+                throw VerificationMismatch()
+            }
+        }
+    }
+
     private func nextRecoveryURL(in directory: URL, exportedAt: Date) throws -> URL {
         let baseName = "Pre-Restore Backup \(Self.recoveryTimestampFormatter.string(from: exportedAt))"
+        for suffix in 0..<10_000 {
+            let name = suffix == 0 ? baseName : "\(baseName)-\(suffix)"
+            let candidate = directory.appendingPathComponent("\(name).json", isDirectory: false)
+            try CodePulseManagedStorage.validateDirectChild(candidate, of: directory)
+            if !fileManager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        throw ManagedStoragePathError.unsafePath
+    }
+
+    private func nextUnreadableStateURL(in directory: URL, exportedAt: Date) throws -> URL {
+        let baseName = "Unreadable State \(Self.recoveryTimestampFormatter.string(from: exportedAt))"
         for suffix in 0..<10_000 {
             let name = suffix == 0 ? baseName : "\(baseName)-\(suffix)"
             let candidate = directory.appendingPathComponent("\(name).json", isDirectory: false)

@@ -394,7 +394,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             projectName: projectName,
             type: type,
             goal: goal,
-            outcome: Self.cleanOptionalText(outcome),
+            outcome: Self.cleanOptionalText(outcome) ?? Self.cleanOptionalText(self.outcome),
             startedAt: startedAt,
             endedAt: endedAt,
             pauseIntervals: pauseIntervals,

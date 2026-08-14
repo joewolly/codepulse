@@ -24,6 +24,30 @@ private final class InMemoryPersistence: StatePersisting {
     func save(_ state: AppState) { self.state = state }
 }
 
+private struct CriticalSaveFailure: Error {}
+
+private final class FailureInjectingPersistence: StatePersisting {
+    var state: AppState
+    var failCriticalSaves = false
+
+    init(_ state: AppState = AppState()) {
+        self.state = state
+    }
+
+    func load() -> AppState { state }
+
+    func save(_ state: AppState) {
+        self.state = state
+    }
+
+    func saveCritical(_ state: AppState) throws {
+        if failCriticalSaves {
+            throw CriticalSaveFailure()
+        }
+        self.state = state
+    }
+}
+
 @MainActor
 final class SessionStoreTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_700_000_000)
@@ -162,6 +186,252 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertFalse(store.finish())
         XCTAssertTrue(store.discardSession())
         XCTAssertEqual(store.phase, .idle)
+    }
+
+    func testManualLifecycleCommitFailureKeepsPriorStateAndRelaunchesThatState() {
+        let clock = TestClock(start)
+        let persistence = FailureInjectingPersistence()
+        let store = makeStore(clock: clock, persistence: persistence)
+
+        persistence.failCriticalSaves = true
+        XCTAssertFalse(store.startSession(projectID: nil, goal: nil))
+        XCTAssertEqual(store.phase, .idle)
+        XCTAssertNil(persistence.state.activeSession)
+
+        persistence.failCriticalSaves = false
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+
+        persistence.failCriticalSaves = true
+        XCTAssertFalse(store.pause())
+        XCTAssertEqual(store.phase, .running)
+
+        persistence.failCriticalSaves = false
+        XCTAssertTrue(store.pause())
+        persistence.failCriticalSaves = true
+        XCTAssertFalse(store.resume())
+        XCTAssertEqual(store.phase, .paused)
+
+        persistence.failCriticalSaves = false
+        XCTAssertTrue(store.resume())
+        persistence.failCriticalSaves = true
+        XCTAssertFalse(store.finish())
+        XCTAssertEqual(store.phase, .running)
+
+        let relaunched = makeStore(clock: clock, persistence: persistence)
+        XCTAssertEqual(relaunched.phase, .running)
+        XCTAssertEqual(relaunched.activeSession?.id, store.activeSession?.id)
+    }
+
+    func testSaveFailureKeepsFinishingSessionAndRetryCreatesOneCompletedRecord() {
+        let clock = TestClock(start)
+        let persistence = FailureInjectingPersistence()
+        let store = makeStore(clock: clock, persistence: persistence)
+
+        XCTAssertTrue(store.startSession(projectID: nil, goal: "Recover"))
+        clock.advance(60)
+        XCTAssertTrue(store.finish())
+        let sessionID = store.activeSession?.id
+
+        persistence.failCriticalSaves = true
+        XCTAssertFalse(store.saveFinishedSession(outcome: "Done"))
+        XCTAssertEqual(store.phase, .finishing)
+        XCTAssertEqual(store.activeSession?.id, sessionID)
+        XCTAssertTrue(persistence.state.activeSession?.id == sessionID)
+        XCTAssertTrue(persistence.state.completedSessions.isEmpty)
+
+        let relaunched = makeStore(clock: clock, persistence: persistence)
+        XCTAssertEqual(relaunched.phase, .finishing)
+        persistence.failCriticalSaves = false
+        XCTAssertTrue(relaunched.saveFinishedSession(outcome: "Done"))
+        XCTAssertEqual(relaunched.state.completedSessions.count, 1)
+        XCTAssertEqual(relaunched.state.completedSessions[0].id, sessionID)
+        XCTAssertFalse(relaunched.saveFinishedSession(outcome: "Done"))
+
+        let savedAgain = makeStore(clock: clock, persistence: persistence)
+        XCTAssertEqual(savedAgain.state.completedSessions.count, 1)
+        XCTAssertEqual(savedAgain.state.completedSessions.first?.id, sessionID)
+        XCTAssertNil(savedAgain.activeSession)
+    }
+
+    func testPersistedFinishingOutcomeSurvivesRelaunchBeforeSave() {
+        let clock = TestClock(start)
+        let persistence = FailureInjectingPersistence()
+        let store = makeStore(clock: clock, persistence: persistence)
+
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+        clock.advance(60)
+        XCTAssertTrue(store.finish())
+        XCTAssertTrue(store.updateFinishingOutcome("  Done  "))
+
+        let relaunched = makeStore(clock: clock, persistence: persistence)
+        XCTAssertEqual(relaunched.activeSession?.outcome, "Done")
+        XCTAssertTrue(relaunched.saveFinishedSession(outcome: nil))
+        XCTAssertEqual(relaunched.state.completedSessions.first?.outcome, "Done")
+    }
+
+    func testDiscardFailureLeavesFinishingSessionRecoverable() {
+        let clock = TestClock(start)
+        let persistence = FailureInjectingPersistence()
+        let store = makeStore(clock: clock, persistence: persistence)
+
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+        XCTAssertTrue(store.finish())
+        let sessionID = store.activeSession?.id
+
+        persistence.failCriticalSaves = true
+        XCTAssertFalse(store.discardSession())
+        XCTAssertEqual(store.phase, .finishing)
+        XCTAssertEqual(store.activeSession?.id, sessionID)
+
+        let relaunched = makeStore(clock: clock, persistence: persistence)
+        XCTAssertEqual(relaunched.phase, .finishing)
+        persistence.failCriticalSaves = false
+        XCTAssertTrue(relaunched.discardSession())
+        XCTAssertNil(relaunched.activeSession)
+        XCTAssertTrue(relaunched.state.completedSessions.isEmpty)
+    }
+
+    func testJSONCriticalCommitFailureRollsBackTheLiveStateFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseCriticalCommit-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        var shouldFail = true
+        let persistence = JSONFilePersistence(
+            fileURL: stateURL,
+            failureInjector: { point in
+                if shouldFail {
+                    if case .afterLiveReplacement = point {
+                        throw CriticalSaveFailure()
+                    }
+                }
+            }
+        )
+        persistence.save(AppState())
+        let before = try Data(contentsOf: stateURL)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+
+        XCTAssertFalse(store.startSession(projectID: nil, goal: nil))
+        XCTAssertNil(store.activeSession)
+        XCTAssertEqual(try Data(contentsOf: stateURL), before)
+        XCTAssertEqual(JSONFilePersistence(fileURL: stateURL).load(), AppState())
+
+        shouldFail = false
+        XCTAssertTrue(store.startSession(projectID: nil, goal: nil))
+        XCTAssertNotNil(JSONFilePersistence(fileURL: stateURL).load().activeSession)
+    }
+
+    func testMissingStateIsFreshButUnreadableStateIsReadOnlyUntilExplicitRestore() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseRecovery-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let missingURL = root.appendingPathComponent("missing/CodePulse/state.json")
+        let missingPersistence = JSONFilePersistence(fileURL: missingURL)
+        let missingStore = SessionStore(
+            persistence: missingPersistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+        XCTAssertEqual(missingPersistence.loadStatus, .missing)
+        XCTAssertFalse(missingStore.isInRecoveryMode)
+        XCTAssertTrue(missingStore.shouldPresentOnboarding)
+
+        let stateURL = root.appendingPathComponent("broken/CodePulse/state.json")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let corruptData = Data("{ not valid CodePulse state".utf8)
+        try corruptData.write(to: stateURL, options: .atomic)
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+        XCTAssertEqual(persistence.loadStatus, .unreadable)
+        XCTAssertTrue(store.isInRecoveryMode)
+        XCTAssertFalse(store.shouldPresentOnboarding)
+        XCTAssertNil(store.addProject(name: "Blocked", folderURL: nil))
+        XCTAssertFalse(store.startSession(projectID: nil, goal: nil))
+        store.markOnboardingCompleted()
+        XCTAssertEqual(try Data(contentsOf: stateURL), corruptData)
+
+        let backupURL = root.appendingPathComponent("valid-backup.json")
+        try CodePulseBackupCodec.encode(
+            state: AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly)),
+            exportedAt: start
+        ).write(to: backupURL, options: .atomic)
+        let candidate = try store.inspectBackup(at: backupURL)
+        let result = try store.restoreBackup(candidate)
+
+        XCTAssertFalse(store.isInRecoveryMode)
+        XCTAssertNil(store.lifecycleErrorMessage)
+        XCTAssertEqual(try Data(contentsOf: result.recoveryBackupURL), corruptData)
+        let restoredData = try Data(contentsOf: stateURL)
+        XCTAssertNotEqual(restoredData, corruptData)
+        XCTAssertEqual(JSONFilePersistence(fileURL: stateURL).load(), store.state)
+    }
+
+    func testUnreadableRestoreFailureRollsBackOriginalBytes() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseRecoveryRollback-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let corruptData = Data("{ truncated CodePulse state".utf8)
+        try corruptData.write(to: stateURL, options: .atomic)
+
+        var shouldFail = true
+        let persistence = JSONFilePersistence(
+            fileURL: stateURL,
+            failureInjector: { point in
+                if shouldFail, case .afterLiveReplacement = point {
+                    throw CriticalSaveFailure()
+                }
+            }
+        )
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+        let backupURL = root.appendingPathComponent("valid-backup.json")
+        try CodePulseBackupCodec.encode(
+            state: AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly)),
+            exportedAt: start
+        ).write(to: backupURL, options: .atomic)
+        let candidate = try store.inspectBackup(at: backupURL)
+
+        XCTAssertThrowsError(try store.restoreBackup(candidate))
+        XCTAssertTrue(store.isInRecoveryMode)
+        XCTAssertEqual(try Data(contentsOf: stateURL), corruptData)
+
+        let recoveryDirectory = stateURL.deletingLastPathComponent().appendingPathComponent("Backups")
+        let preservedCopies = try FileManager.default.contentsOfDirectory(
+            at: recoveryDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("Unreadable State ") }
+        XCTAssertEqual(preservedCopies.count, 1)
+        XCTAssertEqual(try Data(contentsOf: preservedCopies[0]), corruptData)
+
+        shouldFail = false
+        let result = try store.restoreBackup(candidate)
+        XCTAssertFalse(store.isInRecoveryMode)
+        XCTAssertEqual(try Data(contentsOf: result.recoveryBackupURL), corruptData)
     }
 
     func testTransitionDatesRemainMonotonic() {
@@ -414,7 +684,7 @@ final class SessionStoreTests: XCTestCase {
 
     private func makeStore(
         clock: TestClock,
-        persistence: InMemoryPersistence = InMemoryPersistence(),
+        persistence: StatePersisting = InMemoryPersistence(),
         calendar: Calendar? = nil
     ) -> SessionStore {
         SessionStore(
