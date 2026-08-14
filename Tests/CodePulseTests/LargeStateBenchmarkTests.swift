@@ -12,12 +12,12 @@ final class LargeStateBenchmarkTests: XCTestCase {
             let referenceDate = LargeStateFixture.referenceDate
             let query = HistoryQuery(searchText: "fixture-model-2")
 
-            let encode = timed {
-                _ = try? LargeStateFixture.encodedData(for: state)
+            let encode = try timedThrowing {
+                _ = try LargeStateFixture.encodedData(for: state)
             }
             let encoded = try LargeStateFixture.encodedData(for: state)
-            let decode = timed {
-                _ = try? LargeStateFixture.decodedState(from: encoded)
+            let decode = try timedThrowing {
+                _ = try LargeStateFixture.decodedState(from: encoded)
             }
 
             let storeInit = timed {
@@ -95,6 +95,13 @@ final class LargeStateBenchmarkTests: XCTestCase {
     private func timed(_ operation: () -> Void) -> TimeInterval {
         let start = DispatchTime.now().uptimeNanoseconds
         operation()
+        let end = DispatchTime.now().uptimeNanoseconds
+        return Double(end - start) / 1_000_000
+    }
+
+    private func timedThrowing(_ operation: () throws -> Void) rethrows -> TimeInterval {
+        let start = DispatchTime.now().uptimeNanoseconds
+        try operation()
         let end = DispatchTime.now().uptimeNanoseconds
         return Double(end - start) / 1_000_000
     }
