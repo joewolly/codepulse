@@ -76,6 +76,15 @@ baselines for the current canonical operations, not acceptance thresholds.
 | 10,000 | 7,763,268 | 68.63 | 70.71 | 0.28 | 68.83 | 29.53 | 45.05 | 954.54 | 35.63 |
 | 50,000 | 38,867,590 | 336.87 | 353.99 | 0.18 | 343.14 | 164.74 | 220.76 | 4,828.89 | 35.83 |
 
+After the view-snapshot change, the same direct-operation harness measured
+10,000 sessions at 7,763,220 bytes (68.46 ms encode, 72.41 ms decode,
+68.87 ms History query, 31.02 ms grouping, 45.45 ms Insights, 956.50 ms CSV,
+35.62 ms Markdown) and 50,000 sessions at 38,867,542 bytes (341.82 ms encode,
+360.74 ms decode, 349.31 ms History query, 161.55 ms grouping, 224.15 ms
+Insights, 4,853.58 ms CSV, 36.35 ms Markdown). These are within normal local
+run variance; the optimization intentionally removes repeated calls from
+one-second view invalidations rather than changing a canonical operation.
+
 The targeted performance change is view-level recomputation scope: History
 and Insights now retain derived snapshots and refresh them on state/filter or
 calendar-bucket changes rather than on every published elapsed-time tick. The
