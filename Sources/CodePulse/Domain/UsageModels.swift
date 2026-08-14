@@ -389,11 +389,19 @@ final class PricingCatalogStore {
     private let cacheURL: URL
     private let fileManager: FileManager
 
-    init(bundledURL: URL? = Bundle.module.url(forResource: "pricing-catalog", withExtension: "json"), cacheURL: URL, fileManager: FileManager = .default) throws {
+    init(bundledURL: URL? = nil, cacheURL: URL, fileManager: FileManager = .default) throws {
+        let bundledURL = bundledURL ?? Self.defaultBundledURL()
         guard let bundledURL else { throw PricingCatalogStoreError.bundledCatalogUnavailable }
         self.bundledURL = bundledURL
         self.cacheURL = cacheURL
         self.fileManager = fileManager
+    }
+
+    private static func defaultBundledURL() -> URL? {
+        if let appResource = Bundle.main.url(forResource: "pricing-catalog", withExtension: "json") {
+            return appResource
+        }
+        return Bundle.module.url(forResource: "pricing-catalog", withExtension: "json")
     }
 
     func current(at date: Date) throws -> PricingCatalogSnapshot {

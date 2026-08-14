@@ -59,6 +59,21 @@ CODEPULSE_RELEASE_REPOSITORY=owner/codepulse \
   ./script/package_release.sh
 ```
 
+Before committing a packaging or startup change, build a synthetic candidate,
+apply an ad-hoc signature, and launch that staged app. Confirm the process
+remains running before creating a tag:
+
+```sh
+CODEPULSE_VERSION=<next-version> CODEPULSE_BUILD=<next-build> \
+  ./script/package_release.sh --app-only --adhoc-sign
+open -n dist/release/CodePulse.app
+pgrep -x CodePulse
+```
+
+This local smoke check exercises the staged app bundle and its resources; it is
+separate from the non-publishing GitHub release preflight and from distribution
+signing/notarization.
+
 ## Output
 
 The default release writes:

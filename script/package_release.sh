@@ -15,6 +15,8 @@ APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 APP_HELPER_BINARY="$APP_HELPERS/codepulse-integration"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+SWIFTPM_RESOURCE_BUNDLE_NAME="CodePulse_CodePulse.bundle"
+APP_PRICING_CATALOG="$APP_RESOURCES/pricing-catalog.json"
 VOLUME_NAME="CodePulse"
 
 APP_ONLY=false
@@ -36,6 +38,7 @@ ARM64_HELPER=""
 X86_64_HELPER=""
 UNIVERSAL_HELPER=""
 SPARKLE_FRAMEWORK=""
+SWIFTPM_RESOURCE_BUNDLE=""
 SWIFT_BUILD_JOBS=""
 
 usage() {
@@ -193,9 +196,11 @@ build_release() {
   ARM64_BINARY="$arm64_bin_path/$APP_NAME"
   ARM64_HELPER="$arm64_bin_path/codepulse-integration"
   SPARKLE_FRAMEWORK="$arm64_bin_path/Sparkle.framework"
+  SWIFTPM_RESOURCE_BUNDLE="$arm64_bin_path/$SWIFTPM_RESOURCE_BUNDLE_NAME"
   [[ -x "$ARM64_BINARY" ]] || die "SwiftPM did not produce the arm64 release executable: $ARM64_BINARY"
   [[ -x "$ARM64_HELPER" ]] || die "SwiftPM did not produce the arm64 integration helper: $ARM64_HELPER"
   [[ -d "$SPARKLE_FRAMEWORK" ]] || die "SwiftPM did not stage Sparkle.framework beside the arm64 release product"
+  [[ -d "$SWIFTPM_RESOURCE_BUNDLE" ]] || die "SwiftPM did not stage the CodePulse resource bundle: $SWIFTPM_RESOURCE_BUNDLE"
 
   echo "Building optimized x86_64 release binary"
   run_swift_build \
@@ -250,6 +255,7 @@ stage_app_bundle() {
   cp "$UNIVERSAL_HELPER" "$APP_HELPER_BINARY"
   cp "$INFO_TEMPLATE" "$INFO_PLIST"
   cp "$ICON_SOURCE" "$APP_RESOURCES/CodePulse.icns"
+  cp "$SWIFTPM_RESOURCE_BUNDLE/pricing-catalog.json" "$APP_PRICING_CATALOG"
   /usr/bin/ditto "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
   chmod 755 "$APP_BINARY"
   chmod 755 "$APP_HELPER_BINARY"
@@ -289,6 +295,7 @@ verify_bundle() {
   [[ -x "$APP_BINARY" ]] || die "missing executable: $APP_BINARY"
   [[ -x "$APP_HELPER_BINARY" ]] || die "missing integration helper: $APP_HELPER_BINARY"
   [[ -f "$APP_RESOURCES/CodePulse.icns" ]] || die "missing app icon resource"
+  [[ -f "$APP_PRICING_CATALOG" ]] || die "missing bundled pricing catalog"
   [[ -d "$APP_FRAMEWORKS/Sparkle.framework" ]] || die "missing embedded Sparkle.framework"
   [[ -L "$APP_FRAMEWORKS/Sparkle.framework/Versions/Current" ]] || die "Sparkle.framework symlinks were not preserved"
   /usr/bin/plutil -lint "$INFO_PLIST" >/dev/null || die "staged Info.plist is invalid"
@@ -391,6 +398,7 @@ smoke_validate_artifact() {
   mounted_volume_name="$(/usr/sbin/diskutil info "$MOUNT_POINT" | /usr/bin/awk -F': ' '/Volume Name/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2; exit}')"
   [[ "$mounted_volume_name" == "$VOLUME_NAME" ]] || die "unexpected DMG volume name: $mounted_volume_name"
   [[ -d "$MOUNT_POINT/$APP_NAME.app" ]] || die "DMG does not contain $APP_NAME.app"
+  [[ -f "$MOUNT_POINT/$APP_NAME.app/Contents/Resources/pricing-catalog.json" ]] || die "DMG app does not contain the bundled pricing catalog"
   [[ -d "$MOUNT_POINT/$APP_NAME.app/Contents/Frameworks/Sparkle.framework" ]] || die "DMG app does not contain Sparkle.framework"
   [[ -x "$MOUNT_POINT/$APP_NAME.app/Contents/Helpers/codepulse-integration" ]] || die "DMG app does not contain the integration helper"
   [[ -L "$MOUNT_POINT/Applications" ]] || die "DMG does not contain an Applications symlink"
