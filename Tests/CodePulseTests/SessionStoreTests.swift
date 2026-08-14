@@ -718,6 +718,45 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: result.recoveryBackupURL), corruptData)
     }
 
+    func testUnreadableRestorePreservesSubsecondAcceptanceBoundary() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseRecoveryFractional-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let corruptData = Data("{ truncated CodePulse state".utf8)
+        try corruptData.write(to: stateURL, options: .atomic)
+
+        let restoreDate = start.addingTimeInterval(0.375123)
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(restoreDate),
+            automaticallyRefresh: false
+        )
+        let backupURL = root.appendingPathComponent("valid-backup.json")
+        try CodePulseBackupCodec.encode(
+            state: AppState(),
+            exportedAt: start
+        ).write(to: backupURL, options: .atomic)
+
+        let candidate = try store.inspectBackup(at: backupURL)
+        let result = try store.restoreBackup(candidate)
+
+        XCTAssertFalse(store.isInRecoveryMode)
+        XCTAssertEqual(store.state.localInputAcceptanceDate, restoreDate)
+        XCTAssertEqual(
+            JSONFilePersistence(fileURL: stateURL).load().localInputAcceptanceDate,
+            start
+        )
+        XCTAssertEqual(try Data(contentsOf: result.recoveryBackupURL), corruptData)
+    }
+
     func testTransitionDatesRemainMonotonic() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

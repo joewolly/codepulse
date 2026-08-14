@@ -680,8 +680,13 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
 
     private func verifyStateFile(at url: URL, expectedState: AppState) throws {
         let data = try Data(contentsOf: url)
-        let decoded = try decoder.decode(AppState.self, from: data)
-        guard decoded == expectedState else {
+        // Verify the exact canonical bytes written for the expected state.
+        // JSONEncoder's ISO 8601 strategy intentionally normalizes Date
+        // values to whole seconds, so decoding and comparing Date instances
+        // would reject an otherwise valid critical write whose in-memory
+        // timestamp has subsecond precision.
+        let expectedData = try encoder.encode(expectedState)
+        guard data == expectedData else {
             throw VerificationMismatch()
         }
     }
