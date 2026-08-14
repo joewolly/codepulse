@@ -303,6 +303,23 @@ Review changes from 2.9.2 through current 2.9.x, update in a dedicated change,
 commit the chosen resolution policy, run unit/TSan/package tests, and validate
 appcast signing with the safe preflight. Do not auto-merge the dependency PR.
 
+### DEP-002 — Retire the deprecated Node.js 20 runtime
+
+Inventory repository workflows, release tooling, local development scripts, and
+any external automation configuration for Node.js 20 usage. Upgrade each
+identified use to the supported Node LTS selected at execution time, including
+action/runtime upgrades when an action embeds the deprecated runtime. Record
+the chosen major version and compatibility rationale, refresh lockfiles only
+where they are authoritative, and run the affected automation or its closest
+non-publishing equivalent. This repository currently has no checked-in Node
+runtime or package-manager configuration, so the first deliverable is an
+evidence-backed inventory rather than an assumed source edit.
+
+- **Success:** no owned workflow, tool, or documented setup path runs Node.js
+  20; the selected supported LTS and validation evidence are recorded; external
+  automation outside this repository is explicitly listed if it still needs an
+  owner change.
+
 ### TEST-001 — Add a safety regression suite
 
 Create a named test group covering all Phase 0/1 defects. Preserve source-level
@@ -569,6 +586,7 @@ deletion.
 | PERF-004 | Bounded usage enumeration | P1 | M | None | 1 | Fixed scan work and fair eventual processing. |
 | UX-001 | Safe session discard | P1 | S | None | 1 | Confirmation/undo prevents single-action loss. |
 | DEP-001 | Sparkle patch update | P1 | S | SEC-001, SEC-002 | 1 | Normal/TSan/package/update-signature checks pass. |
+| DEP-002 | Retire deprecated Node.js 20 | P1 | S | Automation inventory | 1 | No owned Node 20 runtime remains; supported LTS and validation evidence are recorded. |
 | TEST-001 | Safety regression suite | P1 | M | Phase 0/1 fixes | 1 | Every confirmed defect has a failing-before/passing-after test or static assertion. |
 | PERF-001 | Retention and compaction policy | P1 | L | BUG-002–004, measurements | 2 | State growth and latency remain within documented budgets. |
 | ARCH-001 | Decompose SessionStore | P2 | L | TEST-001 | 2 | Responsibilities extracted with unchanged behavior/tests. |
