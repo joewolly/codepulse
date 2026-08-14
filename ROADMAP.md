@@ -38,6 +38,10 @@ local macOS product.
 
 ## Phase 0: Immediate Safety and Repository Hygiene
 
+> **Status: complete (2026-08-14).** All nine implementation-plan deliveries
+> merged to `origin/main` and the Phase 0 verification gate passed. See the
+> completion record at the end of this phase.
+
 No new release or production-key preflight should occur until this phase is
 complete.
 
@@ -237,6 +241,37 @@ usage overflow matrix, backup/deletion round trips, and documentation/link
 checks. Re-run the protected disposable-key preflight after the final workflow
 commit. Record exact commit SHAs, GitHub settings evidence, test commands/results,
 and any environment-only limitations; do not tag or publish as part of the gate.
+
+### Phase 0 completion record
+
+Closed on 2026-08-14 from the final integration state on `origin/main`
+(`e2fdb2bd4ce18fab75f34a66f546ca8eb67048e2`).
+
+Merged deliveries and evidence SHAs:
+
+| Delivery | IDs | Merged commit |
+| --- | --- | --- |
+| 1 — Secret-free, injection-safe preflight | SEC-001 | `50fea3a` |
+| 2 — Protected production-signing workflow | SEC-002 | `1b24a44`, `060ed29` |
+| 3 — Non-executing Git command profile | SEC-003 | `9f67c82` |
+| 4 — Bounded receipt ledger | BUG-001 | `9c35c18`, `64981d5` |
+| 5 — Shared usage numeric policy and checked aggregation | BUG-002 | `390e4d8` |
+| 6 — Truthful full-fidelity recovery backup | PRIV-001 | `f1388f1` |
+| 7 — Complete per-integration deletion | PRIV-002 | `69724cf` |
+| 8 — Independent-release-line documentation | GH-005 | `e483ffb` |
+| 9 — Repository and signing controls | GH-002 | admin checkpoints; `a90b061` |
+
+Gate results:
+
+- `swift test`: 230 tests passed (1 skipped).
+- `swift test --sanitize=thread`: 230 tests passed (1 skipped).
+- Hostile-input/static release-preflight check runs in validation via
+  `./script/check_release_preflight.sh` (wired by `50fea3a`, portable on
+  runner Bash by `a90b061`).
+- Receipt quota/concurrency, usage overflow, and backup/deletion contract
+  regressions are present in the merged suites above.
+- No branches deleted; both `v0.8.0` tags remain untouched; `Info.plist`
+  bumped only for the `0.9.0` release candidate (`060ed29`).
 
 ## Phase 1: Stabilization
 
