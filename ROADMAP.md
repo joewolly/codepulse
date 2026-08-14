@@ -306,14 +306,16 @@ appcast signing with the safe preflight. Do not auto-merge the dependency PR.
 ### DEP-002 — Retire the deprecated Node.js 20 runtime
 
 Inventory repository workflows, release tooling, local development scripts, and
-any external automation configuration for Node.js 20 usage. Upgrade each
-identified use to the supported Node LTS selected at execution time, including
-action/runtime upgrades when an action embeds the deprecated runtime. Record
-the chosen major version and compatibility rationale, refresh lockfiles only
-where they are authoritative, and run the affected automation or its closest
-non-publishing equivalent. This repository currently has no checked-in Node
-runtime or package-manager configuration, so the first deliverable is an
-evidence-backed inventory rather than an assumed source edit.
+any external automation configuration for Node.js 20 usage. Prioritize the
+GitHub Action(s) called out by GitHub's Node 20 deprecation annotation: identify
+the annotated pinned action SHA, upgrade it to a SHA-pinned compatible release
+that uses the supported runtime, or replace it if no supported release exists.
+Record the chosen action/runtime version and compatibility rationale, refresh
+lockfiles only where they are authoritative, and run the affected workflow or
+its closest non-publishing equivalent. This repository currently has no
+checked-in Node runtime or package-manager configuration, so the first
+deliverable is an evidence-backed automation inventory rather than an assumed
+application source edit.
 
 - **Success:** no owned workflow, tool, or documented setup path runs Node.js
   20; the selected supported LTS and validation evidence are recorded; external
