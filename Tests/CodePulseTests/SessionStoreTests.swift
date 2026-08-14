@@ -48,6 +48,35 @@ private final class FailureInjectingPersistence: StatePersisting {
     }
 }
 
+private final class RecoveryReportingPersistence: StatePersisting {
+    var state: AppState
+    private(set) var loadStatus: StateLoadStatus = .loaded
+    var failCriticalSaves = false
+    var failNonCriticalSaves = false
+
+    init(_ state: AppState = AppState()) {
+        self.state = state
+    }
+
+    func load() -> AppState { state }
+
+    func save(_ state: AppState) {
+        if failNonCriticalSaves {
+            loadStatus = .unreadable
+            return
+        }
+        self.state = state
+    }
+
+    func saveCritical(_ state: AppState) throws {
+        if failCriticalSaves {
+            loadStatus = .unreadable
+            throw CriticalSaveFailure()
+        }
+        self.state = state
+    }
+}
+
 @MainActor
 final class SessionStoreTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_700_000_000)
@@ -86,6 +115,44 @@ final class SessionStoreTests: XCTestCase {
 
         XCTAssertTrue(store.pause())
         XCTAssertGreaterThan(store.stateRevision, runningRevision)
+    }
+
+    func testCriticalCommitFailureThatMakesPersistenceUnreadableEntersRecovery() {
+        let persistence = RecoveryReportingPersistence()
+        persistence.failCriticalSaves = true
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+        let originalState = store.state
+        let originalRevision = store.stateRevision
+
+        XCTAssertFalse(store.startSession(projectID: nil, goal: "Release validation"))
+        XCTAssertTrue(store.isInRecoveryMode)
+        XCTAssertFalse(store.shouldPresentOnboarding)
+        XCTAssertEqual(store.state, originalState)
+        XCTAssertEqual(store.stateRevision, originalRevision)
+    }
+
+    func testNonCriticalCommitFailureThatMakesPersistenceUnreadableDoesNotPublishState() {
+        let persistence = RecoveryReportingPersistence()
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+        let originalState = store.state
+        let originalRevision = store.stateRevision
+        persistence.failNonCriticalSaves = true
+
+        store.updateSettings { settings in
+            settings.menuBarDisplay = .timerOnly
+        }
+
+        XCTAssertTrue(store.isInRecoveryMode)
+        XCTAssertEqual(store.state, originalState)
+        XCTAssertEqual(store.stateRevision, originalRevision)
     }
 
     func testPauseStopsActiveDurationAccumulation() {

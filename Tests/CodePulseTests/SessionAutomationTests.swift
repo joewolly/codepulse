@@ -476,6 +476,7 @@ final class SessionAutomationTests: XCTestCase {
         persistence.failCriticalSaves = true
         clock.now = start.addingTimeInterval(2)
         fixture.store.refresh()
+        try await settle(fixture.store)
         XCTAssertEqual(fixture.store.phase, .paused)
         XCTAssertFalse(persistence.state.activeSession?.automationMetadata?.pendingAutomaticSave ?? true)
 
