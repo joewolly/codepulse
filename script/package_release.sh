@@ -36,7 +36,7 @@ ARM64_HELPER=""
 X86_64_HELPER=""
 UNIVERSAL_HELPER=""
 SPARKLE_FRAMEWORK=""
-SWIFT_BUILD_ARGS=()
+SWIFT_BUILD_JOBS=""
 
 usage() {
   cat <<'USAGE'
@@ -129,7 +129,15 @@ validate_environment() {
 
   if [[ -n "${CODEPULSE_SWIFT_JOBS:-}" ]]; then
     [[ "$CODEPULSE_SWIFT_JOBS" =~ ^[1-9][0-9]*$ ]] || die "CODEPULSE_SWIFT_JOBS must be a positive integer"
-    SWIFT_BUILD_ARGS=(-j "$CODEPULSE_SWIFT_JOBS")
+    SWIFT_BUILD_JOBS="$CODEPULSE_SWIFT_JOBS"
+  fi
+}
+
+run_swift_build() {
+  if [[ -n "$SWIFT_BUILD_JOBS" ]]; then
+    swift build -j "$SWIFT_BUILD_JOBS" "$@"
+  else
+    swift build "$@"
   fi
 }
 
@@ -164,22 +172,19 @@ build_release() {
   local arm64_bin_path x86_64_bin_path
 
   echo "Building optimized arm64 release binary"
-  swift build \
-    "${SWIFT_BUILD_ARGS[@]}" \
+  run_swift_build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
     --product "$APP_NAME"
-  swift build \
-    "${SWIFT_BUILD_ARGS[@]}" \
+  run_swift_build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
     --product codepulse-integration
-  arm64_bin_path="$(swift build \
-    "${SWIFT_BUILD_ARGS[@]}" \
+  arm64_bin_path="$(run_swift_build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
@@ -193,22 +198,19 @@ build_release() {
   [[ -d "$SPARKLE_FRAMEWORK" ]] || die "SwiftPM did not stage Sparkle.framework beside the arm64 release product"
 
   echo "Building optimized x86_64 release binary"
-  swift build \
-    "${SWIFT_BUILD_ARGS[@]}" \
+  run_swift_build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
     --product "$APP_NAME"
-  swift build \
-    "${SWIFT_BUILD_ARGS[@]}" \
+  run_swift_build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
     --product codepulse-integration
-  x86_64_bin_path="$(swift build \
-    "${SWIFT_BUILD_ARGS[@]}" \
+  x86_64_bin_path="$(run_swift_build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
