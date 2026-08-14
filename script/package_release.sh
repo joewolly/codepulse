@@ -36,6 +36,7 @@ ARM64_HELPER=""
 X86_64_HELPER=""
 UNIVERSAL_HELPER=""
 SPARKLE_FRAMEWORK=""
+SWIFT_BUILD_ARGS=()
 
 usage() {
   cat <<'USAGE'
@@ -52,6 +53,7 @@ Options:
 Release overrides:
   CODEPULSE_VERSION=0.4.2 CODEPULSE_BUILD=402 ./script/package_release.sh
   CODEPULSE_RELEASE_REPOSITORY=owner/repository ./script/package_release.sh
+  CODEPULSE_SWIFT_JOBS=1 ./script/package_release.sh
 USAGE
 }
 
@@ -124,6 +126,11 @@ validate_environment() {
 
   BUNDLE_ID="$(/usr/bin/plutil -extract CFBundleIdentifier raw "$INFO_TEMPLATE")"
   [[ "$BUNDLE_ID" == "com.joewolly.CodePulse" ]] || die "unexpected bundle identifier in Info.plist: $BUNDLE_ID"
+
+  if [[ -n "${CODEPULSE_SWIFT_JOBS:-}" ]]; then
+    [[ "$CODEPULSE_SWIFT_JOBS" =~ ^[1-9][0-9]*$ ]] || die "CODEPULSE_SWIFT_JOBS must be a positive integer"
+    SWIFT_BUILD_ARGS=(-j "$CODEPULSE_SWIFT_JOBS")
+  fi
 }
 
 determine_version() {
@@ -158,18 +165,21 @@ build_release() {
 
   echo "Building optimized arm64 release binary"
   swift build \
+    "${SWIFT_BUILD_ARGS[@]}" \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
     --product "$APP_NAME"
   swift build \
+    "${SWIFT_BUILD_ARGS[@]}" \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
     --product codepulse-integration
   arm64_bin_path="$(swift build \
+    "${SWIFT_BUILD_ARGS[@]}" \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
@@ -184,18 +194,21 @@ build_release() {
 
   echo "Building optimized x86_64 release binary"
   swift build \
+    "${SWIFT_BUILD_ARGS[@]}" \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
     --product "$APP_NAME"
   swift build \
+    "${SWIFT_BUILD_ARGS[@]}" \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
     --product codepulse-integration
   x86_64_bin_path="$(swift build \
+    "${SWIFT_BUILD_ARGS[@]}" \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
@@ -255,6 +268,10 @@ stage_app_bundle() {
 optionally_adhoc_sign() {
   if [[ "$ADHOC_SIGN" == "1" || "$ADHOC_SIGN" == "true" ]]; then
     echo "Applying optional ad-hoc signature"
+    # Sign loose nested executables before sealing the enclosing bundle.
+    # `codesign` will not infer this ordering for a helper that is copied into
+    # Contents/Helpers after SwiftPM has produced it.
+    /usr/bin/codesign --force --sign - "$APP_HELPER_BINARY"
     /usr/bin/codesign --force --sign - "$APP_BUNDLE"
     clear_bundle_metadata
   else
@@ -263,7 +280,7 @@ optionally_adhoc_sign() {
 }
 
 verify_bundle() {
-  local bundle_id bundle_executable display_name package_type short_version bundle_version minimum_system ls_ui_element icon_file architecture_info feed_url public_ed_key
+  local bundle_id bundle_executable display_name package_type short_version bundle_version minimum_system ls_ui_element icon_file architecture_info feed_url public_ed_key expected_public_ed_key
 
   [[ -d "$APP_BUNDLE/Contents" ]] || die "missing app bundle Contents directory"
   [[ -f "$INFO_PLIST" ]] || die "missing app Info.plist"
@@ -285,6 +302,7 @@ verify_bundle() {
   icon_file="$(/usr/bin/plutil -extract CFBundleIconFile raw "$INFO_PLIST")"
   feed_url="$(/usr/bin/plutil -extract SUFeedURL raw "$INFO_PLIST")"
   public_ed_key="$(/usr/bin/plutil -extract SUPublicEDKey raw "$INFO_PLIST")"
+  expected_public_ed_key="$(/usr/bin/plutil -extract SUPublicEDKey raw "$INFO_TEMPLATE")"
 
   [[ "$bundle_id" == "$BUNDLE_ID" ]] || die "bundle identifier mismatch: $bundle_id"
   [[ "$bundle_executable" == "$APP_NAME" ]] || die "executable metadata mismatch: $bundle_executable"
@@ -296,7 +314,7 @@ verify_bundle() {
   [[ "$ls_ui_element" == "true" ]] || die "LSUIElement must remain enabled: $ls_ui_element"
   [[ "$icon_file" == "CodePulse" ]] || die "unexpected icon declaration: $icon_file"
   [[ "$feed_url" == "$UPDATE_FEED_URL" ]] || die "unexpected Sparkle feed URL: $feed_url"
-  [[ "$public_ed_key" == "+jAzQL9fmsKPC9KfxBQU2NuNMaLfHucplFLk78UgoVo=" ]] || die "unexpected Sparkle public EdDSA key"
+  [[ -n "$public_ed_key" && "$public_ed_key" == "$expected_public_ed_key" ]] || die "staged Sparkle public EdDSA key does not match source metadata"
 
   architecture_info="$(/usr/bin/lipo -info "$APP_BINARY")"
   [[ "$architecture_info" == *arm64* && "$architecture_info" == *x86_64* ]] || die "final executable is not Universal 2: $architecture_info"

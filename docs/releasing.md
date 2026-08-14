@@ -126,6 +126,14 @@ It uses Sparkle's `sign_update` utility with the private key passed over stdin,
 creates `appcast.xml`, uploads the appcast with the DMG and checksum, and then
 downloads the published assets again for verification.
 
+### 0.9.0 signing-key recovery
+
+`0.9.0` begins a new fork signing-key line after the previous private key could
+not be recovered. It is a manual-upgrade release: users of earlier builds must
+download and install `0.9.0` from GitHub Releases. After that installation,
+Sparkle updates resume under the new key. Do not replace, move, or delete the
+historical `v0.8.0` tag or release.
+
 Each appcast item uses the immutable version-tagged GitHub Release asset URL
 for its DMG. The app itself reads the appcast through GitHub's stable latest
 release asset URL.
@@ -162,6 +170,8 @@ The `GitHub Release` workflow then:
 
 Do not manually replace release assets after a successful automated release;
 the appcast signature and published archive are expected to stay in sync.
+Every release requires a committed `docs/releases/<version>.md` file; its text
+is published as the GitHub Release notes.
 
 Before creating a real tag, manually dispatch the **Release preflight** GitHub
 Actions workflow with a synthetic semantic version and numeric build. Its inputs

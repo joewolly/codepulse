@@ -163,7 +163,7 @@ jobs:
           set -euo pipefail
 
           [[ -n "${SPARKLE_PRIVATE_KEY_BASE64:-}" ]] || {
-            echo "error: SPARKLE_PRIVATE_KEY_BASE64 repository secret is not configured" >&2
+            echo "error: SPARKLE_PRIVATE_KEY_BASE64 production environment secret is not configured" >&2
             exit 1
           }
 
@@ -260,11 +260,17 @@ jobs:
 
           TAG="${GITHUB_REF_NAME}"
           DMG="dist/release/CodePulse-${VERSION}.dmg"
+          RELEASE_NOTES="docs/releases/${VERSION}.md"
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "error: GitHub Release $TAG already exists" >&2
             exit 1
           fi
+
+          [[ -f "$RELEASE_NOTES" ]] || {
+            echo "error: missing release notes: $RELEASE_NOTES" >&2
+            exit 1
+          }
 
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
@@ -274,7 +280,7 @@ jobs:
             --verify-tag \
             --fail-on-no-commits \
             --title "CodePulse $TAG" \
-            --generate-notes \
+            --notes-file "$RELEASE_NOTES" \
             --latest
 
       - name: Verify published assets
