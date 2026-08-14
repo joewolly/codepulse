@@ -533,7 +533,14 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             try replaceLiveState(with: temporary, in: storageDirectory)
             try inject(.afterLiveReplacement)
             try inject(.liveVerification)
-            try verifyStateFile(at: fileURL, expectedState: expectedState)
+            // The candidate was already decoded and checked before the live
+            // replacement. Reuse those encoded bytes for the live check so a
+            // critical lifecycle commit does not decode the complete state a
+            // second time, while still detecting an unexpected live-file
+            // mutation before the commit is accepted.
+            guard try Data(contentsOf: fileURL) == data else {
+                throw VerificationMismatch()
+            }
         } catch let commitError {
             guard liveReplacementStarted else {
                 throw StatePersistenceError.criticalCommitFailed(commitError)
