@@ -111,7 +111,7 @@ parse_options() {
 validate_environment() {
   [[ "$(uname -s)" == "Darwin" ]] || die "release packaging requires macOS"
 
-  for command in swift lipo hdiutil plutil file shasum xattr open diskutil ditto install_name_tool otool; do
+  for command in swift lipo hdiutil plutil file shasum xattr open diskutil ditto install_name_tool otool strip; do
     require_command "$command"
   done
 
@@ -150,6 +150,9 @@ build_release() {
   local arm64_scratch="$TEMP_DIR/build-arm64"
   local x86_64_scratch="$TEMP_DIR/build-x86_64"
   local arm64_bin_path x86_64_bin_path
+  local source_prefix_map="$ROOT_DIR=/CodePulse"
+  local arm64_scratch_prefix_map="$TEMP_DIR=/CodePulseBuild"
+  local x86_64_scratch_prefix_map="$TEMP_DIR=/CodePulseBuild"
 
   echo "Building optimized arm64 release binary"
   swift build \
@@ -157,25 +160,57 @@ build_release() {
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
-    --product "$APP_NAME"
+    --product "$APP_NAME" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map"
   swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
-    --product codepulse-integration
+    --product codepulse-integration \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map"
   swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
-    --product codepulsectl
+    --product codepulsectl \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map"
   arm64_bin_path="$(swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$arm64_scratch" \
     --configuration release \
     --triple arm64-apple-macosx13.0 \
-    --show-bin-path)"
+    --show-bin-path \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$arm64_scratch_prefix_map")"
   ARM64_BINARY="$arm64_bin_path/$APP_NAME"
   ARM64_HELPER="$arm64_bin_path/codepulse-integration"
   ARM64_CONTROL="$arm64_bin_path/codepulsectl"
@@ -191,25 +226,57 @@ build_release() {
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
-    --product "$APP_NAME"
+    --product "$APP_NAME" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map"
   swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
-    --product codepulse-integration
+    --product codepulse-integration \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map"
   swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
-    --product codepulsectl
+    --product codepulsectl \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map"
   x86_64_bin_path="$(swift build \
     --package-path "$ROOT_DIR" \
     --scratch-path "$x86_64_scratch" \
     --configuration release \
     --triple x86_64-apple-macosx13.0 \
-    --show-bin-path)"
+    --show-bin-path \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -file-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$source_prefix_map" \
+    -Xswiftc -debug-prefix-map \
+    -Xswiftc "$x86_64_scratch_prefix_map")"
   X86_64_BINARY="$x86_64_bin_path/$APP_NAME"
   X86_64_HELPER="$x86_64_bin_path/codepulse-integration"
   X86_64_CONTROL="$x86_64_bin_path/codepulsectl"
@@ -264,6 +331,13 @@ stage_app_bundle() {
   if ! /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -Fq '@executable_path/../Frameworks'; then
     /usr/bin/install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_BINARY"
   fi
+
+  # Swift release binaries can retain object/debug paths from the temporary
+  # build workspace. Strip that metadata from the distributable executables;
+  # it is not needed at runtime and must not leak local build paths.
+  /usr/bin/strip -S "$APP_BINARY"
+  /usr/bin/strip -S "$APP_HELPER_BINARY"
+  /usr/bin/strip -S "$APP_CONTROL_BINARY"
 
   # Finder metadata and resource forks are not part of the release bundle and
   # can make strict codesign verification fail on otherwise valid apps.

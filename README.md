@@ -39,7 +39,12 @@ read-only repository, pull request, and developer-tool metadata.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
   Swift Charts.
-- Exports a versioned JSON backup of local CodePulse state.
+- Exports the currently filtered History as standard UTF-8 CSV.
+- Exports the currently selected Insights timeframe and project as a deterministic
+  local Markdown report.
+- Archives projects that are no longer active without deleting their saved
+  sessions, Insights, exports, presets, or automation rules.
+- Exports and restores a versioned JSON backup of local CodePulse state.
 
 ## Download and install
 
@@ -75,6 +80,59 @@ or allow the automatic update check.
 
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
+
+## Backup and restore
+
+Use **Settings → Data → Export Backup…** to save a portable, pretty-printed JSON
+backup of local CodePulse projects, settings, presets, automation rules, saved
+sessions, captured Git/GitHub context, developer-tool session context, and any
+active-session timeline. The backup format remains `codepulse-backup` version 1,
+so backups exported by CodePulse 0.8 can be restored by 0.9.
+
+Use **Settings → Data → Restore Backup…** to inspect the selected backup before
+confirming. Restore replaces the current local CodePulse data; it does not merge
+sessions or projects. CodePulse first creates and verifies a private automatic
+recovery backup at
+`~/Library/Application Support/CodePulse/Backups/Pre-Restore Backup ...json`.
+The newest five automatic pre-restore recovery backups are retained. A failed
+restore leaves the current data in place or reports whether automatic rollback
+succeeded.
+
+Restore is local-only and does not contact a cloud service. Session Automation
+is restored but left disabled until it is reviewed and deliberately enabled
+again. A backup moved to another Mac may contain project names and saved
+folder-path snapshots whose security-scoped bookmarks no longer resolve; those
+projects remain in CodePulse and are marked **Needs Relink** rather than being
+deleted or silently bound to another folder. Restore is blocked while the
+current installation has a running, paused, or finishing session.
+
+## CSV and Markdown exports
+
+Use **History → Export CSV…** to save exactly the completed sessions matching the
+current History search and filters. The export uses standard UTF-8 CSV and a
+user-selected local destination; an active session is not included.
+
+Use **Insights → Export Report…** to save the currently selected timeframe and
+project as a deterministic Markdown report. The report uses the existing local
+Insights summary and contains no AI-generated commentary or cloud data.
+
+Both exports are created locally at the destination you choose. CodePulse does
+not upload CSV or Markdown exports.
+
+## Project archiving
+
+Use **Settings → Projects → Archive** when you want to retire a project without
+deleting its CodePulse data. Archived projects are excluded from new-session
+pickers, Quick Start, default-project selection, Session Automation, and direct
+`codepulsectl` starts. CodePulse keeps the project record and does not rewrite
+completed sessions.
+
+Archived projects remain available in History and Insights, including History
+CSV and Insights Markdown exports. Session Presets and automation rules that
+reference an archived project are preserved and shown as unavailable until the
+project is restored. Use **Restore** in Project Settings to make the same
+project, preset, and rule eligible again. Archive state is part of local backup
+configuration and is independent from **Needs Relink** folder status.
 
 ## External local control
 
@@ -133,18 +191,21 @@ CodePulse stores its state as JSON under the user's Application Support
 directory. Session notes, project paths, settings, session presets, automation
 rules, configured application bundle identifiers, active automation ownership,
 Git snapshots, GitHub context snapshots, developer-tool session metadata, and
-active session state stay on the Mac unless the user exports or shares a backup.
+active session state stay on the Mac unless the user explicitly exports or
+shares selected data or a backup.
 Developer-tool metadata is limited to the tool name,
 external session identifier, working directory, timestamps, lifecycle event
 count, and optional model/profile labels. When Session Automation is enabled,
 CodePulse uses only those local lifecycle signals and the working directory to
 match an explicit rule to a configured project. CodePulse also keeps a local
 deduplication ledger of processed event identifiers and timestamps (up to 2,048
-entries; event processing prunes entries older than 30 days), which may appear
-in exported backups. External CLI commands use a separate bounded local
-processing ledger and transient response files; backup export intentionally
-omits that control ledger and all command/response files. Inbox cleanup after
-processing is best effort, so a filesystem failure may leave a local event file.
+entries; event processing prunes entries older than 30 days). This replay
+bookkeeping remains local and is reset when a backup is restored; portable
+backups include saved-session developer-tool contexts but omit the processed
+event ledger. External CLI commands use a separate bounded local processing
+ledger and transient response files; backup export intentionally omits that
+control ledger and all command/response files. Inbox cleanup after processing is
+best effort, so a filesystem failure may leave a local event file.
 CodePulse does not collect
 prompts, messages, responses, transcripts, source code, terminal command
 contents, command output, tool-call arguments or results, permission decisions,

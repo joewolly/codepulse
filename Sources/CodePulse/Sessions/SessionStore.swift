@@ -1,6 +1,7 @@
 import Combine
 import CodePulseIntegration
 import Foundation
+import ServiceManagement
 
 protocol SessionClock {
     var now: Date { get }
@@ -28,6 +29,26 @@ enum CompletedSessionProjectAssignment: Equatable {
     case project(UUID)
 }
 
+enum ProjectArchiveError: LocalizedError, Equatable {
+    case projectNotFound
+    case alreadyArchived
+    case alreadyActive
+    case activeSession
+
+    var errorDescription: String? {
+        switch self {
+        case .projectNotFound:
+            return "The project could not be found."
+        case .alreadyArchived:
+            return "The project is already archived."
+        case .alreadyActive:
+            return "The project is already active."
+        case .activeSession:
+            return "Finish or discard the current session before archiving this project."
+        }
+    }
+}
+
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
@@ -49,6 +70,7 @@ final class SessionStore: ObservableObject {
     private let controlLaunchDate: Date
     private var lastControlScanAt: Date?
     private var isMonitoringApplications = false
+    private let currentLaunchAtLoginState: () -> Bool
     private(set) var currentFrontmostApplication: ApplicationIdentity?
 
     init(
@@ -60,7 +82,8 @@ final class SessionStore: ObservableObject {
         developerToolEventConsumer: DeveloperToolEventConsuming = DeveloperToolEventConsumer(),
         automaticallyRefresh: Bool = true,
         frontmostApplicationMonitor: FrontmostApplicationMonitoring? = nil,
-        controlTransport: CodePulseControlTransport? = nil
+        controlTransport: CodePulseControlTransport? = nil,
+        currentLaunchAtLoginState: @escaping () -> Bool = { SMAppService.mainApp.status == .enabled }
     ) {
         self.persistence = persistence
         self.clock = clock
@@ -71,6 +94,7 @@ final class SessionStore: ObservableObject {
         self.frontmostApplicationMonitor = frontmostApplicationMonitor
         self.controlTransport = controlTransport
         self.calendar = calendar
+        self.currentLaunchAtLoginState = currentLaunchAtLoginState
         self.state = persistence.load()
         let initialNow = clock.now
         self.now = initialNow
@@ -89,6 +113,7 @@ final class SessionStore: ObservableObject {
         }
 
         var normalizedState = state
+        normalizeProjectConfiguration(in: &normalizedState)
         relinquishInvalidAutomation(in: &normalizedState)
         if normalizedState != state {
             state = normalizedState
@@ -173,9 +198,14 @@ final class SessionStore: ObservableObject {
         case .noProject:
             return nil
         case .specificProject:
-            return state.settings.specificProjectID
+            guard let specificProjectID = state.settings.specificProjectID,
+                  state.projects.contains(where: { $0.id == specificProjectID && $0.isActive }) else {
+                return nil
+            }
+            return specificProjectID
         case .lastUsed:
             return state.projects
+                .filter(\.isActive)
                 .compactMap { project in
                     project.lastUsedAt.map { (project.id, $0) }
                 }
@@ -184,7 +214,30 @@ final class SessionStore: ObservableObject {
     }
 
     var projectsSortedByRecentUse: [ProjectRecord] {
-        state.projects.sorted { lhs, rhs in
+        sortProjectsByRecentUse(state.projects)
+    }
+
+    var activeProjectsSortedByRecentUse: [ProjectRecord] {
+        sortProjectsByRecentUse(state.projects.filter(\.isActive))
+    }
+
+    var archivedProjectsSortedByRecentUse: [ProjectRecord] {
+        sortProjectsByRecentUse(state.projects.filter(\.isArchived))
+    }
+
+    /// Projects that may be selected for future manual work. Folder relinking
+    /// remains a separate concern; manual sessions have historically allowed a
+    /// project whose folder is currently unresolved.
+    var selectableProjectsSortedByRecentUse: [ProjectRecord] {
+        activeProjectsSortedByRecentUse
+    }
+
+    var automationEligibleProjects: [ProjectRecord] {
+        activeProjectsSortedByRecentUse.filter { !$0.requiresRelink }
+    }
+
+    private func sortProjectsByRecentUse(_ projects: [ProjectRecord]) -> [ProjectRecord] {
+        projects.sorted { lhs, rhs in
             switch (lhs.lastUsedAt, rhs.lastUsedAt) {
             case let (left?, right?) where left != right:
                 return left > right
@@ -196,6 +249,47 @@ final class SessionStore: ObservableObject {
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
         }
+    }
+
+    func isProjectAvailableForManualStart(_ projectID: UUID?) -> Bool {
+        guard let projectID else { return true }
+        return state.projects.contains { $0.id == projectID && $0.isActive }
+    }
+
+    func isSessionPresetAvailableForManualStart(_ preset: SessionPreset) -> Bool {
+        preset.isValid && isProjectAvailableForManualStart(preset.projectID)
+    }
+
+    var sessionPresetsAvailableForManualStart: [SessionPreset] {
+        sessionPresetsSorted.filter(isSessionPresetAvailableForManualStart)
+    }
+
+    var sessionPresetsAvailableForAutomation: [SessionPreset] {
+        sessionPresetsSorted.filter(isPresetUsableForAutomation)
+    }
+
+    func projectsForPresetEditing(_ preset: SessionPreset?) -> [ProjectRecord] {
+        var projects = activeProjectsSortedByRecentUse
+        if let archivedProjectID = preset?.projectID,
+           let archivedProject = state.projects.first(where: { $0.id == archivedProjectID && $0.isArchived }) {
+            projects.append(archivedProject)
+        }
+        return projects
+    }
+
+    func presetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
+        sessionPresetsSorted.filter { preset in
+            isPresetUsableForAutomation(preset) || preset.id == rule?.presetID
+        }
+    }
+
+    func isPresetUsableForAutomation(_ preset: SessionPreset) -> Bool {
+        guard let projectID = preset.projectID,
+              let project = state.projects.first(where: { $0.id == projectID }),
+              project.isActive else {
+            return false
+        }
+        return DeveloperToolProjectResolver.isUsableFolder(for: project)
     }
 
     func refresh() {
@@ -226,7 +320,7 @@ final class SessionStore: ObservableObject {
         guard let frontmostApplicationMonitor else { return }
 
         let needsMonitoring = state.settings.automationEnabled && state.automationRules.contains { rule in
-            rule.isEnabled && rule.applicationTrigger != nil
+            rule.isEnabled && rule.applicationTrigger != nil && isAutomationRuleUsable(rule)
         }
 
         if needsMonitoring {
@@ -327,8 +421,7 @@ final class SessionStore: ObservableObject {
         guard state.activeSession == nil,
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
-              let project = state.projects.first(where: { $0.id == projectID }),
-              DeveloperToolProjectResolver.isUsableFolder(for: project),
+              isPresetUsableForAutomation(preset),
               isAutomationTriggerValid(rule.trigger),
               sourceMatchesTrigger(source, trigger: rule.trigger) else {
             return false
@@ -391,6 +484,10 @@ final class SessionStore: ObservableObject {
         automationMetadata: SessionAutomationMetadata?
     ) -> (state: AppState, session: ActiveSession, folderURL: URL?)? {
         guard state.activeSession == nil else { return nil }
+
+        guard projectID == nil || state.projects.contains(where: { $0.id == projectID && $0.isActive }) else {
+            return nil
+        }
 
         let project = projectID.flatMap { id in state.projects.first(where: { $0.id == id }) }
         let folderURL = project.flatMap { projectFolderURL(for: $0) }
@@ -549,6 +646,20 @@ final class SessionStore: ObservableObject {
             return response
         }
 
+        if !LocalInputAcceptance.accepts(
+            timestamp: command.issuedAt,
+            after: state.localInputAcceptanceDate
+        ) {
+            let response = CodePulseControlResponse(
+                commandID: command.id,
+                result: .commandRejected,
+                message: "The command was issued before the most recent CodePulse restore.",
+                status: controlStatus(at: date)
+            )
+            recordControlResponseIfNeeded(response, for: command.action, at: date)
+            return response
+        }
+
         if command.issuedAt < controlLaunchDate {
             let response = CodePulseControlResponse(
                 commandID: command.id,
@@ -600,6 +711,15 @@ final class SessionStore: ObservableObject {
                     commandID: command.id,
                     result: .presetOrProjectNotFound,
                     message: "The requested project was not found or is ambiguous.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard !project.isArchived else {
+                return recordControlFailure(
+                    commandID: command.id,
+                    result: .presetOrProjectNotFound,
+                    message: "Project \"\(project.name)\" is archived.",
                     action: command.action,
                     date: date
                 )
@@ -764,6 +884,17 @@ final class SessionStore: ObservableObject {
                 commandID: commandID,
                 result: .presetOrProjectNotFound,
                 message: "The session preset references a missing project.",
+                action: action,
+                date: date
+            )
+        }
+        if let projectID = preset.projectID,
+           let project = state.projects.first(where: { $0.id == projectID }),
+           project.isArchived {
+            return recordControlFailure(
+                commandID: commandID,
+                result: .presetOrProjectNotFound,
+                message: "Project \"\(project.name)\" is archived.",
                 action: action,
                 date: date
             )
@@ -935,14 +1066,33 @@ final class SessionStore: ObservableObject {
         historyGroups(for: HistoryQuery())
     }
 
+    /// Returns saved sessions in the same filtered, newest-first order used by
+    /// History. Keeping this collection separate from grouping lets exports
+    /// consume the exact same canonical matches without reimplementing query
+    /// semantics.
+    func historySessions(
+        for query: HistoryQuery,
+        referenceDate: Date? = nil
+    ) -> [CompletedSession] {
+        let referenceDate = referenceDate ?? clock.now
+        return state.completedSessions
+            .filter { session in
+                query.matches(session, calendar: calendar, referenceDate: referenceDate)
+            }
+            .sorted { lhs, rhs in
+                if lhs.startedAt != rhs.startedAt {
+                    return lhs.startedAt > rhs.startedAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
     func historyGroups(
         for query: HistoryQuery,
         referenceDate: Date? = nil
     ) -> [DaySessionGroup] {
         let referenceDate = referenceDate ?? clock.now
-        let matchingSessions = state.completedSessions.filter { session in
-            query.matches(session, calendar: calendar, referenceDate: referenceDate)
-        }
+        let matchingSessions = historySessions(for: query, referenceDate: referenceDate)
         let groups = Dictionary(grouping: matchingSessions) { session in
             calendar.startOfDay(for: session.startedAt)
         }
@@ -952,7 +1102,7 @@ final class SessionStore: ObservableObject {
                 return DaySessionGroup(id: day, sessions: groups[day] ?? [], totalDuration: 0)
             }
             let interval = DateInterval(start: day, end: dayEnd)
-            let sessions = (groups[day] ?? []).sorted { $0.startedAt > $1.startedAt }
+            let sessions = groups[day] ?? []
             let total = sessions.reduce(into: 0) { result, session in
                 result += session.activeDuration(in: interval)
             }
@@ -1081,6 +1231,50 @@ final class SessionStore: ObservableObject {
     }
 
     @discardableResult
+    func archiveProject(id: UUID, at date: Date? = nil) throws -> ProjectRecord {
+        guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        guard !state.projects[index].isArchived else {
+            throw ProjectArchiveError.alreadyArchived
+        }
+        guard state.activeSession?.projectID != id else {
+            throw ProjectArchiveError.activeSession
+        }
+
+        var nextState = state
+        nextState.projects[index].archivedAt = date ?? clock.now
+        if nextState.settings.defaultProjectBehavior == .specificProject,
+           nextState.settings.specificProjectID == id {
+            nextState.settings.defaultProjectBehavior = .lastUsed
+            nextState.settings.specificProjectID = nil
+        }
+        commit(nextState)
+        guard let archivedProject = state.projects.first(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        return archivedProject
+    }
+
+    @discardableResult
+    func restoreProject(id: UUID) throws -> ProjectRecord {
+        guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        guard state.projects[index].isArchived else {
+            throw ProjectArchiveError.alreadyActive
+        }
+
+        var nextState = state
+        nextState.projects[index].archivedAt = nil
+        commit(nextState)
+        guard let restoredProject = state.projects.first(where: { $0.id == id }) else {
+            throw ProjectArchiveError.projectNotFound
+        }
+        return restoredProject
+    }
+
+    @discardableResult
     func updateProjectFolder(id: UUID, folderURL: URL) -> Bool {
         guard let index = state.projects.firstIndex(where: { $0.id == id }) else { return false }
 
@@ -1171,20 +1365,23 @@ final class SessionStore: ObservableObject {
         guard rule.isValid,
               isAutomationTriggerValid(rule.trigger),
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
-              let projectID = preset.projectID,
-              let project = state.projects.first(where: { $0.id == projectID }),
-              let folderPath = DeveloperToolProjectResolver.folderPath(for: project),
-              DeveloperToolProjectResolver.isUsableFolder(for: project) else {
+              isPresetUsableForAutomation(preset) else {
             return false
         }
-        return !folderPath.isEmpty
+        return true
     }
 
     @discardableResult
     func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
         guard rule.isValid,
-              state.sessionPresets.contains(where: { $0.id == rule.presetID }),
+              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               isAutomationTriggerValid(rule.trigger) else { return false }
+
+        let preservesExistingPreset = state.automationRules
+            .first(where: { $0.id == rule.id })?.presetID == rule.presetID
+        if !preservesExistingPreset && !isPresetUsableForAutomation(preset) {
+            return false
+        }
         var nextState = state
         if let index = nextState.automationRules.firstIndex(where: { $0.id == rule.id }) {
             nextState.automationRules[index] = rule
@@ -1268,9 +1465,118 @@ final class SessionStore: ObservableObject {
         try data.write(to: fileURL, options: .atomic)
     }
 
+    func inspectBackup(at fileURL: URL) throws -> BackupRestoreCandidate {
+        let data: Data
+        do {
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                throw BackupRestoreError.fileUnreadable
+            }
+            let attributes: [FileAttributeKey: Any]
+            do {
+                attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            } catch {
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard let size = attributes[.size] as? NSNumber else {
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard size.uint64Value <= UInt64(CodePulseBackupError.maximumInputBytes) else {
+                throw CodePulseBackupError.inputTooLarge
+            }
+            guard let readData = try? Data(contentsOf: fileURL) else {
+                throw BackupRestoreError.fileUnreadable
+            }
+            guard readData.count <= CodePulseBackupError.maximumInputBytes else {
+                throw CodePulseBackupError.inputTooLarge
+            }
+            data = readData
+        } catch let error as CodePulseBackupError {
+            throw error
+        } catch let error as BackupRestoreError {
+            throw error
+        } catch {
+            throw BackupRestoreError.fileUnreadable
+        }
+
+        let backup = try CodePulseBackupCodec.decode(data)
+        let normalizedState = try BackupRestoreNormalizer.normalize(
+            backup.state,
+            preservingLaunchAtLogin: currentLaunchAtLoginState()
+        )
+        return BackupRestoreCandidate(
+            backup: backup,
+            state: normalizedState,
+            preview: CodePulseBackupPreview(backup: backup, state: normalizedState)
+        )
+    }
+
+    func restoreBackup(_ candidate: BackupRestoreCandidate) throws -> BackupRestoreResult {
+        guard state.activeSession == nil, !gitCaptureInProgress else {
+            throw BackupRestoreError.activeSession
+        }
+        guard let restoringPersistence = persistence as? StateRestoring else {
+            throw BackupRestoreError.persistenceUnavailable
+        }
+
+        do {
+            let restoreAcceptanceDate = clock.now
+            var restoredState = candidate.state
+            // The boundary is included in the candidate verified by the
+            // transactional persistence layer. It becomes effective only if
+            // the durable replacement succeeds, and therefore cannot advance
+            // on a failed or rolled-back restore.
+            restoredState.localInputAcceptanceDate = restoreAcceptanceDate
+            let receipt = try restoringPersistence.replaceStateTransactionally(
+                with: restoredState,
+                recoverySnapshot: state,
+                exportedAt: restoreAcceptanceDate
+            )
+            // The durable replacement and its readback have completed. This is
+            // the first point where the live in-memory store may change.
+            state = restoredState
+            now = restoreAcceptanceDate
+            configureApplicationMonitoring()
+            return BackupRestoreResult(
+                preview: candidate.preview,
+                recoveryBackupURL: receipt.recoveryBackupURL
+            )
+        } catch let error as StatePersistenceError {
+            NSLog("CodePulse restore failed (%@).", error.logIdentifier)
+            throw BackupRestoreError.persistence(error)
+        } catch {
+            NSLog("CodePulse restore failed (persistence-unavailable).")
+            throw BackupRestoreError.persistenceUnavailable
+        }
+    }
+
+    func restoreBackup(from fileURL: URL) throws -> BackupRestoreResult {
+        try restoreBackup(inspectBackup(at: fileURL))
+    }
+
+    private func normalizeProjectConfiguration(in state: inout AppState) {
+        switch state.settings.defaultProjectBehavior {
+        case .specificProject:
+            guard let specificProjectID = state.settings.specificProjectID,
+                  state.projects.contains(where: { $0.id == specificProjectID && $0.isActive }) else {
+                state.settings.defaultProjectBehavior = .lastUsed
+                state.settings.specificProjectID = nil
+                return
+            }
+            // Keep the explicit reference only while it points to an active
+            // project. The guard above intentionally leaves a valid setting
+            // untouched, including for projects that need relinking.
+            state.settings.specificProjectID = specificProjectID
+        case .lastUsed, .noProject:
+            state.settings.specificProjectID = nil
+        }
+    }
+
     private func commit(_ nextState: AppState) {
-        state = nextState
-        persistence.save(nextState)
+        var normalizedState = nextState
+        normalizeProjectConfiguration(in: &normalizedState)
+        relinquishInvalidAutomation(in: &normalizedState)
+        state = normalizedState
+        persistence.save(normalizedState)
         configureApplicationMonitoring()
     }
 

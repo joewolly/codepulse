@@ -123,12 +123,14 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         XCTAssertTrue(backupText.contains("developerToolContexts"))
         XCTAssertTrue(backupText.contains("thread-privacy"))
         XCTAssertTrue(backupText.contains("GPT-5.6"))
-        XCTAssertTrue(backupText.contains(processedEventID.uuidString))
-        XCTAssertTrue(backupText.contains("processedAt"))
+        XCTAssertFalse(backupText.contains(processedEventID.uuidString))
+        XCTAssertFalse(backupText.contains("developerToolIntegration"))
         for forbidden in ["transcript", "assistant message", "tool-call arguments", "command output", "api key"] {
             XCTAssertFalse(backupText.localizedCaseInsensitiveContains(forbidden), "Found \(forbidden) in backup")
         }
-        XCTAssertEqual(try CodePulseBackupCodec.decode(data).state, state)
+        var expectedPortableState = state
+        expectedPortableState.developerToolIntegration = nil
+        XCTAssertEqual(try CodePulseBackupCodec.decode(data).state, expectedPortableState)
     }
 
     func testEventCodecAndOptionalMetadata() throws {
@@ -374,6 +376,166 @@ final class DeveloperToolIntegrationTests: XCTestCase {
 
         _ = consumer.processPending(state: &state, now: now.addingTimeInterval(1))
         XCTAssertEqual(state.activeSession?.developerToolContexts.first?.eventCount, 1)
+    }
+
+    func testRestoreBoundaryRejectsRetainedProcessedDeveloperEvent() throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("codepulse", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let project = ProjectRecord(name: "CodePulse", folderPath: projectURL.path, createdAt: now)
+        var state = AppState()
+        state.projects = [project]
+        state.activeSession = ActiveSession(
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: now.addingTimeInterval(-60)
+        )
+        let event = event(
+            id: UUID(),
+            tool: .codex,
+            sessionID: "retained-before-restore",
+            type: .activity,
+            path: projectURL.path,
+            timestamp: now
+        )
+        try DeveloperToolInbox(paths: paths).write(event)
+
+        // Process once while cleanup fails, leaving the file behind with its
+        // ID in the old local ledger.
+        let failingConsumer = DeveloperToolEventConsumer(inbox: DeveloperToolInbox(
+            paths: paths,
+            fileManager: FailingRemoveFileManager()
+        ))
+        XCTAssertTrue(failingConsumer.processPending(state: &state, now: now))
+        XCTAssertEqual(state.activeSession?.developerToolContexts.first?.eventCount, 1)
+        XCTAssertEqual(state.developerToolIntegration?.processedEvents.count, 1)
+
+        // Restore imports the session context but intentionally clears the
+        // portable replay ledger. The retained old file is still ineligible.
+        state.developerToolIntegration = nil
+        state.localInputAcceptanceDate = now.addingTimeInterval(1)
+        let restoredConsumer = DeveloperToolEventConsumer(inbox: DeveloperToolInbox(paths: paths))
+        XCTAssertFalse(restoredConsumer.processPending(state: &state, now: now.addingTimeInterval(2)))
+        XCTAssertEqual(state.activeSession?.developerToolContexts.first?.eventCount, 1)
+        XCTAssertNil(state.developerToolIntegration)
+        XCTAssertTrue(DeveloperToolInbox(paths: paths).pendingEventURLs().isEmpty)
+    }
+
+    func testRestoreBoundaryRejectsPreRestoreEventAcrossRelaunchAndAcceptsPostRestoreEvent() throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("codepulse", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let inbox = DeveloperToolInbox(paths: paths)
+        let project = ProjectRecord(name: "CodePulse", folderPath: projectURL.path, createdAt: now)
+        let boundary = now
+        let state = AppState(
+            projects: [project],
+            activeSession: ActiveSession(
+                projectID: project.id,
+                projectName: project.name,
+                startedAt: boundary.addingTimeInterval(-60)
+            ),
+            localInputAcceptanceDate: boundary
+        )
+        let preRestore = event(
+            id: UUID(),
+            tool: .opencode,
+            sessionID: "pre-restore",
+            type: .activity,
+            path: projectURL.path,
+            timestamp: boundary.addingTimeInterval(-1)
+        )
+        try inbox.write(preRestore)
+
+        // Encode/decode the imported state to model the persisted relaunch
+        // path, including the machine-local boundary.
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var relaunchedState = try decoder.decode(AppState.self, from: encoder.encode(state))
+        let relaunchedConsumer = DeveloperToolEventConsumer(inbox: inbox)
+        XCTAssertFalse(relaunchedConsumer.processPending(
+            state: &relaunchedState,
+            now: boundary.addingTimeInterval(2)
+        ))
+        XCTAssertTrue(relaunchedState.activeSession?.developerToolContexts.isEmpty == true)
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+
+        let postRestore = event(
+            id: UUID(),
+            tool: .opencode,
+            sessionID: "post-restore",
+            type: .activity,
+            path: projectURL.path,
+            timestamp: boundary.addingTimeInterval(1)
+        )
+        try inbox.write(postRestore)
+        XCTAssertTrue(relaunchedConsumer.processPending(
+            state: &relaunchedState,
+            now: boundary.addingTimeInterval(2)
+        ))
+        XCTAssertEqual(relaunchedState.activeSession?.developerToolContexts.count, 1)
+        XCTAssertEqual(relaunchedState.activeSession?.developerToolContexts.first?.externalSessionID, "post-restore")
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
+    }
+
+    func testSameSecondPreRestoreEventIsRejectedAfterPersistedRelaunch() throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("codepulse", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root)
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let inbox = DeveloperToolInbox(paths: paths)
+        let second = now.addingTimeInterval(60)
+        let staleTimestamp = second.addingTimeInterval(0.200)
+        let restoreBoundary = second.addingTimeInterval(0.800)
+        let project = ProjectRecord(name: "CodePulse", folderPath: projectURL.path, createdAt: second)
+        let persistedState = AppState(
+            projects: [project],
+            activeSession: ActiveSession(
+                projectID: project.id,
+                projectName: project.name,
+                startedAt: second.addingTimeInterval(-60)
+            ),
+            localInputAcceptanceDate: restoreBoundary
+        )
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        persistence.save(persistedState)
+
+        let preRestore = event(
+            id: UUID(),
+            tool: .opencode,
+            sessionID: "same-second-pre-restore",
+            type: .activity,
+            path: projectURL.path,
+            timestamp: staleTimestamp
+        )
+        try inbox.write(preRestore)
+
+        let relaunchedState = JSONFilePersistence(fileURL: stateURL).load()
+        let persistedBoundary = try XCTUnwrap(relaunchedState.localInputAcceptanceDate)
+        XCTAssertEqual(persistedBoundary, second)
+        XCTAssertNotEqual(persistedBoundary, restoreBoundary)
+        let persistedEventURL = try XCTUnwrap(inbox.pendingEventURLs().first)
+        XCTAssertEqual(
+            try inbox.readEvent(from: persistedEventURL, now: second.addingTimeInterval(1)).timestamp,
+            second
+        )
+
+        var processedState = relaunchedState
+        let beforeProcessing = processedState
+        let consumer = DeveloperToolEventConsumer(inbox: inbox)
+        XCTAssertFalse(consumer.processPending(
+            state: &processedState,
+            now: second.addingTimeInterval(1)
+        ))
+        XCTAssertEqual(processedState, beforeProcessing)
+        XCTAssertTrue(processedState.activeSession?.developerToolContexts.isEmpty == true)
+        XCTAssertNil(processedState.developerToolIntegration)
+        XCTAssertTrue(inbox.pendingEventURLs().isEmpty)
     }
 
     func testMalformedUnsupportedAndStaleEventsAreRemovedWithoutAttachment() throws {

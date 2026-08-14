@@ -546,6 +546,7 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
     var bookmarkData: Data?
     let createdAt: Date
     var lastUsedAt: Date?
+    var archivedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -553,7 +554,8 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
         folderPath: String? = nil,
         bookmarkData: Data? = nil,
         createdAt: Date = Date(),
-        lastUsedAt: Date? = nil
+        lastUsedAt: Date? = nil,
+        archivedAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -561,6 +563,22 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
         self.bookmarkData = bookmarkData
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
+        self.archivedAt = archivedAt
+    }
+
+    var isArchived: Bool {
+        archivedAt != nil
+    }
+
+    var isActive: Bool {
+        !isArchived
+    }
+
+    /// A project remains persisted when a moved or stale bookmark cannot be
+    /// resolved. This derived flag keeps that state visible to restore/UI
+    /// callers without adding machine-specific portability data to the schema.
+    var requiresRelink: Bool {
+        !DeveloperToolProjectResolver.isUsableFolder(for: self)
     }
 }
 
@@ -648,6 +666,7 @@ struct AppState: Codable, Equatable {
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
     var automationRules: [SessionAutomationRule]
     var controlProcessing: CodePulseControlProcessingState?
+    var localInputAcceptanceDate: Date?
 
     init(
         projects: [ProjectRecord] = [],
@@ -657,7 +676,8 @@ struct AppState: Codable, Equatable {
         sessionPresets: [SessionPreset] = [],
         developerToolIntegration: DeveloperToolIntegrationProcessingState? = nil,
         automationRules: [SessionAutomationRule] = [],
-        controlProcessing: CodePulseControlProcessingState? = nil
+        controlProcessing: CodePulseControlProcessingState? = nil,
+        localInputAcceptanceDate: Date? = nil
     ) {
         self.projects = projects
         self.completedSessions = completedSessions
@@ -667,11 +687,13 @@ struct AppState: Codable, Equatable {
         self.developerToolIntegration = developerToolIntegration
         self.automationRules = automationRules.map { $0.canonicalized() }
         self.controlProcessing = Self.normalizedControlProcessing(controlProcessing)
+        self.localInputAcceptanceDate = localInputAcceptanceDate
     }
 
     private enum CodingKeys: String, CodingKey {
         case projects, completedSessions, activeSession, settings
         case sessionPresets, developerToolIntegration, automationRules, controlProcessing
+        case localInputAcceptanceDate
     }
 
     init(from decoder: Decoder) throws {
@@ -684,7 +706,10 @@ struct AppState: Codable, Equatable {
         // history. A malformed or forward-incompatible collection must not
         // make the whole state file unreadable.
         let sessionPresets = (try? container.decode([SessionPreset].self, forKey: .sessionPresets)) ?? []
-        let developerToolIntegration = try container.decodeIfPresent(
+        // Processed developer-tool IDs are local replay bookkeeping. Preserve
+        // the existing fail-soft behavior if an old ledger is malformed; the
+        // restore path resets it regardless.
+        let developerToolIntegration = try? container.decodeIfPresent(
             DeveloperToolIntegrationProcessingState.self,
             forKey: .developerToolIntegration
         )
@@ -696,6 +721,10 @@ struct AppState: Codable, Equatable {
             CodePulseControlProcessingState.self,
             forKey: .controlProcessing
         )
+        let localInputAcceptanceDate = try? container.decodeIfPresent(
+            Date.self,
+            forKey: .localInputAcceptanceDate
+        )
         self.init(
             projects: projects,
             completedSessions: completedSessions,
@@ -704,7 +733,8 @@ struct AppState: Codable, Equatable {
             sessionPresets: sessionPresets,
             developerToolIntegration: developerToolIntegration,
             automationRules: automationRules,
-            controlProcessing: controlProcessing
+            controlProcessing: controlProcessing,
+            localInputAcceptanceDate: localInputAcceptanceDate
         )
     }
 

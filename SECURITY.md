@@ -87,6 +87,31 @@ running the mutation again. Status requests do not enter the mutation ledger.
 The CLI never edits `state.json`, invokes private app files, installs a helper
 into a system path, or executes input as a process.
 
+### Transactional backup restore
+
+The **Settings → Data → Restore Backup…** workflow accepts only the supported
+versioned JSON envelope and applies a 128 MiB input bound. Required projects,
+saved sessions, active-session data, identifiers, and session timelines are
+validated strictly; replaceable automation configuration is retained or
+disabled fail-safe when it references missing projects or presets. Restore
+normalizes machine-local state by clearing the control and developer-event
+replay ledgers, relinquishing imported automation ownership, and leaving global
+automation disabled. It preserves the current Mac's launch-at-login setting
+without calling `SMAppService`.
+
+Before replacing `state.json`, CodePulse creates a uniquely named,
+pretty-printed recovery backup under
+`~/Library/Application Support/CodePulse/Backups/`, writes it atomically, and
+reads it back through the normal backup decoder. Managed state and recovery
+directories are checked for symbolic-link redirection and use private 0700
+directory/0600 file permissions where supported. The normalized candidate is
+written to a same-directory temporary file, decoded and compared, atomically
+replaces the live state, and is decoded and compared again before
+`SessionStore` changes in memory. If a post-replacement verification fails,
+CodePulse atomically attempts rollback from the verified pre-restore state and
+reports separately if rollback also fails. User-selected input paths are read
+only; they are not used as managed write destinations.
+
 Codex configuration changes are marked and merged with existing hook entries.
 An explicit user `hooks = false` setting is respected. OpenCode installation
 uses one marked CodePulse-owned file in the global plugin directory and refuses

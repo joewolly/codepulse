@@ -181,6 +181,7 @@ struct SessionAutomationCoordinator {
                       preset.projectID == projectID,
                       let projectID = preset.projectID,
                       let project = state.projects.first(where: { $0.id == projectID }),
+                      project.isActive,
                       DeveloperToolProjectResolver.isUsableFolder(for: project) else {
                     return false
                 }
@@ -216,6 +217,7 @@ struct SessionAutomationCoordinator {
                       projectID == nil || preset.projectID == projectID,
                       let projectID = preset.projectID,
                       let project = state.projects.first(where: { $0.id == projectID }),
+                      project.isActive,
                       let projectPath = DeveloperToolProjectResolver.folderPath(for: project),
                       DeveloperToolProjectResolver.isUsableFolder(for: project) else {
                     return false
@@ -241,6 +243,7 @@ struct SessionAutomationCoordinator {
                       projectID == nil || preset.projectID == projectID,
                       let projectID = preset.projectID,
                       let project = state.projects.first(where: { $0.id == projectID }),
+                      project.isActive,
                       DeveloperToolProjectResolver.isUsableFolder(for: project) else {
                     return false
                 }

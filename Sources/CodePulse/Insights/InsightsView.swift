@@ -1,10 +1,13 @@
+import AppKit
 import Charts
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct InsightsView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var timeframe: InsightsTimeframe = .thisWeek
     @State private var project: InsightsProjectFilter = .allProjects
+    @State private var reportExportError = false
 
     private var projectOptions: [InsightsProjectOption] {
         store.insightsProjectOptions
@@ -28,7 +31,8 @@ struct InsightsView: View {
                 InsightsFilterBar(
                     timeframe: $timeframe,
                     project: $project,
-                    projectOptions: projectOptions
+                    projectOptions: projectOptions,
+                    onExport: exportReport
                 )
 
                 if summary.hasActivity {
@@ -69,11 +73,55 @@ struct InsightsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("Insights")
+        .alert("Report Export Failed", isPresented: $reportExportError) {
+            Button("OK", role: .cancel) { reportExportError = false }
+        } message: {
+            Text("CodePulse couldn't export this Insights report. Choose another destination or check its permissions.")
+        }
         .frame(minWidth: 700, idealWidth: 760, minHeight: 560, idealHeight: 620)
     }
 
     private var hasAnySessions: Bool {
         !store.state.completedSessions.isEmpty || store.state.activeSession != nil
+    }
+
+    private func exportReport() {
+        let referenceDate = store.now
+        let calendar = store.calendar
+        let selectedProjectTitle = project.title(options: projectOptions)
+        let summary = InsightsCalculator.summary(
+            state: store.state,
+            calendar: calendar,
+            referenceDate: referenceDate,
+            timeframe: timeframe,
+            project: project
+        )
+        let filenameProject = project == .allProjects ? nil : selectedProjectTitle
+        let markdownType = UTType(importedAs: "net.daringfireball.markdown")
+
+        guard let url = ExportSavePanel.chooseURL(
+            defaultName: ExportFilename.report(
+                projectTitle: filenameProject,
+                timeframe: timeframe,
+                referenceDate: referenceDate,
+                calendar: calendar
+            ),
+            contentType: markdownType,
+            prompt: "Export Report"
+        ) else { return }
+
+        do {
+            try AtomicExportFileWriter().write(
+                InsightsMarkdownExporter.data(
+                    summary: summary,
+                    projectTitle: selectedProjectTitle,
+                    calendar: calendar
+                ),
+                to: url
+            )
+        } catch {
+            reportExportError = true
+        }
     }
 }
 
@@ -96,6 +144,7 @@ private struct InsightsFilterBar: View {
     @Binding var timeframe: InsightsTimeframe
     @Binding var project: InsightsProjectFilter
     let projectOptions: [InsightsProjectOption]
+    let onExport: () -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -131,6 +180,15 @@ private struct InsightsFilterBar: View {
             .pickerStyle(.menu)
             .accessibilityLabel("Insights project")
             .accessibilityValue(project.title(options: projectOptions))
+
+            Button {
+                onExport()
+            } label: {
+                Label("Export Report…", systemImage: "doc.text")
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Export Insights Report")
+            .accessibilityHint("Saves the current Insights timeframe and project as a Markdown report")
         }
         .accessibilityElement(children: .contain)
     }

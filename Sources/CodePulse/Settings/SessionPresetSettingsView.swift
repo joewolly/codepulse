@@ -18,16 +18,15 @@ struct SessionPresetSettingsView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(store.sessionPresetsSorted) { preset in
+                    let project = preset.projectID.flatMap { id in
+                        store.state.projects.first(where: { $0.id == id })
+                    }
                     SessionPresetRow(
                         preset: preset,
-                        projectName: preset.projectID.flatMap { id in
-                            store.state.projects.first(where: { $0.id == id })?.name
-                        },
-                        isAutomationUsable: preset.projectID.flatMap { id in
-                            store.state.projects.first(where: { $0.id == id })
-                        }.map { project in
-                            DeveloperToolProjectResolver.isUsableFolder(for: project)
-                        } ?? false,
+                        projectName: project?.name,
+                        isProjectArchived: project?.isArchived == true,
+                        isAvailableForManualStart: store.isSessionPresetAvailableForManualStart(preset),
+                        isAutomationUsable: project.map { !$0.isArchived && DeveloperToolProjectResolver.isUsableFolder(for: $0) } ?? false,
                         edit: {
                             presetBeingEdited = preset
                             isPresentingEditor = true
@@ -48,7 +47,7 @@ struct SessionPresetSettingsView: View {
         .sheet(isPresented: $isPresentingEditor) {
             SessionPresetEditorView(
                 preset: presetBeingEdited,
-                projects: store.projectsSortedByRecentUse,
+                projects: store.projectsForPresetEditing(presetBeingEdited),
                 save: { preset in
                     guard store.upsertSessionPreset(preset) else { return false }
                     isPresentingEditor = false
@@ -63,6 +62,8 @@ struct SessionPresetSettingsView: View {
 private struct SessionPresetRow: View {
     let preset: SessionPreset
     let projectName: String?
+    let isProjectArchived: Bool
+    let isAvailableForManualStart: Bool
     let isAutomationUsable: Bool
     let edit: () -> Void
     let delete: () -> Void
@@ -76,10 +77,18 @@ private struct SessionPresetRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(preset.name)
                     .font(.subheadline.weight(.medium))
-                Text([projectName ?? "No Project", preset.sessionType.title].joined(separator: " · "))
+                Text([projectLabel, preset.sessionType.title].joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if preset.projectID != nil && !isAutomationUsable {
+                if isProjectArchived {
+                    Text("Project Archived — unavailable until restored")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                } else if preset.projectID != nil && !isAvailableForManualStart {
+                    Text("Project unavailable for Quick Start")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                } else if preset.projectID != nil && !isAutomationUsable {
                     Text("Project unavailable for automation")
                         .font(.caption2)
                         .foregroundStyle(.orange)
@@ -107,6 +116,11 @@ private struct SessionPresetRow: View {
             .accessibilityHint("Deletes the preset and leaves any referencing automation rule available for repair")
         }
         .padding(.vertical, 3)
+    }
+
+    private var projectLabel: String {
+        guard let projectName else { return "No Project" }
+        return isProjectArchived ? "\(projectName) (Archived)" : projectName
     }
 }
 
@@ -150,7 +164,8 @@ private struct SessionPresetEditorView: View {
                 Picker("Project", selection: $projectID) {
                     Text("No Project").tag(UUID?.none)
                     ForEach(projects) { project in
-                        Text(project.name).tag(Optional(project.id))
+                        Text(project.isArchived ? "\(project.name) (Archived)" : project.name)
+                            .tag(Optional(project.id))
                     }
                 }
 
@@ -166,7 +181,7 @@ private struct SessionPresetEditorView: View {
             }
             .formStyle(.grouped)
 
-            Text("All presets are available for manual Quick Start. Automatic rules require a configured project folder.")
+            Text("Presets with archived projects remain saved but are unavailable for Quick Start and automation until the project is restored. Automatic rules also require a configured project folder.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

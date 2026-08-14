@@ -27,9 +27,14 @@ struct AutomationSettingsView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(store.automationRulesSorted) { rule in
+                    let preset = store.sessionPreset(id: rule.presetID)
+                    let projectArchived = preset?.projectID.flatMap { projectID in
+                        store.state.projects.first(where: { $0.id == projectID })?.isArchived
+                    } == true
                     AutomationRuleRow(
                         rule: rule,
-                        preset: store.sessionPreset(id: rule.presetID),
+                        preset: preset,
+                        projectArchived: projectArchived,
                         isUsable: store.isAutomationRuleUsable(rule),
                         edit: {
                             ruleBeingEdited = rule
@@ -46,13 +51,13 @@ struct AutomationSettingsView: View {
             } label: {
                 Label("Add Automation Rule…", systemImage: "plus")
             }
-            .disabled(store.sessionPresetsSorted.isEmpty)
-            .accessibilityHint(store.sessionPresetsSorted.isEmpty ? "Create a session preset before creating an automation rule" : "Creates a local developer-tool or application session rule")
+            .disabled(store.sessionPresetsAvailableForAutomation.isEmpty)
+            .accessibilityHint(store.sessionPresetsAvailableForAutomation.isEmpty ? "Create a session preset for an active project before creating an automation rule" : "Creates a local developer-tool or application session rule")
         }
         .sheet(isPresented: $isPresentingEditor) {
             AutomationRuleEditorView(
                 rule: ruleBeingEdited,
-                presets: store.sessionPresetsSorted,
+                presets: store.presetsForAutomationEditing(ruleBeingEdited),
                 projects: store.projectsSortedByRecentUse,
                 save: { rule in
                     guard store.upsertAutomationRule(rule) else { return false }
@@ -68,6 +73,7 @@ struct AutomationSettingsView: View {
 private struct AutomationRuleRow: View {
     let rule: SessionAutomationRule
     let preset: SessionPreset?
+    let projectArchived: Bool
     let isUsable: Bool
     let edit: () -> Void
     let delete: () -> Void
@@ -86,6 +92,10 @@ private struct AutomationRuleRow: View {
                         Text("Disabled")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                    } else if projectArchived {
+                        Text("Project Archived")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
                     } else if !isUsable {
                         Text("Needs attention")
                             .font(.caption2)
@@ -117,7 +127,7 @@ private struct AutomationRuleRow: View {
         .padding(.vertical, 3)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rule.name), \(triggerSummary), \(preset?.name ?? "missing preset")")
-        .accessibilityValue(rule.isEnabled ? (isUsable ? "Enabled" : "Needs attention") : "Disabled")
+        .accessibilityValue(statusLabel)
     }
 
     private var iconName: String {
@@ -134,6 +144,12 @@ private struct AutomationRuleRow: View {
         case .applications(let trigger):
             return trigger.applications.map(\.displayName).joined(separator: " + ")
         }
+    }
+
+    private var statusLabel: String {
+        if !rule.isEnabled { return "Disabled" }
+        if projectArchived { return "Project Archived" }
+        return isUsable ? "Enabled" : "Needs attention"
     }
 }
 
@@ -225,7 +241,7 @@ private struct AutomationRuleEditorView: View {
                 Picker("Session preset", selection: $presetID) {
                     Text("Choose a preset").tag(UUID?.none)
                     ForEach(presets) { preset in
-                        Text(preset.name).tag(Optional(preset.id))
+                        Text(presetDisplayName(preset)).tag(Optional(preset.id))
                     }
                     if let presetID, !presets.contains(where: { $0.id == presetID }) {
                         Text("Missing preset").tag(Optional(presetID))
@@ -338,6 +354,15 @@ private struct AutomationRuleEditorView: View {
         if !save(value) {
             saveError = "The rule could not be saved. Check its name, trigger, and session preset."
         }
+    }
+
+    private func presetDisplayName(_ preset: SessionPreset) -> String {
+        guard let projectID = preset.projectID,
+              let project = projects.first(where: { $0.id == projectID }),
+              project.isArchived else {
+            return preset.name
+        }
+        return "\(preset.name) (Archived Project)"
     }
 
     private func finiteNonNegativeDouble(_ value: String) -> Double? {

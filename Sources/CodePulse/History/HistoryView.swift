@@ -1,3 +1,5 @@
+import AppKit
+import UniformTypeIdentifiers
 import SwiftUI
 
 struct HistoryView: View {
@@ -5,15 +7,20 @@ struct HistoryView: View {
     @State private var selectedSessionID: UUID?
     @State private var sessionPendingDeletion: CompletedSession?
     @State private var sessionPendingEdit: CompletedSession?
+    @State private var exportError = false
     @State private var query = HistoryQuery()
 
     private var filteredGroups: [DaySessionGroup] {
-        store.historyGroups(for: query)
+        store.historyGroups(for: query, referenceDate: store.now)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            HistoryFilterBar(query: $query, projectOptions: store.historyProjectOptions)
+            HistoryFilterBar(
+                query: $query,
+                projectOptions: store.historyProjectOptions,
+                onExport: exportCSV
+            )
 
             Divider()
 
@@ -86,13 +93,35 @@ struct HistoryView: View {
             SessionEditView(session: session)
                 .environmentObject(store)
         }
+        .alert("History Export Failed", isPresented: $exportError) {
+            Button("OK", role: .cancel) { exportError = false }
+        } message: {
+            Text("CodePulse couldn't export this History file. Choose another destination or check its permissions.")
+        }
         .frame(minWidth: 680, minHeight: 500)
+    }
+
+    private func exportCSV() {
+        let referenceDate = store.now
+        let sessions = store.historySessions(for: query, referenceDate: referenceDate)
+        guard let url = ExportSavePanel.chooseURL(
+            defaultName: ExportFilename.history(referenceDate: referenceDate, calendar: store.calendar),
+            contentType: .commaSeparatedText,
+            prompt: "Export CSV"
+        ) else { return }
+
+        do {
+            try AtomicExportFileWriter().write(HistoryCSVExporter.data(for: sessions), to: url)
+        } catch {
+            exportError = true
+        }
     }
 }
 
 private struct HistoryFilterBar: View {
     @Binding var query: HistoryQuery
     let projectOptions: [HistoryProjectOption]
+    let onExport: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -177,6 +206,15 @@ private struct HistoryFilterBar: View {
             .accessibilityValue(query.developerTool.title)
 
             Spacer()
+
+            Button {
+                onExport()
+            } label: {
+                Label("Export CSV…", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.link)
+            .accessibilityLabel("Export History as CSV")
+            .accessibilityHint("Saves the currently filtered History sessions as a UTF-8 CSV file")
 
             if query.hasRestrictions {
                 Button("Clear Filters") {

@@ -1,0 +1,216 @@
+{
+  "exportedAt" : "2026-08-13T15:20:00Z",
+  "format" : "codepulse-backup",
+  "state" : {
+    "activeSession" : {
+      "automationMetadata" : {
+        "claims" : [
+          {
+            "isActive" : true,
+            "lastSignalAt" : "2026-08-13T14:45:00Z",
+            "source" : {
+              "externalSessionID" : "fixture-thread",
+              "kind" : "developerTool",
+              "tool" : "codex"
+            }
+          }
+        ],
+        "controlEnabled" : true,
+        "finishEligibleAt" : "2026-08-13T15:45:00Z",
+        "finishDelay" : 3600,
+        "lastMatchingSignalAt" : "2026-08-13T14:45:00Z",
+        "minimumSavedDuration" : 60,
+        "pauseDelay" : 900,
+        "pauseEligibleAt" : "2026-08-13T15:00:00Z",
+        "pendingAutomaticSave" : false,
+        "startedByRuleID" : "55555555-5555-5555-5555-555555555555",
+        "startedByRuleName" : "Codex coding",
+        "startedBySource" : {
+          "externalSessionID" : "fixture-thread",
+          "kind" : "developerTool",
+          "tool" : "codex"
+        }
+      },
+      "developerToolContexts" : [
+        {
+          "endedAt" : null,
+          "eventCount" : 4,
+          "firstActivityAt" : "2026-08-13T14:05:00Z",
+          "id" : "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+          "lastActivityAt" : "2026-08-13T14:45:00Z",
+          "model" : "GPT-5",
+          "profile" : "fixture",
+          "externalSessionID" : "fixture-thread",
+          "tool" : "codex",
+          "workingDirectory" : "/tmp/codepulse-v08-fixture-main"
+        }
+      ],
+      "endedAt" : null,
+      "gitContext" : null,
+      "githubContext" : null,
+      "goal" : "Finish restore validation",
+      "id" : "99999999-9999-9999-9999-999999999999",
+      "outcome" : null,
+      "pauseIntervals" : [
+        {
+          "endedAt" : null,
+          "id" : "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "startedAt" : "2026-08-13T14:30:00Z"
+        }
+      ],
+      "phase" : "paused",
+      "projectID" : "11111111-1111-1111-1111-111111111111",
+      "projectName" : "Fixture Main",
+      "startedAt" : "2026-08-13T14:00:00Z",
+      "type" : "coding"
+    },
+    "automationRules" : [
+      {
+        "finishDelay" : 3600,
+        "id" : "55555555-5555-5555-5555-555555555555",
+        "isEnabled" : true,
+        "minimumSavedDuration" : 60,
+        "name" : "Codex coding",
+        "pauseDelay" : 900,
+        "presetID" : "33333333-3333-3333-3333-333333333333",
+        "trigger" : {
+          "developerTool" : "codex",
+          "kind" : "developerTool"
+        }
+      },
+      {
+        "finishDelay" : 300,
+        "id" : "66666666-6666-6666-6666-666666666666",
+        "isEnabled" : true,
+        "minimumSavedDuration" : 60,
+        "name" : "Xcode review",
+        "pauseDelay" : 60,
+        "presetID" : "44444444-4444-4444-4444-444444444444",
+        "trigger" : {
+          "applications" : {
+            "applications" : [
+              {
+                "bundleIdentifier" : "com.apple.dt.Xcode",
+                "displayName" : "Xcode"
+              }
+            ]
+          },
+          "kind" : "applications"
+        }
+      }
+    ],
+    "completedSessions" : [
+      {
+        "developerToolContexts" : [
+          {
+            "endedAt" : "2026-08-10T10:55:00Z",
+            "eventCount" : 8,
+            "firstActivityAt" : "2026-08-10T10:05:00Z",
+            "id" : "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "lastActivityAt" : "2026-08-10T10:55:00Z",
+            "model" : "GPT-5",
+            "profile" : "fixture",
+            "externalSessionID" : "fixture-complete",
+            "tool" : "opencode",
+            "workingDirectory" : "/tmp/codepulse-v08-fixture-main"
+          }
+        ],
+        "endedAt" : "2026-08-10T11:00:00Z",
+        "gitContext" : {
+          "branchAtEnd" : "main",
+          "branchAtStart" : "feature/fixture",
+          "commitCount" : 3,
+          "deletions" : 2,
+          "endHeadSHA" : "2222222222222222222222222222222222222222",
+          "endWasDetached" : false,
+          "filesChanged" : 2,
+          "insertions" : 12,
+          "preExistingWorkingTreePaths" : [],
+          "repositoryRoot" : "/tmp/codepulse-v08-fixture-main",
+          "startHeadSHA" : "1111111111111111111111111111111111111111",
+          "startWasDetached" : false
+        },
+        "githubContext" : {
+          "pullRequest" : {
+            "baseBranch" : "main",
+            "headBranch" : "feature/fixture",
+            "isDraft" : false,
+            "number" : 42,
+            "state" : "open",
+            "title" : "Fixture restore coverage",
+            "url" : "https://github.com/example/codepulse/pull/42"
+          },
+          "repositoryIsPrivate" : false,
+          "repositoryNameWithOwner" : "example/codepulse",
+          "repositoryURL" : "https://github.com/example/codepulse"
+        },
+        "goal" : "Inspect backup portability",
+        "id" : "77777777-7777-7777-7777-777777777777",
+        "outcome" : "Fixture complete",
+        "pauseIntervals" : [
+          {
+            "endedAt" : "2026-08-10T10:30:00Z",
+            "id" : "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            "startedAt" : "2026-08-10T10:20:00Z"
+          }
+        ],
+        "projectID" : "11111111-1111-1111-1111-111111111111",
+        "projectName" : "Fixture Main",
+        "startedAt" : "2026-08-10T10:00:00Z",
+        "type" : "debugging"
+      }
+    ],
+    "developerToolIntegration" : {
+      "processedEvents" : [
+        {
+          "id" : "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+          "processedAt" : "2026-08-13T15:00:00Z"
+        }
+      ]
+    },
+    "projects" : [
+      {
+        "bookmarkData" : null,
+        "createdAt" : "2026-08-01T12:00:00Z",
+        "folderPath" : "/tmp/codepulse-v08-fixture-main",
+        "id" : "11111111-1111-1111-1111-111111111111",
+        "lastUsedAt" : "2026-08-13T14:00:00Z",
+        "name" : "Fixture Main"
+      },
+      {
+        "bookmarkData" : null,
+        "createdAt" : "2026-08-02T12:00:00Z",
+        "folderPath" : "/tmp/codepulse-v08-fixture-docs",
+        "id" : "22222222-2222-2222-2222-222222222222",
+        "lastUsedAt" : null,
+        "name" : "Fixture Docs"
+      }
+    ],
+    "sessionPresets" : [
+      {
+        "goal" : "Ship code",
+        "id" : "33333333-3333-3333-3333-333333333333",
+        "name" : "Fixture Coding",
+        "projectID" : "11111111-1111-1111-1111-111111111111",
+        "sessionType" : "coding"
+      },
+      {
+        "goal" : "Review changes",
+        "id" : "44444444-4444-4444-4444-444444444444",
+        "name" : "Fixture Review",
+        "projectID" : "22222222-2222-2222-2222-222222222222",
+        "sessionType" : "review"
+      }
+    ],
+    "settings" : {
+      "automationEnabled" : true,
+      "defaultProjectBehavior" : "specificProject",
+      "globalShortcutEnabled" : true,
+      "idleAppearance" : "code",
+      "launchAtLogin" : true,
+      "menuBarDisplay" : "projectAndTimer",
+      "specificProjectID" : "11111111-1111-1111-1111-111111111111"
+    }
+  },
+  "version" : 1
+}
