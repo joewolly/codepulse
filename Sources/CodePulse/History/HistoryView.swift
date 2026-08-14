@@ -8,6 +8,7 @@ struct HistoryView: View {
     @State private var sessionPendingDeletion: CompletedSession?
     @State private var sessionPendingEdit: CompletedSession?
     @State private var exportError = false
+    @State private var exportActivity = HistoryCSVExportActivity()
     @State private var query = HistoryQuery()
     @State private var filteredGroups: [DaySessionGroup] = []
     @State private var projectOptions: [HistoryProjectOption] = []
@@ -21,6 +22,7 @@ struct HistoryView: View {
             HistoryFilterBar(
                 query: $query,
                 projectOptions: projectOptions,
+                isExportingCSV: exportActivity.isActive,
                 onExport: exportCSV
             )
 
@@ -113,7 +115,10 @@ struct HistoryView: View {
         filteredGroups = store.historyGroups(for: query, referenceDate: referenceDate)
     }
 
+    @MainActor
     private func exportCSV() {
+        guard !exportActivity.isActive else { return }
+
         let referenceDate = store.now
         let sessions = store.historySessions(for: query, referenceDate: referenceDate)
         guard let url = ExportSavePanel.chooseURL(
@@ -122,10 +127,23 @@ struct HistoryView: View {
             prompt: "Export CSV"
         ) else { return }
 
-        do {
-            try AtomicExportFileWriter().write(HistoryCSVExporter.data(for: sessions), to: url)
-        } catch {
-            exportError = true
+        guard exportActivity.begin() else { return }
+
+        let exportSnapshot = sessions
+        Task { @MainActor in
+            let succeeded = await Task.detached(priority: .userInitiated) { [exportSnapshot, url] in
+                do {
+                    try HistoryCSVExportWorker.write(sessions: exportSnapshot, to: url)
+                    return true
+                } catch {
+                    return false
+                }
+            }.value
+
+            exportActivity.end()
+            if !succeeded {
+                exportError = true
+            }
         }
     }
 }
@@ -133,6 +151,7 @@ struct HistoryView: View {
 private struct HistoryFilterBar: View {
     @Binding var query: HistoryQuery
     let projectOptions: [HistoryProjectOption]
+    let isExportingCSV: Bool
     let onExport: () -> Void
 
     var body: some View {
@@ -225,8 +244,20 @@ private struct HistoryFilterBar: View {
                 Label("Export CSV…", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.link)
+            .disabled(isExportingCSV)
             .accessibilityLabel("Export History as CSV")
             .accessibilityHint("Saves the currently filtered History sessions as a UTF-8 CSV file")
+
+            if isExportingCSV {
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Exporting…")
+                        .font(.caption)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("History export in progress")
+            }
 
             if query.hasRestrictions {
                 Button("Clear Filters") {
