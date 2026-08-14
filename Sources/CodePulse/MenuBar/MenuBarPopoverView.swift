@@ -19,11 +19,19 @@ struct MenuBarPopoverView: View {
         VStack(alignment: .leading, spacing: 0) {
             if let lifecycleErrorMessage = store.lifecycleErrorMessage,
                !store.isInRecoveryMode {
-                Label(lifecycleErrorMessage, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
+                HStack(alignment: .top, spacing: 8) {
+                    Label(lifecycleErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Dismiss", action: store.dismissLifecycleError)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHint("Dismisses this save error without changing the current session")
+                }
+                .accessibilityElement(children: .contain)
+                .padding(.bottom, 12)
             }
 
             if store.isInRecoveryMode {
@@ -225,6 +233,7 @@ private struct ActiveSessionView: View {
                 .font(.system(size: 34, weight: .medium, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel("Elapsed time")
+                .accessibilityValue(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
 
             if store.phase == .paused {
                 Label("Paused", systemImage: "pause.fill")

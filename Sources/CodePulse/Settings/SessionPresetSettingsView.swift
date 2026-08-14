@@ -75,9 +75,14 @@ private struct SessionPresetRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(preset.name)
                     .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(preset.name)
                 Text([projectLabel, preset.sessionType.title].joined(separator: " · "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 if isProjectArchived {
                     Text("Project Archived — unavailable until restored")
                         .font(.caption2)
@@ -114,11 +119,25 @@ private struct SessionPresetRow: View {
             .accessibilityHint("Deletes the preset and leaves any referencing automation rule available for repair")
         }
         .padding(.vertical, 3)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(preset.name), \(projectLabel), \(preset.sessionType.title)")
+        .accessibilityValue(availabilitySummary)
     }
 
     private var projectLabel: String {
         guard let projectName else { return "No Project" }
         return isProjectArchived ? "\(projectName) (Archived)" : projectName
+    }
+
+    private var availabilitySummary: String {
+        if isProjectArchived { return "Project Archived, unavailable until restored" }
+        if preset.projectID != nil && !isAvailableForManualStart {
+            return "Project unavailable for Quick Start"
+        }
+        if preset.projectID != nil && !isAutomationUsable {
+            return "Project unavailable for automation"
+        }
+        return "Available"
     }
 }
 

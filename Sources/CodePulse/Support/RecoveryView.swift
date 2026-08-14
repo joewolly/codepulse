@@ -16,7 +16,8 @@ struct RecoveryView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
             Label("CodePulse Couldn't Read Its Saved Data", systemImage: "exclamationmark.triangle")
                 .font(.title2.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
@@ -58,8 +59,10 @@ struct RecoveryView: View {
                 .accessibilityLabel("Quit CodePulse")
                 .accessibilityHint("Quits CodePulse without changing the unreadable saved data")
             }
+            }
+            .padding(30)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(30)
         .frame(
             minWidth: 620,
             idealWidth: 620,

@@ -465,6 +465,9 @@ private struct ProjectSettingsRow: View {
             VStack(alignment: .leading) {
                 HStack(spacing: 6) {
                     Text(project.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(project.name)
                     if project.isArchived {
                         Label("Archived", systemImage: "archivebox")
                             .font(.caption2)
@@ -478,8 +481,10 @@ private struct ProjectSettingsRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(path)
                 }
             }
+            .layoutPriority(1)
             Spacer()
             if let path = project.folderPath, !project.requiresRelink {
                 Button {

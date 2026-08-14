@@ -9,16 +9,18 @@ struct HistoryView: View {
     @State private var sessionPendingEdit: CompletedSession?
     @State private var exportError = false
     @State private var query = HistoryQuery()
+    @State private var filteredGroups: [DaySessionGroup] = []
+    @State private var projectOptions: [HistoryProjectOption] = []
 
-    private var filteredGroups: [DaySessionGroup] {
-        store.historyGroups(for: query, referenceDate: store.now)
+    private var historyReferenceDay: Date {
+        store.calendar.startOfDay(for: store.now)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HistoryFilterBar(
                 query: $query,
-                projectOptions: store.historyProjectOptions,
+                projectOptions: projectOptions,
                 onExport: exportCSV
             )
 
@@ -98,7 +100,17 @@ struct HistoryView: View {
         } message: {
             Text("CodePulse couldn't export this History file. Choose another destination or check its permissions.")
         }
+        .onAppear(perform: refreshDerivedData)
+        .onChange(of: query) { _ in refreshDerivedData() }
+        .onChange(of: store.stateRevision) { _ in refreshDerivedData() }
+        .onChange(of: historyReferenceDay) { _ in refreshDerivedData() }
         .frame(minWidth: 680, minHeight: 500)
+    }
+
+    private func refreshDerivedData() {
+        let referenceDate = store.now
+        projectOptions = store.historyProjectOptions
+        filteredGroups = store.historyGroups(for: query, referenceDate: referenceDate)
     }
 
     private func exportCSV() {
@@ -357,11 +369,19 @@ private struct HistoryRow: View {
         var values = [
             session.projectName ?? "No Project",
             session.type.title,
-            CodePulseFormatting.duration(session.activeDuration)
+            CodePulseFormatting.duration(session.activeDuration),
+            "Started \(CodePulseFormatting.time(session.startedAt))",
+            "Finished \(CodePulseFormatting.time(session.endedAt))"
         ]
         if let goal = session.goal { values.append(goal) }
         if let outcome = session.outcome { values.append(outcome) }
         if let branch = session.gitContext?.branchDisplay { values.append(branch) }
+        if let githubContext = session.githubContext {
+            values.append("GitHub \(githubContext.repositoryNameWithOwner)")
+            if let pullRequest = githubContext.pullRequest {
+                values.append("Pull request \(pullRequest.number), \(pullRequest.title), \(pullRequest.statusDisplay)")
+            }
+        }
         if !session.developerToolContexts.isEmpty { values.append(developerToolSummary) }
         return values.joined(separator: ", ")
     }
@@ -411,7 +431,8 @@ private struct SessionDetailView: View {
 
     @ViewBuilder
     private func detailContent(_ session: CompletedSession) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.projectName ?? "No Project")
@@ -484,14 +505,14 @@ private struct SessionDetailView: View {
                 GitHubContextView(context: githubContext)
             }
 
-            Spacer()
-
             Button("Delete Session", role: .destructive) {
                 showDeleteConfirmation = true
             }
             .accessibilityLabel("Delete Session")
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(24)
         .frame(minWidth: 520, idealWidth: 540, maxWidth: 620, minHeight: 380, maxHeight: 620)
     }
 }

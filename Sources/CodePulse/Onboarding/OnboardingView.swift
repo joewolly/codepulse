@@ -145,6 +145,9 @@ struct OnboardingView: View {
                    let project = store.state.projects.first(where: { $0.id == addedProjectID }) {
                     Label("Added \(project.name)", systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                        .help(project.name)
                         .accessibilityLabel("Added project \(project.name)")
                 }
 

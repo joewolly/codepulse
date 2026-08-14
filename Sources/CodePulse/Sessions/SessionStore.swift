@@ -55,6 +55,7 @@ enum ProjectArchiveError: LocalizedError, Equatable {
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
+    @Published private(set) var stateRevision = 0
     @Published private(set) var now: Date
     @Published private(set) var gitCaptureInProgress = false
     @Published private(set) var lifecycleErrorMessage: String?
@@ -207,6 +208,34 @@ final class SessionStore: ObservableObject {
             }
         }
         return "Automatic · Multiple"
+    }
+
+    var menuBarAccessibilityText: String {
+        switch phase {
+        case .idle:
+            return "CodePulse, ready to start a session"
+        case .running, .paused, .finishing:
+            let phaseDescription: String
+            switch phase {
+            case .running:
+                phaseDescription = "running"
+            case .paused:
+                phaseDescription = "paused"
+            case .finishing:
+                phaseDescription = "session complete"
+            case .idle:
+                phaseDescription = "ready to start a session"
+            }
+            let project = activeSession?.projectName.flatMap { $0.isEmpty ? nil : $0 } ?? "No Project"
+            let sessionType = activeSession?.type.title ?? SessionType.coding.title
+            let duration = CodePulseFormatting.duration(elapsedDuration, includeSeconds: true)
+            let automation = activeAutomationStatusLabel.map { ", \($0)" } ?? ""
+            return "CodePulse, \(phaseDescription), \(project), \(sessionType), \(duration)\(automation)"
+        }
+    }
+
+    func dismissLifecycleError() {
+        lifecycleErrorMessage = nil
     }
 
     var elapsedDuration: TimeInterval {
@@ -1454,6 +1483,28 @@ final class SessionStore: ObservableObject {
         return true
     }
 
+    func automationRuleStatusLabel(for rule: SessionAutomationRule) -> String {
+        guard rule.isEnabled else { return "Disabled" }
+        guard state.settings.automationEnabled else { return "Enabled · Automation Off" }
+        guard rule.isValid, isAutomationTriggerValid(rule.trigger) else {
+            return "Needs attention · Invalid rule"
+        }
+        guard let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }) else {
+            return "Needs attention · Missing preset"
+        }
+        guard let projectID = preset.projectID,
+              let project = state.projects.first(where: { $0.id == projectID }) else {
+            return "Needs attention · Missing project"
+        }
+        if project.isArchived {
+            return "Project Archived"
+        }
+        if project.requiresRelink {
+            return "Needs Relink"
+        }
+        return isAutomationRuleUsable(rule) ? "Enabled" : "Needs attention"
+    }
+
     @discardableResult
     func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
         guard !isInRecoveryMode else { return false }
@@ -1624,6 +1675,7 @@ final class SessionStore: ObservableObject {
             // The durable replacement and its readback have completed. This is
             // the first point where the live in-memory store may change.
             state = restoredState
+            stateRevision += 1
             isInRecoveryMode = false
             lifecycleErrorMessage = nil
             now = restoreAcceptanceDate
@@ -1685,8 +1737,18 @@ final class SessionStore: ObservableObject {
                 try persistence.saveCritical(normalizedState)
             } catch {
                 lastCriticalCommitFailed = true
-                lifecycleErrorMessage = error.localizedDescription
-                NSLog("CodePulse critical lifecycle commit failed: %@", error.localizedDescription)
+                if let persistenceError = error as? StatePersistenceError {
+                    lifecycleErrorMessage = persistenceError.errorDescription
+                        ?? "CodePulse couldn't save this lifecycle change. Try again or open Recovery."
+                    NSLog(
+                        "CodePulse critical lifecycle commit failed (%@): %@",
+                        persistenceError.logIdentifier,
+                        persistenceError.technicalDescription
+                    )
+                } else {
+                    lifecycleErrorMessage = "CodePulse couldn't save this lifecycle change. Your previous session state is unchanged. Try again or dismiss this message."
+                    NSLog("CodePulse critical lifecycle commit failed: %@", error.localizedDescription)
+                }
                 return false
             }
             lastCriticalCommitFailed = false
@@ -1696,6 +1758,7 @@ final class SessionStore: ObservableObject {
         }
 
         state = normalizedState
+        stateRevision += 1
         configureApplicationMonitoring()
         return true
     }
