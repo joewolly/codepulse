@@ -43,7 +43,12 @@ struct CodePulseApp: App {
         // installed on the next run-loop turn, so onboarding cannot become an
         // authority over lifecycle recovery or menu-bar availability.
         DispatchQueue.main.async { [weak windowCoordinator] in
-            windowCoordinator?.showOnboardingIfNeeded()
+            guard let windowCoordinator else { return }
+            if store.isInRecoveryMode {
+                windowCoordinator.showRecoveryIfNeeded()
+            } else {
+                windowCoordinator.showOnboardingIfNeeded()
+            }
         }
     }
 

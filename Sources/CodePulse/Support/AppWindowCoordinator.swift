@@ -7,6 +7,7 @@ final class AppWindowCoordinator: ObservableObject {
     private var historyWindow: NSWindow?
     private var insightsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
+    private var recoveryWindow: NSWindow?
 
     init(store: SessionStore) {
         self.store = store
@@ -67,7 +68,7 @@ final class AppWindowCoordinator: ObservableObject {
     }
 
     func showOnboardingIfNeeded() {
-        guard store.shouldPresentOnboarding else { return }
+        guard !store.isInRecoveryMode, store.shouldPresentOnboarding else { return }
         showOnboarding()
     }
 
@@ -90,6 +91,37 @@ final class AppWindowCoordinator: ObservableObject {
             newWindow.isRestorable = false
             newWindow.center()
             onboardingWindow = newWindow
+            window = newWindow
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func showRecoveryIfNeeded() {
+        guard store.isInRecoveryMode else { return }
+        showRecovery()
+    }
+
+    func showRecovery() {
+        let window: NSWindow
+        if let recoveryWindow, recoveryWindow.isVisible {
+            window = recoveryWindow
+        } else {
+            let content = RecoveryView { [weak self] in
+                self?.recoveryWindow?.close()
+            }
+            .environmentObject(store)
+            let hostingController = NSHostingController(rootView: content)
+            let newWindow = NSWindow(contentViewController: hostingController)
+            newWindow.title = "CodePulse Recovery"
+            newWindow.styleMask = [.titled, .closable]
+            newWindow.setContentSize(NSSize(width: 620, height: 300))
+            newWindow.minSize = NSSize(width: 620, height: 300)
+            newWindow.isReleasedWhenClosed = false
+            newWindow.isRestorable = false
+            newWindow.center()
+            recoveryWindow = newWindow
             window = newWindow
         }
 

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarPopoverView: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.dismiss) private var dismiss
     private let onDismiss: (() -> Void)?
     private let onOpenInsights: (() -> Void)?
@@ -16,22 +17,55 @@ struct MenuBarPopoverView: View {
         let dismissPopover = onDismiss ?? { dismiss() }
 
         VStack(alignment: .leading, spacing: 0) {
-            switch store.phase {
-            case .idle:
-                IdleSessionView()
-            case .running, .paused:
-                ActiveSessionView()
-            case .finishing:
-                FinishingSessionView()
+            if let lifecycleErrorMessage = store.lifecycleErrorMessage,
+               !store.isInRecoveryMode {
+                Label(lifecycleErrorMessage, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 12)
             }
 
-            Divider()
-                .padding(.top, 16)
+            if store.isInRecoveryMode {
+                RecoveryUnavailablePopoverView {
+                    windowCoordinator.showRecovery()
+                }
+            } else {
+                switch store.phase {
+                case .idle:
+                    IdleSessionView()
+                case .running, .paused:
+                    ActiveSessionView()
+                case .finishing:
+                    FinishingSessionView()
+                }
 
-            PopoverFooter(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
+                Divider()
+                    .padding(.top, 16)
+
+                PopoverFooter(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
+            }
         }
         .padding(18)
         .frame(width: 350)
+    }
+}
+
+private struct RecoveryUnavailablePopoverView: View {
+    let showRecovery: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Saved data unavailable", systemImage: "lock.trianglebadge.exclamationmark")
+                .font(.headline)
+            Text("CodePulse is read-only until you restore a valid backup.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open Recovery…", action: showRecovery)
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint("Opens options to restore a backup or show the local data folder")
+        }
     }
 }
 
@@ -317,6 +351,12 @@ private struct FinishingSessionView: View {
             .accessibilityLabel("Discard Session")
             .accessibilityValue("Discard Session")
             .accessibilityHint("Discards the completed coding session")
+        }
+        .onAppear {
+            outcome = store.activeSession?.outcome ?? ""
+        }
+        .onChange(of: outcome) { newValue in
+            _ = store.updateFinishingOutcome(newValue)
         }
     }
 }
