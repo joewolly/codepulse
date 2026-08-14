@@ -151,8 +151,8 @@ CodePulse does not store GitHub credentials, ask for a Personal Access Token, or
 perform GitHub mutations. Downloaded updates are authenticated with an Ed25519
 signature before installation.
 
-Insights in CodePulse 0.7 are derived in memory from the local session records
-already described above. Timeframe totals, counts, project/work-type
+Insights are derived in memory from the local session records already described
+above. Timeframe totals, counts, project/work-type
 breakdowns, developer-tool participation, Git totals, and GitHub repository/PR
 aggregates are not stored in a separate analytics database or uploaded. GitHub
 context shown for a historical session is the snapshot saved with that session;

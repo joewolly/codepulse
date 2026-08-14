@@ -13,6 +13,8 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
+The current release is CodePulse **1.0.0 (build 1000)**.
+
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
 </p>
@@ -59,9 +61,9 @@ approval. Follow the safe first-launch instructions in
 [`docs/releasing.md`](docs/releasing.md#installation-and-gatekeeper); do not
 disable Gatekeeper globally.
 
-Starting with CodePulse 0.4.2, authenticated in-app updates are provided by
-Sparkle. After the initial installation, use **Settings → Check for Updates…**
-or allow the automatic update check.
+Authenticated in-app updates are provided by Sparkle. After the initial
+installation, use **Settings → Check for Updates…** or allow the automatic
+update check.
 
 ## Quick start
 
@@ -94,7 +96,7 @@ Use **Settings → Data → Export Backup…** to save a portable, pretty-printe
 backup of local CodePulse projects, settings, presets, automation rules, saved
 sessions, captured Git/GitHub context, developer-tool session context, and any
 active-session timeline. The backup format remains `codepulse-backup` version 1,
-so backups exported by CodePulse 0.8 can be restored by 0.9.
+so backups exported by CodePulse 0.8 and 0.9 can be restored by 1.0.0.
 
 Use **Settings → Data → Restore Backup…** to inspect the selected backup before
 confirming. Restore replaces the current local CodePulse data; it does not merge
