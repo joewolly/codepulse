@@ -82,6 +82,7 @@ struct OnboardingView: View {
                 Button("Skip Introduction") {
                     completeAndDismiss()
                 }
+                .keyboardShortcut(.cancelAction)
                 .accessibilityHint("Marks the introduction as complete without changing session or feature settings")
 
                 Button(primaryActionTitle) {
