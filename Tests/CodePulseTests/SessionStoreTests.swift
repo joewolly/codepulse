@@ -350,6 +350,200 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotNil(JSONFilePersistence(fileURL: stateURL).load().activeSession)
     }
 
+    func testJSONCriticalCommitFailuresBeforeReplacementLeaveLiveBytesUnchanged() throws {
+        let points: [StateRestoreFailurePoint] = [
+            .candidateEncoding,
+            .candidateWrite,
+            .candidateVerification,
+            .liveReplacement
+        ]
+        for point in points {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("CodePulseCriticalBoundary-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let stateURL = root.appendingPathComponent("CodePulse/state.json")
+            let stateA = AppState(settings: CodePulseSettings(globalShortcutEnabled: false))
+            let stateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+            let base = JSONFilePersistence(fileURL: stateURL)
+            base.save(stateA)
+            let persistence = JSONFilePersistence(
+                fileURL: stateURL,
+                failureInjector: { injected in
+                    if Self.sameFailurePoint(injected, point) {
+                        throw CriticalSaveFailure()
+                    }
+                }
+            )
+            XCTAssertEqual(persistence.load(), stateA)
+            let before = try Data(contentsOf: stateURL)
+
+            XCTAssertThrowsError(try persistence.saveCritical(stateB)) { error in
+                guard case .criticalCommitFailed = (error as? StatePersistenceError) else {
+                    return XCTFail("Expected critical commit failure")
+                }
+            }
+            XCTAssertEqual(try Data(contentsOf: stateURL), before)
+            let leftovers = try FileManager.default.contentsOfDirectory(
+                at: stateURL.deletingLastPathComponent(),
+                includingPropertiesForKeys: nil
+            ).filter { $0.lastPathComponent.hasPrefix(".state.critical-") }
+            XCTAssertTrue(leftovers.isEmpty)
+        }
+    }
+
+    func testJSONCriticalCommitDetectsTruncatedLiveStateAndRollsBack() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseCriticalVerification-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let stateA = AppState(settings: CodePulseSettings(globalShortcutEnabled: false))
+        let stateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        let persistence = JSONFilePersistence(
+            fileURL: stateURL,
+            failureInjector: { point in
+                if case .liveVerification = point {
+                    try Data().write(to: stateURL, options: .atomic)
+                }
+            }
+        )
+        persistence.save(stateA)
+        let before = try Data(contentsOf: stateURL)
+
+        XCTAssertThrowsError(try persistence.saveCritical(stateB)) { error in
+            guard case .criticalCommitFailed = (error as? StatePersistenceError) else {
+                return XCTFail("Expected live verification failure")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: stateURL), before)
+        XCTAssertEqual(persistence.loadStatus, .loaded)
+        XCTAssertEqual(persistence.load(), stateA)
+    }
+
+    func testJSONCriticalCommitDurabilityFailureRollsBack() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseCriticalDurability-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let stateA = AppState(settings: CodePulseSettings(globalShortcutEnabled: false))
+        let stateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        let persistence = JSONFilePersistence(
+            fileURL: stateURL,
+            failureInjector: { point in
+                if Self.sameFailurePoint(point, .liveDurability) {
+                    throw CriticalSaveFailure()
+                }
+            }
+        )
+        persistence.save(stateA)
+        let before = try Data(contentsOf: stateURL)
+
+        XCTAssertThrowsError(try persistence.saveCritical(stateB)) { error in
+            guard case .criticalCommitFailed = (error as? StatePersistenceError) else {
+                return XCTFail("Expected durability failure")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: stateURL), before)
+        XCTAssertEqual(persistence.loadStatus, .loaded)
+    }
+
+    func testJSONCriticalCommitRollbackFailureEntersRecoveryModeAndBlocksWrites() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseCriticalRollback-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let stateA = AppState(settings: CodePulseSettings(globalShortcutEnabled: false))
+        let stateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        let stateC = AppState(settings: CodePulseSettings(idleAppearance: .iconOnly))
+        let persistence = JSONFilePersistence(
+            fileURL: stateURL,
+            failureInjector: { point in
+                if Self.sameFailurePoint(point, .afterLiveReplacement) ||
+                    Self.sameFailurePoint(point, .rollbackWrite) {
+                    throw CriticalSaveFailure()
+                }
+            }
+        )
+        persistence.save(stateA)
+        let before = try Data(contentsOf: stateURL)
+
+        XCTAssertThrowsError(try persistence.saveCritical(stateB)) { error in
+            guard case .criticalCommitRollbackFailed = (error as? StatePersistenceError) else {
+                return XCTFail("Expected severe rollback failure")
+            }
+        }
+        XCTAssertEqual(persistence.loadStatus, .unreadable)
+        let afterFailure = try Data(contentsOf: stateURL)
+        XCTAssertNotEqual(afterFailure, before)
+
+        persistence.save(stateC)
+        XCTAssertEqual(try Data(contentsOf: stateURL), afterFailure)
+        XCTAssertThrowsError(try persistence.saveCritical(stateC)) { error in
+            guard case .unreadablePrimaryState = (error as? StatePersistenceError) else {
+                return XCTFail("Expected unreadable-primary-state rejection")
+            }
+        }
+    }
+
+    func testJSONCriticalCommitRejectsUnsafeStoragePathWithoutWrapping() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseCriticalUnsafePath-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let managed = root.appendingPathComponent("managed", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: managed, withDestinationURL: outside)
+        let stateURL = managed.appendingPathComponent("state.json")
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+
+        XCTAssertThrowsError(try persistence.saveCritical(AppState())) { error in
+            guard case .unsafeStoragePath = (error as? StatePersistenceError) else {
+                return XCTFail("Expected unsafe storage path")
+            }
+        }
+        XCTAssertEqual(persistence.loadStatus, .notLoaded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outside.appendingPathComponent("state.json").path))
+    }
+
+    func testUnsafeStatePathEntersRecoveryWithoutFreshInstallOnboarding() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseLoadUnsafePath-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let managed = root.appendingPathComponent("managed", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: managed, withDestinationURL: outside)
+        let stateURL = managed.appendingPathComponent("state.json")
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+
+        XCTAssertEqual(persistence.loadStatus, .unsafePath)
+        XCTAssertTrue(store.isInRecoveryMode)
+        XCTAssertFalse(store.shouldPresentOnboarding)
+        XCTAssertNil(store.addProject(name: "Blocked", folderURL: nil))
+        XCTAssertThrowsError(try persistence.saveCritical(AppState())) { error in
+            guard case .unsafeStoragePath = (error as? StatePersistenceError) else {
+                return XCTFail("Expected unsafe storage path")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outside.appendingPathComponent("state.json").path))
+    }
+
     func testMissingStateIsFreshButUnreadableStateIsReadOnlyUntilExplicitRestore() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodePulseRecovery-\(UUID().uuidString)", isDirectory: true)
@@ -703,6 +897,25 @@ final class SessionStoreTests: XCTestCase {
         store.refresh()
 
         XCTAssertEqual(store.todayTotal(), 60, accuracy: 0.001)
+    }
+
+    private static func sameFailurePoint(_ lhs: StateRestoreFailurePoint, _ rhs: StateRestoreFailurePoint) -> Bool {
+        switch (lhs, rhs) {
+        case (.recoveryWrite, .recoveryWrite),
+             (.recoveryVerification, .recoveryVerification),
+             (.candidateEncoding, .candidateEncoding),
+             (.candidateWrite, .candidateWrite),
+             (.candidateVerification, .candidateVerification),
+             (.liveReplacement, .liveReplacement),
+             (.liveDurability, .liveDurability),
+             (.afterLiveReplacement, .afterLiveReplacement),
+             (.liveVerification, .liveVerification),
+             (.rollbackWrite, .rollbackWrite),
+             (.rollbackVerification, .rollbackVerification):
+            return true
+        default:
+            return false
+        }
     }
 
     private func makeStore(

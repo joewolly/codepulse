@@ -104,7 +104,7 @@ final class SessionStore: ObservableObject {
         self.calendar = calendar
         self.currentLaunchAtLoginState = currentLaunchAtLoginState
         let loadedState = persistence.load()
-        let recoveryMode = persistence.loadStatus.isUnreadable
+        let recoveryMode = persistence.loadStatus.requiresRecovery
         self.state = loadedState
         self.isInRecoveryMode = recoveryMode
         let initialNow = clock.now

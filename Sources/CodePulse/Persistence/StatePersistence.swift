@@ -1,13 +1,19 @@
 import Foundation
+import Darwin
 
 enum StateLoadStatus: Equatable {
     case notLoaded
     case missing
     case loaded
     case unreadable
+    case unsafePath
 
     var isUnreadable: Bool {
         self == .unreadable
+    }
+
+    var requiresRecovery: Bool {
+        isUnreadable || self == .unsafePath
     }
 }
 
@@ -44,9 +50,11 @@ protocol StateRestoring: AnyObject {
 enum StateRestoreFailurePoint {
     case recoveryWrite
     case recoveryVerification
+    case candidateEncoding
     case candidateWrite
     case candidateVerification
     case liveReplacement
+    case liveDurability
     case afterLiveReplacement
     case liveVerification
     case rollbackWrite
@@ -150,6 +158,12 @@ enum StatePersistenceError: LocalizedError {
 }
 
 struct AutomaticRecoveryBackupFilename: Equatable {
+    enum Kind: Equatable {
+        case preRestore
+        case unreadableState
+    }
+
+    let kind: Kind
     let timestamp: Date
     let collisionSuffix: Int
 
@@ -158,7 +172,18 @@ struct AutomaticRecoveryBackupFilename: Equatable {
         guard let match = pattern.firstMatch(in: fileName, options: [], range: range),
               match.range.location == 0,
               match.range.length == range.length,
-              let timestampRange = Range(match.range(at: 1), in: fileName) else {
+              let kindRange = Range(match.range(at: 1), in: fileName),
+              let timestampRange = Range(match.range(at: 2), in: fileName) else {
+            return nil
+        }
+
+        let kind: Kind
+        switch fileName[kindRange] {
+        case "Pre-Restore Backup":
+            kind = .preRestore
+        case "Unreadable State":
+            kind = .unreadableState
+        default:
             return nil
         }
 
@@ -166,9 +191,9 @@ struct AutomaticRecoveryBackupFilename: Equatable {
         guard let timestamp = parseTimestamp(timestampText) else { return nil }
 
         let collisionSuffix: Int
-        if match.range(at: 2).location == NSNotFound {
+        if match.range(at: 3).location == NSNotFound {
             collisionSuffix = 0
-        } else if let suffixRange = Range(match.range(at: 2), in: fileName),
+        } else if let suffixRange = Range(match.range(at: 3), in: fileName),
                   let suffix = Int(fileName[suffixRange]) {
             collisionSuffix = suffix
         } else {
@@ -176,13 +201,14 @@ struct AutomaticRecoveryBackupFilename: Equatable {
         }
 
         return AutomaticRecoveryBackupFilename(
+            kind: kind,
             timestamp: timestamp,
             collisionSuffix: collisionSuffix
         )
     }
 
     private static let pattern = try! NSRegularExpression(
-        pattern: #"^Pre-Restore Backup ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z)(?:-([1-9][0-9]*))?\.json$"#
+        pattern: #"^(Pre-Restore Backup|Unreadable State) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z)(?:-([1-9][0-9]*))?\.json$"#
     )
 
     private static func parseTimestamp(_ value: String) -> Date? {
@@ -233,7 +259,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         do {
             _ = try CodePulseManagedStorage.validateStateFile(fileURL)
         } catch {
-            loadStatus = .unreadable
+            loadStatus = .unsafePath
             NSLog("CodePulse refused to load an unsafe local state path.")
             return AppState()
         }
@@ -265,8 +291,13 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
     }
 
     func save(_ state: AppState) {
-        guard !loadStatus.isUnreadable else {
-            NSLog("CodePulse refused to replace an unreadable local state file with a new state.")
+        guard !loadStatus.requiresRecovery else {
+            switch loadStatus {
+            case .unsafePath:
+                NSLog("CodePulse refused to replace state through an unsafe local storage path.")
+            default:
+                NSLog("CodePulse refused to replace an unreadable local state file with a new state.")
+            }
             return
         }
         do {
@@ -279,11 +310,15 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
     }
 
     func saveCritical(_ state: AppState) throws {
+        if loadStatus == .unsafePath {
+            throw StatePersistenceError.unsafeStoragePath
+        }
         guard !loadStatus.isUnreadable else {
             throw StatePersistenceError.unreadablePrimaryState
         }
 
         do {
+            try inject(.candidateEncoding)
             let data = try encoder.encode(state)
             try writeStateDataCritically(data, expectedState: state)
             loadStatus = .loaded
@@ -321,13 +356,14 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
 
         let unreadablePrimaryData: Data?
         if loadStatus.isUnreadable {
-            do {
-                guard fileManager.fileExists(atPath: fileURL.path) else {
-                    throw ManagedStoragePathError.targetIsNotRegularFile
+            if fileManager.fileExists(atPath: fileURL.path) {
+                do {
+                    unreadablePrimaryData = try Data(contentsOf: fileURL)
+                } catch {
+                    throw StatePersistenceError.recoveryBackupWriteFailed(fileURL, error)
                 }
-                unreadablePrimaryData = try Data(contentsOf: fileURL)
-            } catch {
-                throw StatePersistenceError.recoveryBackupWriteFailed(fileURL, error)
+            } else {
+                unreadablePrimaryData = nil
             }
         } else {
             unreadablePrimaryData = nil
@@ -379,9 +415,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         // Retention is deliberately after a new recovery file has been
         // durably written and verified. Only exact generated filenames are
         // eligible; user-exported JSON is never scanned or pruned.
-        if unreadablePrimaryData == nil {
-            pruneAutomaticRecoveryBackups(in: recoveryDirectory, preserving: recoveryURL)
-        }
+        pruneAutomaticRecoveryBackups(in: recoveryDirectory, preserving: recoveryURL)
 
         let candidateData: Data
         do {
@@ -502,11 +536,16 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
     }
 
     private func writeStateDataCritically(_ data: Data, expectedState: AppState) throws {
-        let storageDirectory = try CodePulseManagedStorage.validateStateFile(fileURL)
-        try CodePulseManagedStorage.ensurePrivateDirectory(
-            storageDirectory,
-            through: storageDirectory.deletingLastPathComponent()
-        )
+        let storageDirectory: URL
+        do {
+            storageDirectory = try CodePulseManagedStorage.validateStateFile(fileURL)
+            try CodePulseManagedStorage.ensurePrivateDirectory(
+                storageDirectory,
+                through: storageDirectory.deletingLastPathComponent()
+            )
+        } catch {
+            throw StatePersistenceError.unsafeStoragePath
+        }
 
         let previousData: Data?
         if fileManager.fileExists(atPath: fileURL.path) {
@@ -531,6 +570,8 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             try inject(.liveReplacement)
             liveReplacementStarted = true
             try replaceLiveState(with: temporary, in: storageDirectory)
+            try inject(.liveDurability)
+            try flushCriticalStateDurably(in: storageDirectory)
             try inject(.afterLiveReplacement)
             try inject(.liveVerification)
             // The candidate was already decoded and checked before the live
@@ -548,13 +589,45 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
 
             do {
                 try rollbackRawState(to: previousData, in: storageDirectory)
+                try flushCriticalStateDurably(
+                    in: storageDirectory,
+                    stateFileExists: previousData != nil
+                )
             } catch let rollbackError {
+                loadStatus = .unreadable
                 throw StatePersistenceError.criticalCommitRollbackFailed(
                     commitError,
                     rollbackError
                 )
             }
             throw StatePersistenceError.criticalCommitFailed(commitError)
+        }
+    }
+
+    private func flushCriticalStateDurably(
+        in directory: URL,
+        stateFileExists: Bool = true
+    ) throws {
+        if stateFileExists {
+            let stateDescriptor = open(fileURL.path, O_RDONLY)
+            guard stateDescriptor >= 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            defer { close(stateDescriptor) }
+
+            guard fcntl(stateDescriptor, F_FULLFSYNC) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        }
+
+        let directoryDescriptor = open(directory.path, O_RDONLY | O_DIRECTORY)
+        guard directoryDescriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        defer { close(directoryDescriptor) }
+
+        guard fsync(directoryDescriptor) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
     }
 
@@ -700,21 +773,29 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
 
         let preservedPath = recoveryURL.standardizedFileURL
-        let newestOtherFirst = automatic
-            .filter { $0.url.standardizedFileURL != preservedPath }
-            .sorted { lhs, rhs in
-                if lhs.name.timestamp != rhs.name.timestamp {
-                    return lhs.name.timestamp > rhs.name.timestamp
-                }
-                if lhs.name.collisionSuffix != rhs.name.collisionSuffix {
-                    return lhs.name.collisionSuffix > rhs.name.collisionSuffix
-                }
-                return lhs.url.lastPathComponent > rhs.url.lastPathComponent
+        for entries in Dictionary(grouping: automatic, by: { $0.name.kind }).values {
+            let preservesCurrent = entries.contains {
+                $0.url.standardizedFileURL == preservedPath
             }
+            let newestOtherFirst = entries
+                .filter { $0.url.standardizedFileURL != preservedPath }
+                .sorted { lhs, rhs in
+                    if lhs.name.timestamp != rhs.name.timestamp {
+                        return lhs.name.timestamp > rhs.name.timestamp
+                    }
+                    if lhs.name.collisionSuffix != rhs.name.collisionSuffix {
+                        return lhs.name.collisionSuffix > rhs.name.collisionSuffix
+                    }
+                    return lhs.url.lastPathComponent > rhs.url.lastPathComponent
+                }
 
-        let olderRetentionCount = max(0, Self.automaticRecoveryRetentionCount - 1)
-        for entry in newestOtherFirst.dropFirst(olderRetentionCount) {
-            try? fileManager.removeItem(at: entry.url)
+            let olderRetentionCount = max(
+                0,
+                Self.automaticRecoveryRetentionCount - (preservesCurrent ? 1 : 0)
+            )
+            for entry in newestOtherFirst.dropFirst(olderRetentionCount) {
+                try? fileManager.removeItem(at: entry.url)
+            }
         }
     }
 

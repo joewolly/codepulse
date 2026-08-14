@@ -325,6 +325,35 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertEqual(try permissions(of: receipt.recoveryBackupURL.deletingLastPathComponent()), 0o700)
     }
 
+    func testUnreadableRestoreTreatsDisappearedPrimaryAsMissing() throws {
+        let root = try temporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let stateA = AppState(settings: CodePulseSettings(globalShortcutEnabled: false))
+        let stateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{ malformed state".utf8).write(to: stateURL, options: .atomic)
+
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        XCTAssertEqual(persistence.load(), AppState())
+        XCTAssertEqual(persistence.loadStatus, .unreadable)
+        try FileManager.default.removeItem(at: stateURL)
+
+        let receipt = try persistence.replaceStateTransactionally(
+            with: stateB,
+            recoverySnapshot: stateA,
+            exportedAt: now
+        )
+
+        XCTAssertEqual(persistence.loadStatus, .loaded)
+        XCTAssertEqual(persistence.load(), stateB)
+        XCTAssertTrue(receipt.recoveryBackupURL.lastPathComponent.hasPrefix("Pre-Restore Backup "))
+        let recovery = try CodePulseBackupCodec.decode(Data(contentsOf: receipt.recoveryBackupURL))
+        XCTAssertEqual(recovery.state, CodePulseBackupCodec.portableState(from: stateA))
+    }
+
     func testFailuresBeforeLiveReplacementLeaveCurrentStateByteIdentical() throws {
         let points: [StateRestoreFailurePoint] = [
             .recoveryWrite,
@@ -477,11 +506,83 @@ final class BackupRestoreTests: XCTestCase {
         }
     }
 
+    func testRecoveryRetentionKeepsNewestFivePerKindAndLeavesMalformedFilesUnmanaged() throws {
+        let root = try temporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let backupDirectory = stateURL.deletingLastPathComponent().appendingPathComponent("Backups")
+        let corruptData = Data("{ truncated state".utf8)
+        let normalStateA = AppState(settings: CodePulseSettings(globalShortcutEnabled: false))
+        let normalStateB = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let initialPersistence = JSONFilePersistence(fileURL: stateURL)
+        initialPersistence.save(AppState())
+        try FileManager.default.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        let manualUnreadableCopy = backupDirectory.appendingPathComponent(
+            "Unreadable State 2026-08-13T22-15-01Z-manual.json"
+        )
+        try corruptData.write(to: manualUnreadableCopy, options: .atomic)
+
+        var normalReceipts: [StateRestoreReceipt] = []
+        for offset in 0..<7 {
+            normalReceipts.append(try initialPersistence.replaceStateTransactionally(
+                with: offset.isMultiple(of: 2) ? normalStateA : normalStateB,
+                recoverySnapshot: normalStateA,
+                exportedAt: now.addingTimeInterval(TimeInterval(offset))
+            ))
+        }
+
+        var receipts: [StateRestoreReceipt] = []
+        for offset in 0..<7 {
+            try corruptData.write(to: stateURL, options: .atomic)
+            let persistence = JSONFilePersistence(fileURL: stateURL)
+            XCTAssertEqual(persistence.loadStatus, .notLoaded)
+            XCTAssertEqual(persistence.load(), AppState())
+            XCTAssertEqual(persistence.loadStatus, .unreadable)
+            receipts.append(try persistence.replaceStateTransactionally(
+                with: AppState(settings: CodePulseSettings(
+                    menuBarDisplay: offset.isMultiple(of: 2) ? .timerOnly : .iconOnly
+                )),
+                recoverySnapshot: AppState(),
+                exportedAt: now.addingTimeInterval(TimeInterval(offset + 10))
+            ))
+        }
+
+        let files = try FileManager.default.contentsOfDirectory(
+            at: backupDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey]
+        )
+        let automatic = files.compactMap {
+            AutomaticRecoveryBackupFilename.parse($0.lastPathComponent)
+        }
+        let automaticByKind = Dictionary(grouping: automatic, by: { $0.kind })
+        XCTAssertEqual(automaticByKind[.preRestore]?.count, 5)
+        XCTAssertEqual(automaticByKind[.unreadableState]?.count, 5)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: manualUnreadableCopy.path))
+        for receipt in normalReceipts.prefix(2) {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path))
+        }
+        for receipt in normalReceipts.suffix(5) {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path))
+        }
+        for receipt in receipts.prefix(2) {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path))
+        }
+        for receipt in receipts.suffix(5) {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: receipt.recoveryBackupURL.path))
+            XCTAssertEqual(try Data(contentsOf: receipt.recoveryBackupURL), corruptData)
+        }
+    }
+
     func testAutomaticRecoveryFilenameMatcherUsesExactGeneratedGrammar() {
         let matching: [(String, Int)] = [
             ("Pre-Restore Backup 2026-08-13T22-15-01Z.json", 0),
             ("Pre-Restore Backup 2026-08-13T22-15-01Z-1.json", 1),
-            ("Pre-Restore Backup 2026-08-13T22-15-01Z-999.json", 999)
+            ("Pre-Restore Backup 2026-08-13T22-15-01Z-999.json", 999),
+            ("Unreadable State 2026-08-13T22-15-01Z.json", 0),
+            ("Unreadable State 2026-08-13T22-15-01Z-1.json", 1)
         ]
         for (fileName, suffix) in matching {
             XCTAssertEqual(
@@ -495,11 +596,36 @@ final class BackupRestoreTests: XCTestCase {
             "Pre-Restore Backup important-copy.json",
             "Pre-Restore Backup 2026-08-13.json",
             "Pre-Restore Backup 2026-08-13T22-15-01Z-manual.json",
+            "Unreadable State 2026-08-13T22-15-01Z-manual.json",
             "Pre-Restore Backup 2026-08-13T22-15-01Z.txt",
             "my Pre-Restore Backup 2026-08-13T22-15-01Z.json"
         ]
         for fileName in nonMatching {
             XCTAssertNil(AutomaticRecoveryBackupFilename.parse(fileName), fileName)
+        }
+    }
+
+    func testUnreadableRecoveryCopyCannotBeInspectedAsRestoreCandidate() throws {
+        let root = try temporaryDirectory()
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        persistence.save(AppState())
+        let store = SessionStore(
+            persistence: persistence,
+            clock: RestoreTestClock(now),
+            automaticallyRefresh: false
+        )
+        let unreadableURL = root.appendingPathComponent(
+            "CodePulse/Backups/Unreadable State 2026-08-13T22-15-01Z.json"
+        )
+        try FileManager.default.createDirectory(
+            at: unreadableURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{ not a backup }".utf8).write(to: unreadableURL, options: .atomic)
+
+        XCTAssertThrowsError(try store.inspectBackup(at: unreadableURL)) { error in
+            XCTAssertEqual(error as? CodePulseBackupError, .malformedJSON)
         }
     }
 
@@ -726,9 +852,11 @@ final class BackupRestoreTests: XCTestCase {
         switch (lhs, rhs) {
         case (.recoveryWrite, .recoveryWrite),
              (.recoveryVerification, .recoveryVerification),
+             (.candidateEncoding, .candidateEncoding),
              (.candidateWrite, .candidateWrite),
              (.candidateVerification, .candidateVerification),
              (.liveReplacement, .liveReplacement),
+             (.liveDurability, .liveDurability),
              (.afterLiveReplacement, .afterLiveReplacement),
              (.liveVerification, .liveVerification),
              (.rollbackWrite, .rollbackWrite),
