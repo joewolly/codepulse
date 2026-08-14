@@ -64,13 +64,13 @@ awk '
   }
 ' "$workflow_path" || exit 1
 
-! rg -q 'SPARKLE_PRIVATE_KEY_BASE64' "$workflow_path" ||
+! grep -Fq 'SPARKLE_PRIVATE_KEY_BASE64' "$workflow_path" ||
   fail "release preflight must not reference the production Sparkle key"
-rg -q 'PREFLIGHT_VERSION: \$\{\{ inputs\.version \}\}' "$workflow_path" ||
+grep -Fq 'PREFLIGHT_VERSION: ${{ inputs.version }}' "$workflow_path" ||
   fail "version input is not passed through an environment variable"
-rg -q 'PREFLIGHT_BUILD: \$\{\{ inputs\.build \}\}' "$workflow_path" ||
+grep -Fq 'PREFLIGHT_BUILD: ${{ inputs.build }}' "$workflow_path" ||
   fail "build input is not passed through an environment variable"
-rg -q '\.build/artifacts/sparkle/Sparkle/bin' "$workflow_path" ||
+grep -Fq '.build/artifacts/sparkle/Sparkle/bin' "$workflow_path" ||
   fail "release preflight does not use the deterministic Sparkle artifact path"
 
 echo "Release preflight workflow safety checks passed"
