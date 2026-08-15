@@ -26,11 +26,11 @@ The current release is CodePulse **1.0.0 (build 1000)**.
 
 ### History
 
-![CodePulse History showing privacy-safe sample coding sessions](docs/images/history.png)
+<img src="docs/images/history.png" alt="CodePulse History showing privacy-safe sample coding sessions" width="760">
 
 ### Insights
 
-![CodePulse Insights showing local summary metrics, activity, work types, and project totals](docs/images/insights.png)
+<img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, activity, work types, and project totals" width="760">
 
 ## What it does
 
