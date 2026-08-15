@@ -13,6 +13,8 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
+The current release is CodePulse **1.0.0 (build 1000)**.
+
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
 </p>
@@ -59,9 +61,9 @@ approval. Follow the safe first-launch instructions in
 [`docs/releasing.md`](docs/releasing.md#installation-and-gatekeeper); do not
 disable Gatekeeper globally.
 
-Starting with CodePulse 0.4.2, authenticated in-app updates are provided by
-Sparkle. After the initial installation, use **Settings → Check for Updates…**
-or allow the automatic update check.
+Authenticated in-app updates are provided by Sparkle. After the initial
+installation, use **Settings → Check for Updates…** or allow the automatic
+update check.
 
 ## Quick start
 
@@ -81,13 +83,20 @@ or allow the automatic update check.
 Projects are optional. Adding a project grants CodePulse access only to the
 folder you select, allowing it to read local Git metadata for that project.
 
+## Getting started
+
+On a fresh installation, CodePulse shows a short native introduction covering
+local storage, optional Projects, and the first-session workflow. Accounts,
+developer integrations, and Session Automation are optional. You can revisit
+the introduction later from **Settings → General → Show Introduction…**.
+
 ## Backup and restore
 
 Use **Settings → Data → Export Backup…** to save a portable, pretty-printed JSON
 backup of local CodePulse projects, settings, presets, automation rules, saved
 sessions, captured Git/GitHub context, developer-tool session context, and any
 active-session timeline. The backup format remains `codepulse-backup` version 1,
-so backups exported by CodePulse 0.8 can be restored by 0.9.
+so backups exported by CodePulse 0.8 and 0.9 can be restored by 1.0.0.
 
 Use **Settings → Data → Restore Backup…** to inspect the selected backup before
 confirming. Restore replaces the current local CodePulse data; it does not merge
@@ -97,6 +106,22 @@ recovery backup at
 The newest five automatic pre-restore recovery backups are retained. A failed
 restore leaves the current data in place or reports whether automatic rollback
 succeeded.
+
+Lifecycle changes are durably committed before CodePulse publishes start,
+pause, resume, finish, save, or discard in memory. A failed lifecycle commit
+leaves the prior session state available for retry. Finishing sessions and
+pending automatic saves remain recoverable across relaunches, and repeated
+save/replay attempts cannot create a second completed record for the same
+session.
+
+If an existing `state.json` cannot be read, CodePulse does not treat the
+installation as fresh and does not overwrite the file. It opens a small
+read-only recovery window with **Restore Backup…**, **Show Data Folder**, and
+**Quit CodePulse**. Before an explicit restore, normal lifecycle, onboarding,
+automation, and local-control writes are disabled. The original unreadable
+bytes are preserved as a private local recovery copy when an explicit restore
+is confirmed, under
+`~/Library/Application Support/CodePulse/Backups/Unreadable State ...json`.
 
 Restore is local-only and does not contact a cloud service. Session Automation
 is restored but left disabled until it is reviewed and deliberately enabled

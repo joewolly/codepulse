@@ -34,6 +34,7 @@ enum ProjectArchiveError: LocalizedError, Equatable {
     case alreadyArchived
     case alreadyActive
     case activeSession
+    case recoveryMode
 
     var errorDescription: String? {
         switch self {
@@ -45,6 +46,8 @@ enum ProjectArchiveError: LocalizedError, Equatable {
             return "The project is already active."
         case .activeSession:
             return "Finish or discard the current session before archiving this project."
+        case .recoveryMode:
+            return "CodePulse saved data is unavailable until a valid backup is restored."
         }
     }
 }
@@ -52,8 +55,11 @@ enum ProjectArchiveError: LocalizedError, Equatable {
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
+    @Published private(set) var stateRevision = 0
     @Published private(set) var now: Date
     @Published private(set) var gitCaptureInProgress = false
+    @Published private(set) var lifecycleErrorMessage: String?
+    @Published private(set) var isInRecoveryMode: Bool
 
     let persistence: StatePersisting
     let clock: SessionClock
@@ -72,6 +78,8 @@ final class SessionStore: ObservableObject {
     private var isMonitoringApplications = false
     private let currentLaunchAtLoginState: () -> Bool
     private(set) var currentFrontmostApplication: ApplicationIdentity?
+    private var lastCriticalCommitFailed = false
+    private var controlCommandNeedsRetry = false
 
     init(
         persistence: StatePersisting,
@@ -95,7 +103,10 @@ final class SessionStore: ObservableObject {
         self.controlTransport = controlTransport
         self.calendar = calendar
         self.currentLaunchAtLoginState = currentLaunchAtLoginState
-        self.state = persistence.load()
+        let loadedState = persistence.load()
+        let recoveryMode = persistence.loadStatus.requiresRecovery
+        self.state = loadedState
+        self.isInRecoveryMode = recoveryMode
         let initialNow = clock.now
         self.now = initialNow
         self.gitCaptureSessionID = nil
@@ -103,28 +114,35 @@ final class SessionStore: ObservableObject {
         self.controlLaunchDate = initialNow
         self.lastControlScanAt = nil
         self.currentFrontmostApplication = nil
+        self.lifecycleErrorMessage = recoveryMode
+            ? "CodePulse could not read its saved data. The original state file was left unchanged."
+            : nil
+        self.lastCriticalCommitFailed = false
+        self.controlCommandNeedsRetry = false
 
         self.frontmostApplicationMonitor?.onChange = { [weak self] application in
             self?.handleFrontmostApplication(application)
         }
 
-        if state.activeSession?.phase == .idle {
+        if !isInRecoveryMode, state.activeSession?.phase == .idle {
             state.activeSession = nil
         }
 
-        var normalizedState = state
-        normalizeProjectConfiguration(in: &normalizedState)
-        relinquishInvalidAutomation(in: &normalizedState)
-        if normalizedState != state {
-            state = normalizedState
-            persistence.save(normalizedState)
-        }
+        if !isInRecoveryMode {
+            var normalizedState = state
+            normalizeProjectConfiguration(in: &normalizedState)
+            relinquishInvalidAutomation(in: &normalizedState)
+            if normalizedState != state {
+                state = normalizedState
+                persistence.save(normalizedState)
+            }
 
-        processPendingControlCommands(force: true)
-        processPendingIntegrationEvents(force: true)
-        restoreAutomaticFinishingState()
-        evaluateAutomaticLifecycle(at: clock.now)
-        configureApplicationMonitoring()
+            processPendingControlCommands(force: true)
+            processPendingIntegrationEvents(force: true)
+            restoreAutomaticFinishingState()
+            evaluateAutomaticLifecycle(at: clock.now)
+            configureApplicationMonitoring()
+        }
 
         if automaticallyRefresh {
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -158,6 +176,10 @@ final class SessionStore: ObservableObject {
         state.activeSession?.phase ?? .idle
     }
 
+    var shouldPresentOnboarding: Bool {
+        !isInRecoveryMode && !state.settings.hasCompletedOnboarding
+    }
+
     var activeAutomationStatusLabel: String? {
         guard let metadata = state.activeSession?.automationMetadata,
               metadata.controlEnabled else {
@@ -186,6 +208,34 @@ final class SessionStore: ObservableObject {
             }
         }
         return "Automatic · Multiple"
+    }
+
+    var menuBarAccessibilityText: String {
+        switch phase {
+        case .idle:
+            return "CodePulse, ready to start a session"
+        case .running, .paused, .finishing:
+            let phaseDescription: String
+            switch phase {
+            case .running:
+                phaseDescription = "running"
+            case .paused:
+                phaseDescription = "paused"
+            case .finishing:
+                phaseDescription = "session complete"
+            case .idle:
+                phaseDescription = "ready to start a session"
+            }
+            let project = activeSession?.projectName.flatMap { $0.isEmpty ? nil : $0 } ?? "No Project"
+            let sessionType = activeSession?.type.title ?? SessionType.coding.title
+            let duration = CodePulseFormatting.duration(elapsedDuration, includeSeconds: true)
+            let automation = activeAutomationStatusLabel.map { ", \($0)" } ?? ""
+            return "CodePulse, \(phaseDescription), \(project), \(sessionType), \(duration)\(automation)"
+        }
+    }
+
+    func dismissLifecycleError() {
+        lifecycleErrorMessage = nil
     }
 
     var elapsedDuration: TimeInterval {
@@ -293,6 +343,7 @@ final class SessionStore: ObservableObject {
     }
 
     func refresh() {
+        guard !isInRecoveryMode else { return }
         now = clock.now
         processPendingControlCommands()
         processPendingIntegrationEvents()
@@ -302,6 +353,7 @@ final class SessionStore: ObservableObject {
     /// Feeds only the current frontmost identity into the coordinator. No
     /// activation history is retained or persisted.
     func handleFrontmostApplication(_ application: ApplicationIdentity?) {
+        guard !isInRecoveryMode else { return }
         currentFrontmostApplication = application?.isValid == true ? application : nil
         guard state.settings.automationEnabled else { return }
 
@@ -311,7 +363,7 @@ final class SessionStore: ObservableObject {
             now: clock.now
         )
         for action in actions {
-            applyAutomationAction(action, for: nil, at: clock.now)
+            _ = applyAutomationAction(action, for: nil, at: clock.now)
         }
         evaluateAutomaticLifecycle(at: clock.now)
     }
@@ -460,6 +512,7 @@ final class SessionStore: ObservableObject {
         at startDate: Date,
         automationMetadata: SessionAutomationMetadata?
     ) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard let prepared = preparedStartState(
             projectID: projectID,
             goal: goal,
@@ -470,7 +523,7 @@ final class SessionStore: ObservableObject {
             return false
         }
 
-        commit(prepared.state)
+        guard commit(prepared.state, critical: true) else { return false }
         now = clock.now
         scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
         return true
@@ -519,24 +572,27 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func pause(at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard let prepared = preparedManualPauseState(at: date ?? clock.now) else { return false }
-        commit(prepared.state)
+        guard commit(prepared.state, critical: true) else { return false }
         refresh()
         return true
     }
 
     @discardableResult
     func resume(at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard let prepared = preparedManualResumeState(at: date ?? clock.now) else { return false }
-        commit(prepared.state)
+        guard commit(prepared.state, critical: true) else { return false }
         refresh()
         return true
     }
 
     @discardableResult
     func finish(at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard let prepared = preparedManualFinishState(at: date ?? clock.now) else { return false }
-        commit(prepared.state)
+        guard commit(prepared.state, critical: true) else { return false }
         refresh()
 
         if prepared.session.gitContext != nil {
@@ -580,27 +636,36 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func saveFinishedSession(outcome: String?) -> Bool {
+        guard !isInRecoveryMode else { return false }
         processPendingIntegrationEvents(force: true)
         guard !gitCaptureInProgress else { return false }
-        guard var session = state.activeSession,
-              session.phase == .finishing else { return false }
-        relinquishManualAutomationControl(in: &session)
-        var nextState = state
-        nextState.activeSession = session
-        commit(nextState)
         return completeFinishedSession(outcome: outcome)
     }
 
     @discardableResult
+    func updateFinishingOutcome(_ outcome: String?) -> Bool {
+        guard !isInRecoveryMode,
+              state.activeSession?.phase == .finishing else {
+            return false
+        }
+
+        var nextState = state
+        nextState.activeSession?.outcome = ActiveSession.cleanOptionalText(outcome)
+        guard nextState != state else { return true }
+        return commit(nextState, critical: true)
+    }
+
+    @discardableResult
     func discardSession() -> Bool {
-        guard state.activeSession?.phase == .finishing else { return false }
+        guard !isInRecoveryMode,
+              state.activeSession?.phase == .finishing else { return false }
         var nextState = state
         if var session = nextState.activeSession {
             relinquishManualAutomationControl(in: &session)
             nextState.activeSession = session
         }
         nextState.activeSession = nil
-        commit(nextState)
+        guard commit(nextState, critical: true) else { return false }
         gitCaptureSessionID = nil
         gitCaptureInProgress = false
         refresh()
@@ -616,8 +681,20 @@ final class SessionStore: ObservableObject {
         _ rawCommand: CodePulseControlCommand,
         at date: Date? = nil
     ) -> CodePulseControlResponse {
+        controlCommandNeedsRetry = false
         let date = date ?? clock.now
         let isMutation = isControlMutation(rawCommand.action)
+        if isInRecoveryMode {
+            controlCommandNeedsRetry = isMutation
+            return CodePulseControlResponse(
+                commandID: rawCommand.id,
+                result: .internalFailure,
+                message: isMutation
+                    ? "CodePulse saved data is unavailable; recover it before sending lifecycle commands."
+                    : "CodePulse saved data is unavailable; recover it before requesting status.",
+                status: controlStatus(at: date)
+            )
+        }
         if isMutation,
            let existing = state.controlProcessing?.processedCommands.first(where: { $0.id == rawCommand.id }) {
             return existing.response
@@ -757,11 +834,12 @@ final class SessionStore: ObservableObject {
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
-            commit(nextState)
+            let committedResponse = commitControlMutation(response, state: nextState)
+            guard committedResponse.result == .success else { return committedResponse }
             now = clock.now
             scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
             processPendingIntegrationEvents(force: true)
-            return response
+            return committedResponse
 
         case .pause:
             guard let prepared = preparedManualPauseState(at: date) else {
@@ -781,9 +859,10 @@ final class SessionStore: ObservableObject {
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
-            commit(nextState)
+            let committedResponse = commitControlMutation(response, state: nextState)
+            guard committedResponse.result == .success else { return committedResponse }
             refresh()
-            return response
+            return committedResponse
 
         case .resume:
             guard let prepared = preparedManualResumeState(at: date) else {
@@ -803,9 +882,10 @@ final class SessionStore: ObservableObject {
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
-            commit(nextState)
+            let committedResponse = commitControlMutation(response, state: nextState)
+            guard committedResponse.result == .success else { return committedResponse }
             refresh()
-            return response
+            return committedResponse
 
         case .finish:
             guard let prepared = preparedManualFinishState(at: date) else {
@@ -825,12 +905,13 @@ final class SessionStore: ObservableObject {
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
-            commit(nextState)
+            let committedResponse = commitControlMutation(response, state: nextState)
+            guard committedResponse.result == .success else { return committedResponse }
             refresh()
             if prepared.session.gitContext != nil {
                 scheduleFinalGitCapture(for: prepared.session.id)
             }
-            return response
+            return committedResponse
         }
     }
 
@@ -923,11 +1004,12 @@ final class SessionStore: ObservableObject {
         )
         var nextState = prepared.state
         appendControlResponse(response, to: &nextState, at: date)
-        commit(nextState)
+        let committedResponse = commitControlMutation(response, state: nextState)
+        guard committedResponse.result == .success else { return committedResponse }
         now = clock.now
         scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
         processPendingIntegrationEvents(force: true)
-        return response
+        return committedResponse
     }
 
     private func resolvePreset(named name: String) -> PresetResolution {
@@ -973,6 +1055,22 @@ final class SessionStore: ObservableObject {
         var nextState = state
         appendControlResponse(response, to: &nextState, at: date)
         commit(nextState)
+    }
+
+    private func commitControlMutation(
+        _ response: CodePulseControlResponse,
+        state nextState: AppState
+    ) -> CodePulseControlResponse {
+        guard commit(nextState, critical: true) else {
+            controlCommandNeedsRetry = true
+            return CodePulseControlResponse(
+                commandID: response.commandID,
+                result: .internalFailure,
+                message: "CodePulse could not durably save this lifecycle change; retry the command.",
+                status: controlStatus(at: clock.now)
+            )
+        }
+        return response
     }
 
     private func appendControlResponse(
@@ -1198,6 +1296,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func addProject(name: String, folderURL: URL?, at date: Date? = nil) -> UUID? {
+        guard !isInRecoveryMode else { return nil }
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanName.isEmpty else { return nil }
 
@@ -1221,6 +1320,7 @@ final class SessionStore: ObservableObject {
     }
 
     func renameProject(id: UUID, name: String) {
+        guard !isInRecoveryMode else { return }
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanName.isEmpty,
               let index = state.projects.firstIndex(where: { $0.id == id }) else { return }
@@ -1232,6 +1332,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func archiveProject(id: UUID, at date: Date? = nil) throws -> ProjectRecord {
+        guard !isInRecoveryMode else { throw ProjectArchiveError.recoveryMode }
         guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
             throw ProjectArchiveError.projectNotFound
         }
@@ -1258,6 +1359,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func restoreProject(id: UUID) throws -> ProjectRecord {
+        guard !isInRecoveryMode else { throw ProjectArchiveError.recoveryMode }
         guard let index = state.projects.firstIndex(where: { $0.id == id }) else {
             throw ProjectArchiveError.projectNotFound
         }
@@ -1276,6 +1378,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func updateProjectFolder(id: UUID, folderURL: URL) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard let index = state.projects.firstIndex(where: { $0.id == id }) else { return false }
 
         #if os(macOS)
@@ -1297,6 +1400,7 @@ final class SessionStore: ObservableObject {
     }
 
     func deleteProject(id: UUID) {
+        guard !isInRecoveryMode else { return }
         var nextState = state
         nextState.projects.removeAll { $0.id == id }
         if nextState.settings.specificProjectID == id {
@@ -1308,10 +1412,18 @@ final class SessionStore: ObservableObject {
     }
 
     func updateSettings(_ update: (inout CodePulseSettings) -> Void) {
+        guard !isInRecoveryMode else { return }
         var nextState = state
         update(&nextState.settings)
         relinquishInvalidAutomation(in: &nextState)
         commit(nextState)
+    }
+
+    func markOnboardingCompleted() {
+        guard !state.settings.hasCompletedOnboarding else { return }
+        updateSettings { settings in
+            settings.hasCompletedOnboarding = true
+        }
     }
 
     var sessionPresetsSorted: [SessionPreset] {
@@ -1328,6 +1440,7 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func upsertSessionPreset(_ preset: SessionPreset) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard preset.isValid,
               !state.sessionPresets.contains(where: {
                   $0.id != preset.id &&
@@ -1347,6 +1460,7 @@ final class SessionStore: ObservableObject {
     }
 
     func deleteSessionPreset(id: UUID) {
+        guard !isInRecoveryMode else { return }
         var nextState = state
         nextState.sessionPresets.removeAll { $0.id == id }
         relinquishInvalidAutomation(in: &nextState)
@@ -1371,8 +1485,31 @@ final class SessionStore: ObservableObject {
         return true
     }
 
+    func automationRuleStatusLabel(for rule: SessionAutomationRule) -> String {
+        guard rule.isEnabled else { return "Disabled" }
+        guard state.settings.automationEnabled else { return "Enabled · Automation Off" }
+        guard rule.isValid, isAutomationTriggerValid(rule.trigger) else {
+            return "Needs attention · Invalid rule"
+        }
+        guard let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }) else {
+            return "Needs attention · Missing preset"
+        }
+        guard let projectID = preset.projectID,
+              let project = state.projects.first(where: { $0.id == projectID }) else {
+            return "Needs attention · Missing project"
+        }
+        if project.isArchived {
+            return "Project Archived"
+        }
+        if project.requiresRelink {
+            return "Needs Relink"
+        }
+        return isAutomationRuleUsable(rule) ? "Enabled" : "Needs attention"
+    }
+
     @discardableResult
     func upsertAutomationRule(_ rule: SessionAutomationRule) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard rule.isValid,
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               isAutomationTriggerValid(rule.trigger) else { return false }
@@ -1394,6 +1531,7 @@ final class SessionStore: ObservableObject {
     }
 
     func deleteAutomationRule(id: UUID) {
+        guard !isInRecoveryMode else { return }
         var nextState = state
         nextState.automationRules.removeAll { $0.id == id }
         relinquishInvalidAutomation(in: &nextState)
@@ -1401,6 +1539,7 @@ final class SessionStore: ObservableObject {
     }
 
     func deleteCompletedSession(id: UUID) {
+        guard !isInRecoveryMode else { return }
         var nextState = state
         nextState.completedSessions.removeAll { $0.id == id }
         commit(nextState)
@@ -1419,6 +1558,7 @@ final class SessionStore: ObservableObject {
         project: CompletedSessionProjectAssignment,
         startedAt: Date
     ) -> Bool {
+        guard !isInRecoveryMode else { return false }
         guard let index = state.completedSessions.firstIndex(where: { $0.id == id }) else {
             return false
         }
@@ -1461,6 +1601,9 @@ final class SessionStore: ObservableObject {
     }
 
     func exportBackup(to fileURL: URL, at date: Date? = nil) throws {
+        guard !isInRecoveryMode else {
+            throw BackupRestoreError.persistence(.unreadablePrimaryState)
+        }
         let data = try CodePulseBackupCodec.encode(state: state, exportedAt: date ?? clock.now)
         try data.write(to: fileURL, options: .atomic)
     }
@@ -1534,8 +1677,12 @@ final class SessionStore: ObservableObject {
             // The durable replacement and its readback have completed. This is
             // the first point where the live in-memory store may change.
             state = restoredState
+            stateRevision += 1
+            isInRecoveryMode = false
+            lifecycleErrorMessage = nil
             now = restoreAcceptanceDate
             configureApplicationMonitoring()
+            restoreAutomaticFinishingState()
             return BackupRestoreResult(
                 preview: candidate.preview,
                 recoveryBackupURL: receipt.recoveryBackupURL
@@ -1571,17 +1718,62 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    private func commit(_ nextState: AppState) {
+    @discardableResult
+    private func commit(_ nextState: AppState, critical: Bool = false) -> Bool {
+        guard !isInRecoveryMode else {
+            if critical {
+                lastCriticalCommitFailed = true
+            }
+            return false
+        }
+
         var normalizedState = nextState
         normalizeProjectConfiguration(in: &normalizedState)
         relinquishInvalidAutomation(in: &normalizedState)
+
+        if critical {
+            // Lifecycle authority is published only after the durable write;
+            // Git, GitHub, and presentation/configuration enrichment remains
+            // best effort through the non-critical path.
+            do {
+                try persistence.saveCritical(normalizedState)
+            } catch {
+                lastCriticalCommitFailed = true
+                if let persistenceError = error as? StatePersistenceError {
+                    lifecycleErrorMessage = persistenceError.errorDescription
+                        ?? "CodePulse couldn't save this lifecycle change. Try again or open Recovery."
+                    NSLog(
+                        "CodePulse critical lifecycle commit failed (%@): %@",
+                        persistenceError.logIdentifier,
+                        persistenceError.technicalDescription
+                    )
+                } else {
+                    lifecycleErrorMessage = "CodePulse couldn't save this lifecycle change. Your previous session state is unchanged. Try again or dismiss this message."
+                    NSLog("CodePulse critical lifecycle commit failed: %@", error.localizedDescription)
+                }
+                if persistence.loadStatus.requiresRecovery {
+                    isInRecoveryMode = true
+                }
+                return false
+            }
+            lastCriticalCommitFailed = false
+            lifecycleErrorMessage = nil
+        } else {
+            persistence.save(normalizedState)
+            guard !persistence.loadStatus.requiresRecovery else {
+                isInRecoveryMode = true
+                return false
+            }
+        }
+
         state = normalizedState
-        persistence.save(normalizedState)
+        stateRevision += 1
         configureApplicationMonitoring()
+        return true
     }
 
     func processPendingControlCommands(force: Bool = false) {
-        guard let controlTransport else { return }
+        guard !isInRecoveryMode, let controlTransport else { return }
         let scanDate = clock.now
         if !force,
            let lastControlScanAt,
@@ -1607,7 +1799,9 @@ final class SessionStore: ObservableObject {
 
             do {
                 try controlTransport.writeResponse(response)
-                _ = controlTransport.removeCommand(at: url)
+                if !controlCommandNeedsRetry {
+                    _ = controlTransport.removeCommand(at: url)
+                }
             } catch {
                 // Keep the command for the next scan. Mutation responses are
                 // already persisted in the bounded ledger, so retrying the
@@ -1629,6 +1823,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func processPendingIntegrationEvents(force: Bool = false) {
+        guard !isInRecoveryMode else { return }
         let scanDate = clock.now
         if !force,
            let lastIntegrationScanAt,
@@ -1650,12 +1845,18 @@ final class SessionStore: ObservableObject {
         }
 
         for item in pending {
+            lastCriticalCommitFailed = false
             if let action = sessionAutomationCoordinator.action(
                 for: item.event,
                 in: state,
                 now: scanDate
             ) {
-                applyAutomationAction(action, for: item.event, at: scanDate)
+                guard applyAutomationAction(action, for: item.event, at: scanDate) ||
+                    !lastCriticalCommitFailed else {
+                    // Keep the inbox event when a lifecycle commit failed.
+                    // It will be retried after the next launch or scan.
+                    return
+                }
             }
 
             var acknowledgedState = state
@@ -1664,7 +1865,11 @@ final class SessionStore: ObservableObject {
             if acknowledgedState != state {
                 // Persist enrichment and acknowledgement together so a crash
                 // cannot reattach the same inbox event on the next launch.
-                commit(acknowledgedState)
+                guard commit(acknowledgedState, critical: true) else {
+                    // Do not remove the inbox file when either the context or
+                    // its processed acknowledgement was not durably saved.
+                    return
+                }
             }
             developerToolEventConsumer.cleanup(item)
         }
@@ -1674,13 +1879,14 @@ final class SessionStore: ObservableObject {
         _ action: SessionAutomationAction,
         for event: DeveloperToolEvent?,
         at date: Date
-    ) {
+    ) -> Bool {
         switch action {
         case .start(let rule, let startDate):
-            guard let event else { return }
-            _ = startAutomatedSession(with: rule, event: event, at: startDate, signalAt: event.timestamp)
+            guard let event else { return true }
+            let didStart = startAutomatedSession(with: rule, event: event, at: startDate, signalAt: event.timestamp)
+            return didStart || !lastCriticalCommitFailed
         case .signal(let rule, let tool, let externalSessionID, let isActive):
-            applyAutomationSignal(
+            return applyAutomationSignal(
                 rule: rule,
                 source: .developerTool(tool: tool, externalSessionID: externalSessionID),
                 isActive: isActive,
@@ -1688,9 +1894,10 @@ final class SessionStore: ObservableObject {
                 transitionAt: date
             )
         case .startWithSource(let rule, let source, let startDate):
-            _ = startAutomatedSession(with: rule, source: source, at: startDate, signalAt: date)
+            let didStart = startAutomatedSession(with: rule, source: source, at: startDate, signalAt: date)
+            return didStart || !lastCriticalCommitFailed
         case .signalWithSource(let rule, let source, let isActive):
-            applyAutomationSignal(
+            return applyAutomationSignal(
                 rule: rule,
                 source: source,
                 isActive: isActive,
@@ -1701,8 +1908,9 @@ final class SessionStore: ObservableObject {
             var nextState = state
             relinquishInvalidAutomation(in: &nextState)
             if nextState != state {
-                commit(nextState)
+                return commit(nextState, critical: true)
             }
+            return true
         }
     }
 
@@ -1712,12 +1920,12 @@ final class SessionStore: ObservableObject {
         isActive: Bool,
         signalAt eventDate: Date,
         transitionAt date: Date
-    ) {
+    ) -> Bool {
         guard var session = state.activeSession,
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
               session.phase == .running || session.phase == .paused else {
-            return
+            return true
         }
 
         let signalDate = max(metadata.lastMatchingSignalAt, eventDate)
@@ -1744,7 +1952,7 @@ final class SessionStore: ObservableObject {
 
         var nextState = state
         nextState.activeSession = session
-        commit(nextState)
+        return commit(nextState, critical: true)
     }
 
     private func evaluateAutomaticLifecycle(at date: Date) {
@@ -1781,7 +1989,7 @@ final class SessionStore: ObservableObject {
                 session.automationMetadata = metadata
                 var nextState = state
                 nextState.activeSession = session
-                commit(nextState)
+                guard commit(nextState, critical: true) else { return }
             }
         }
 
@@ -1808,7 +2016,7 @@ final class SessionStore: ObservableObject {
         session.automationMetadata = metadata
         var nextState = state
         nextState.activeSession = session
-        commit(nextState)
+        guard commit(nextState, critical: true) else { return }
         now = clock.now
 
         if session.gitContext != nil {
@@ -1854,7 +2062,7 @@ final class SessionStore: ObservableObject {
         if session.activeDuration(at: endedAt) < metadata.minimumSavedDuration {
             var nextState = state
             nextState.activeSession = nil
-            commit(nextState)
+            guard commit(nextState, critical: true) else { return }
             gitCaptureSessionID = nil
             gitCaptureInProgress = false
             now = clock.now
@@ -1866,16 +2074,23 @@ final class SessionStore: ObservableObject {
 
     private func completeFinishedSession(outcome: String?, refreshAfter: Bool = true) -> Bool {
         guard !gitCaptureInProgress,
-              let session = state.activeSession,
-              let completed = session.completedSnapshot(outcome: outcome) else {
+              var session = state.activeSession,
+              session.phase == .finishing else {
+            return false
+        }
+
+        session.outcome = ActiveSession.cleanOptionalText(outcome) ?? session.outcome
+        guard let completed = session.completedSnapshot(outcome: session.outcome) else {
             return false
         }
 
         var nextState = state
-        nextState.completedSessions.append(completed)
+        if !nextState.completedSessions.contains(where: { $0.id == completed.id }) {
+            nextState.completedSessions.append(completed)
+        }
         nextState.completedSessions.sort { $0.startedAt > $1.startedAt }
         nextState.activeSession = nil
-        commit(nextState)
+        guard commit(nextState, critical: true) else { return false }
         gitCaptureSessionID = nil
         gitCaptureInProgress = false
         now = clock.now

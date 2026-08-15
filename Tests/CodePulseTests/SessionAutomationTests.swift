@@ -455,6 +455,42 @@ final class SessionAutomationTests: XCTestCase {
         XCTAssertEqual(persistence.state.completedSessions[0].gitContext?.branchAtEnd, "automation-end")
     }
 
+    func testAutomaticFinishCommitFailureLeavesPausedSessionForRetry() async throws {
+        let clock = AutomationTestClock(start)
+        let persistence = AutomationTestPersistence()
+        let fixture = try makeFixture(
+            tool: .codex,
+            enabled: true,
+            seedEvent: event(tool: .codex, sessionID: "codex-finish-retry", type: .sessionStarted, path: fixtureProjectPath()),
+            clock: clock,
+            persistence: persistence,
+            pauseDelay: 1,
+            finishDelay: 2,
+            minimumSavedDuration: 0
+        )
+
+        clock.now = start.addingTimeInterval(1)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .paused)
+
+        persistence.failCriticalSaves = true
+        clock.now = start.addingTimeInterval(2)
+        fixture.store.refresh()
+        try await settle(fixture.store)
+        XCTAssertEqual(fixture.store.phase, .paused)
+        XCTAssertFalse(persistence.state.activeSession?.automationMetadata?.pendingAutomaticSave ?? true)
+
+        persistence.failCriticalSaves = false
+        fixture.store.refresh()
+        try await settle(fixture.store)
+        XCTAssertEqual(fixture.store.phase, .idle)
+        XCTAssertEqual(persistence.state.completedSessions.count, 1)
+
+        fixture.store.refresh()
+        try await settle(fixture.store)
+        XCTAssertEqual(persistence.state.completedSessions.count, 1)
+    }
+
     func testAutomaticMinimumDurationDiscardsShortButSavesExactThreshold() async throws {
         let shortClock = AutomationTestClock(start)
         let shortPersistence = AutomationTestPersistence()
@@ -572,6 +608,12 @@ final class SessionAutomationTests: XCTestCase {
         let clock = AutomationTestClock(start.addingTimeInterval(2))
         let paths = DeveloperToolIntegrationPaths(applicationSupportDirectory: root.appendingPathComponent("support"))
         let inbox = DeveloperToolInbox(paths: paths)
+        persistence.failNextCriticalSave = true
+        let failedRestore = makeStore(state: state, clock: clock, persistence: persistence, inbox: inbox)
+        try await settle(failedRestore)
+        XCTAssertEqual(failedRestore.phase, .finishing)
+        XCTAssertEqual(persistence.state.completedSessions.count, 0)
+
         let restored = makeStore(state: state, clock: clock, persistence: persistence, inbox: inbox)
         try await settle(restored)
         XCTAssertEqual(restored.phase, .idle)
@@ -590,6 +632,69 @@ final class SessionAutomationTests: XCTestCase {
         let manualRestore = makeStore(state: state, clock: clock, persistence: persistence, inbox: inbox)
         XCTAssertEqual(manualRestore.phase, .finishing)
         XCTAssertTrue(persistence.state.completedSessions.count == 1)
+    }
+
+    func testAutomaticMinimumDurationDiscardFailureRemainsRetryable() async throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        let project = ProjectRecord(name: "Project", folderPath: projectURL.path, createdAt: start)
+        let rule = SessionAutomationRule(
+            name: "Rule",
+            trigger: .developerTool(.codex),
+            projectID: project.id,
+            pauseDelay: 1,
+            finishDelay: 2,
+            minimumSavedDuration: 3
+        )
+        let metadata = SessionAutomationMetadata(
+            startedByRuleID: rule.id,
+            startedByRuleName: rule.name,
+            startedByTool: .codex,
+            lastMatchingSignalAt: start,
+            pendingAutomaticSave: true,
+            pauseDelay: 1,
+            finishDelay: 2,
+            minimumSavedDuration: 3,
+            claims: []
+        )
+        var automatic = ActiveSession(
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: start,
+            automationMetadata: metadata
+        )
+        automatic.endedAt = start.addingTimeInterval(2)
+        automatic.phase = .finishing
+
+        let state = AppState(
+            projects: [project],
+            activeSession: automatic,
+            settings: CodePulseSettings(automationEnabled: true),
+            automationRules: [rule]
+        )
+        let persistence = AutomationTestPersistence(state)
+        let clock = AutomationTestClock(start.addingTimeInterval(2))
+        let inbox = DeveloperToolInbox(
+            paths: DeveloperToolIntegrationPaths(applicationSupportDirectory: root.appendingPathComponent("support"))
+        )
+
+        persistence.failNextCriticalSave = true
+        let failedRestore = makeStore(state: state, clock: clock, persistence: persistence, inbox: inbox)
+        try await settle(failedRestore)
+        XCTAssertEqual(failedRestore.phase, .finishing)
+        XCTAssertNotNil(persistence.state.activeSession)
+        XCTAssertTrue(persistence.state.completedSessions.isEmpty)
+
+        let retry = makeStore(state: state, clock: clock, persistence: persistence, inbox: inbox)
+        try await settle(retry)
+        XCTAssertEqual(retry.phase, .idle)
+        XCTAssertNil(persistence.state.activeSession)
+        XCTAssertTrue(persistence.state.completedSessions.isEmpty)
+
+        let secondRetry = makeStore(state: persistence.state, clock: clock, persistence: persistence, inbox: inbox)
+        XCTAssertEqual(secondRetry.phase, .idle)
+        XCTAssertTrue(persistence.state.completedSessions.isEmpty)
     }
 
     private func makeFixture(
@@ -757,6 +862,8 @@ private final class AutomationTestClock: SessionClock {
 
 private final class AutomationTestPersistence: StatePersisting {
     var state: AppState
+    var failCriticalSaves = false
+    var failNextCriticalSave = false
 
     init(_ state: AppState = AppState()) {
         self.state = state
@@ -764,7 +871,17 @@ private final class AutomationTestPersistence: StatePersisting {
 
     func load() -> AppState { state }
     func save(_ state: AppState) { self.state = state }
+
+    func saveCritical(_ state: AppState) throws {
+        if failCriticalSaves || failNextCriticalSave {
+            failNextCriticalSave = false
+            throw AutomationCriticalSaveFailure()
+        }
+        self.state = state
+    }
 }
+
+private struct AutomationCriticalSaveFailure: Error {}
 
 private final class AutomationNoOpGitService: GitServicing, @unchecked Sendable {
     func captureStartSnapshot(at folderURL: URL) -> GitStartSnapshot? { nil }

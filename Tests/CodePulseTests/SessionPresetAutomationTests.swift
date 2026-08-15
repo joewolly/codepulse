@@ -72,6 +72,48 @@ final class SessionPresetAutomationTests: XCTestCase {
         XCTAssertNil(store.activeSession?.automationMetadata)
     }
 
+    func testMenuBarAccessibilityStatusNamesProjectAndSessionType() throws {
+        let project = try makeProject(name: "Accessibility Project")
+        let persistence = PresetTestPersistence(AppState(projects: [project.record]))
+        let clock = PresetTestClock(start)
+        let store = makeStore(persistence: persistence, clock: clock)
+
+        XCTAssertTrue(store.startSession(projectID: project.record.id, goal: nil, type: .review))
+        XCTAssertTrue(store.menuBarAccessibilityText.contains("Accessibility Project"))
+        XCTAssertTrue(store.menuBarAccessibilityText.contains(SessionType.review.title))
+        XCTAssertTrue(store.menuBarAccessibilityText.contains("running"))
+    }
+
+    func testAutomationStatusExplainsGlobalOffAndUnavailableTargets() throws {
+        let project = try makeProject(name: "Status Project")
+        let preset = SessionPreset(name: "Status Preset", projectID: project.record.id)
+        let rule = SessionAutomationRule(
+            name: "Status Rule",
+            trigger: .developerTool(.codex),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [project.record],
+            sessionPresets: [preset],
+            automationRules: [rule]
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Enabled · Automation Off")
+        store.updateSettings { $0.automationEnabled = true }
+        XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Enabled")
+
+        _ = try store.archiveProject(id: project.record.id, at: start.addingTimeInterval(1))
+        XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Project Archived")
+
+        _ = try store.restoreProject(id: project.record.id)
+        let missingFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseStatusRelink-\(UUID().uuidString)", isDirectory: true)
+        XCTAssertTrue(store.updateProjectFolder(id: project.record.id, folderURL: missingFolder))
+        XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Needs Relink")
+    }
+
     func testUpsertAutomationRuleAcceptsNewRuleForUsablePreset() throws {
         let project = try makeProject(name: "Usable Automation Project")
         let preset = SessionPreset(name: "Usable Automation Preset", projectID: project.record.id)

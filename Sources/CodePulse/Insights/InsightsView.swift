@@ -8,65 +8,61 @@ struct InsightsView: View {
     @State private var timeframe: InsightsTimeframe = .thisWeek
     @State private var project: InsightsProjectFilter = .allProjects
     @State private var reportExportError = false
+    @State private var calculatedProjectOptions: [InsightsProjectOption] = []
+    @State private var calculatedSummary: InsightsSummary?
 
-    private var projectOptions: [InsightsProjectOption] {
-        store.insightsProjectOptions
-    }
-
-    private var summary: InsightsSummary {
-        InsightsCalculator.summary(
-            state: store.state,
-            calendar: store.calendar,
-            referenceDate: store.now,
-            timeframe: timeframe,
-            project: project
-        )
+    private var insightsReferenceMinute: Int {
+        Int(store.now.timeIntervalSince1970 / 60)
     }
 
     var body: some View {
-        let summary = self.summary
-
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 InsightsFilterBar(
                     timeframe: $timeframe,
                     project: $project,
-                    projectOptions: projectOptions,
+                    projectOptions: calculatedProjectOptions,
                     onExport: exportReport
                 )
 
-                if summary.hasActivity {
-                    InsightSummarySection(summary: summary)
-                    ActivityChart(
-                        activity: summary.dailyActivity,
-                        timeframe: timeframe,
-                        calendar: store.calendar
-                    )
+                if let summary = calculatedSummary {
+                    if summary.hasActivity {
+                        InsightSummarySection(summary: summary)
+                        ActivityChart(
+                            activity: summary.dailyActivity,
+                            timeframe: timeframe,
+                            calendar: store.calendar
+                        )
 
-                    InsightSection(title: "Work Type", systemImage: "square.grid.2x2") {
-                        InsightBreakdownBars(values: summary.typeBreakdown)
-                    }
+                        InsightSection(title: "Work Type", systemImage: "square.grid.2x2") {
+                            InsightBreakdownBars(values: summary.typeBreakdown)
+                        }
 
-                    InsightSection(title: "Projects", systemImage: "folder") {
-                        InsightBreakdownBars(values: summary.projectBreakdown)
-                    }
+                        InsightSection(title: "Projects", systemImage: "folder") {
+                            InsightBreakdownBars(values: summary.projectBreakdown)
+                        }
 
-                    DeveloperToolInsightSection(insights: summary.developerToolInsights)
+                        DeveloperToolInsightSection(insights: summary.developerToolInsights)
 
-                    if summary.gitInsights.sessionsWithGitContext > 0 {
-                        GitInsightSection(insights: summary.gitInsights)
-                    }
+                        if summary.gitInsights.sessionsWithGitContext > 0 {
+                            GitInsightSection(insights: summary.gitInsights)
+                        }
 
-                    if summary.githubInsights.sessionsWithGitHubContext > 0 {
-                        GitHubInsightSection(insights: summary.githubInsights)
+                        if summary.githubInsights.sessionsWithGitHubContext > 0 {
+                            GitHubInsightSection(insights: summary.githubInsights)
+                        }
+                    } else {
+                        InsightsEmptyState(
+                            timeframe: timeframe,
+                            projectTitle: project.title(options: calculatedProjectOptions),
+                            isAllProjects: project == .allProjects,
+                            hasSavedSessions: hasSavedSessions
+                        )
                     }
                 } else {
-                    InsightsEmptyState(
-                        timeframe: timeframe,
-                        projectTitle: project.title(options: projectOptions),
-                        isAllProjects: project == .allProjects,
-                        hasAnySessions: hasAnySessions
-                    )
+                    ProgressView("Calculating Insights…")
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                        .accessibilityLabel("Calculating Insights")
                 }
             }
             .padding(24)
@@ -78,17 +74,33 @@ struct InsightsView: View {
         } message: {
             Text("CodePulse couldn't export this Insights report. Choose another destination or check its permissions.")
         }
+        .onAppear(perform: refreshInsights)
+        .onChange(of: timeframe) { _ in refreshInsights() }
+        .onChange(of: project) { _ in refreshInsights() }
+        .onChange(of: store.stateRevision) { _ in refreshInsights() }
+        .onChange(of: insightsReferenceMinute) { _ in refreshInsights() }
         .frame(minWidth: 700, idealWidth: 760, minHeight: 560, idealHeight: 620)
     }
 
-    private var hasAnySessions: Bool {
-        !store.state.completedSessions.isEmpty || store.state.activeSession != nil
+    private func refreshInsights() {
+        calculatedProjectOptions = store.insightsProjectOptions
+        calculatedSummary = InsightsCalculator.summary(
+            state: store.state,
+            calendar: store.calendar,
+            referenceDate: store.now,
+            timeframe: timeframe,
+            project: project
+        )
+    }
+
+    private var hasSavedSessions: Bool {
+        !store.state.completedSessions.isEmpty
     }
 
     private func exportReport() {
         let referenceDate = store.now
         let calendar = store.calendar
-        let selectedProjectTitle = project.title(options: projectOptions)
+        let selectedProjectTitle = project.title(options: calculatedProjectOptions)
         let summary = InsightsCalculator.summary(
             state: store.state,
             calendar: calendar,
@@ -299,6 +311,7 @@ private struct InsightSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
+                .accessibilityAddTraits(.isHeader)
             content()
         }
     }
@@ -425,15 +438,21 @@ private struct ActivityChart: View {
                 }
             }
             .frame(height: 190)
-            .accessibilityElement(children: .contain)
+            .accessibilityElement(children: buckets.count <= 31 ? .contain : .ignore)
             .accessibilityLabel(usesWeeklyBuckets ? "Weekly active time chart" : "Daily active time chart")
             .accessibilityValue(accessibilitySummary)
         }
     }
 
     private var accessibilitySummary: String {
-        buckets.map { "\($0.label): \(CodePulseFormatting.duration($0.duration))" }
-            .joined(separator: "; ")
+        guard !buckets.isEmpty else { return "No active time in this period" }
+        let totalDuration = buckets.reduce(0) { $0 + $1.duration }
+        let peak = buckets.max { lhs, rhs in lhs.duration < rhs.duration }
+        var summary = "\(CodePulseFormatting.duration(totalDuration)) across \(buckets.count) periods"
+        if let peak {
+            summary += "; peak \(peak.label), \(CodePulseFormatting.duration(peak.duration))"
+        }
+        return summary
     }
 }
 
@@ -579,32 +598,17 @@ private struct InsightsEmptyState: View {
     let timeframe: InsightsTimeframe
     let projectTitle: String
     let isAllProjects: Bool
-    let hasAnySessions: Bool
+    let hasSavedSessions: Bool
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: hasAnySessions ? "chart.bar.xaxis" : "clock")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(hasAnySessions ? "No Active Time in This Selection" : "No Sessions Yet")
-                .font(.headline)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        EmptyStateView(
+            content: EmptyStateCopy.insights(
+                hasSavedSessions: hasSavedSessions,
+                timeframeTitle: timeframe.title,
+                projectTitle: projectTitle,
+                isAllProjects: isAllProjects
+            )
+        )
         .frame(maxWidth: .infinity, minHeight: 260)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var message: String {
-        if !hasAnySessions {
-            return "Start a session from the menu bar and your local activity will appear here."
-        }
-        if isAllProjects {
-            return "There is no active session overlap in \(timeframe.title.lowercased()). Try another timeframe."
-        }
-        return "There is no active session overlap for \(projectTitle) in \(timeframe.title.lowercased()). Try another project or timeframe."
     }
 }

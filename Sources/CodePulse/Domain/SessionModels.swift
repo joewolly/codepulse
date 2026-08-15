@@ -394,7 +394,7 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             projectName: projectName,
             type: type,
             goal: goal,
-            outcome: Self.cleanOptionalText(outcome),
+            outcome: Self.cleanOptionalText(outcome) ?? Self.cleanOptionalText(self.outcome),
             startedAt: startedAt,
             endedAt: endedAt,
             pauseIntervals: pauseIntervals,
@@ -621,6 +621,7 @@ struct CodePulseSettings: Codable, Equatable {
     var specificProjectID: UUID?
     var globalShortcutEnabled: Bool
     var automationEnabled: Bool
+    var hasCompletedOnboarding: Bool
 
     init(
         launchAtLogin: Bool = false,
@@ -629,7 +630,8 @@ struct CodePulseSettings: Codable, Equatable {
         defaultProjectBehavior: DefaultProjectBehavior = .lastUsed,
         specificProjectID: UUID? = nil,
         globalShortcutEnabled: Bool = true,
-        automationEnabled: Bool = false
+        automationEnabled: Bool = false,
+        hasCompletedOnboarding: Bool = false
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -638,11 +640,13 @@ struct CodePulseSettings: Codable, Equatable {
         self.specificProjectID = specificProjectID
         self.globalShortcutEnabled = globalShortcutEnabled
         self.automationEnabled = automationEnabled
+        self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
         case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, automationEnabled
+        case hasCompletedOnboarding
     }
 
     init(from decoder: Decoder) throws {
@@ -654,6 +658,14 @@ struct CodePulseSettings: Codable, Equatable {
         specificProjectID = try container.decodeIfPresent(UUID.self, forKey: .specificProjectID)
         globalShortcutEnabled = try container.decodeIfPresent(Bool.self, forKey: .globalShortcutEnabled) ?? true
         automationEnabled = try container.decodeIfPresent(Bool.self, forKey: .automationEnabled) ?? false
+        // A missing or malformed flag means this is an existing persisted
+        // state, not a fresh install. Keep the upgrade path informational and
+        // fail-soft without making the rest of the state unreadable.
+        if let decoded = try? container.decode(Bool.self, forKey: .hasCompletedOnboarding) {
+            hasCompletedOnboarding = decoded
+        } else {
+            hasCompletedOnboarding = true
+        }
     }
 }
 

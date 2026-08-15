@@ -80,17 +80,7 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
         let symbol = store.phase == .paused
             ? "pause.fill"
             : (store.phase == .idle ? "circle" : "circle.fill")
-        let accessibilityText: String
-        switch store.phase {
-        case .idle:
-            accessibilityText = "CodePulse, ready to start a session"
-        case .running:
-            accessibilityText = "CodePulse, running, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))" + (store.activeAutomationStatusLabel.map { ", \($0)" } ?? "")
-        case .paused:
-            accessibilityText = "CodePulse, paused, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))" + (store.activeAutomationStatusLabel.map { ", \($0)" } ?? "")
-        case .finishing:
-            accessibilityText = "CodePulse, session complete, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))"
-        }
+        let accessibilityText = store.menuBarAccessibilityText
 
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: accessibilityText)
         button.title = menuBarTitle

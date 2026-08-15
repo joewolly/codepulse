@@ -8,17 +8,21 @@ struct HistoryView: View {
     @State private var sessionPendingDeletion: CompletedSession?
     @State private var sessionPendingEdit: CompletedSession?
     @State private var exportError = false
+    @State private var exportActivity = HistoryCSVExportActivity()
     @State private var query = HistoryQuery()
+    @State private var filteredGroups: [DaySessionGroup] = []
+    @State private var projectOptions: [HistoryProjectOption] = []
 
-    private var filteredGroups: [DaySessionGroup] {
-        store.historyGroups(for: query, referenceDate: store.now)
+    private var historyReferenceDay: Date {
+        store.calendar.startOfDay(for: store.now)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             HistoryFilterBar(
                 query: $query,
-                projectOptions: store.historyProjectOptions,
+                projectOptions: projectOptions,
+                isExportingCSV: exportActivity.isActive,
                 onExport: exportCSV
             )
 
@@ -98,10 +102,23 @@ struct HistoryView: View {
         } message: {
             Text("CodePulse couldn't export this History file. Choose another destination or check its permissions.")
         }
+        .onAppear(perform: refreshDerivedData)
+        .onChange(of: query) { _ in refreshDerivedData() }
+        .onChange(of: store.stateRevision) { _ in refreshDerivedData() }
+        .onChange(of: historyReferenceDay) { _ in refreshDerivedData() }
         .frame(minWidth: 680, minHeight: 500)
     }
 
+    private func refreshDerivedData() {
+        let referenceDate = store.now
+        projectOptions = store.historyProjectOptions
+        filteredGroups = store.historyGroups(for: query, referenceDate: referenceDate)
+    }
+
+    @MainActor
     private func exportCSV() {
+        guard !exportActivity.isActive else { return }
+
         let referenceDate = store.now
         let sessions = store.historySessions(for: query, referenceDate: referenceDate)
         guard let url = ExportSavePanel.chooseURL(
@@ -110,10 +127,23 @@ struct HistoryView: View {
             prompt: "Export CSV"
         ) else { return }
 
-        do {
-            try AtomicExportFileWriter().write(HistoryCSVExporter.data(for: sessions), to: url)
-        } catch {
-            exportError = true
+        guard exportActivity.begin() else { return }
+
+        let exportSnapshot = sessions
+        Task { @MainActor in
+            let succeeded = await Task.detached(priority: .userInitiated) { [exportSnapshot, url] in
+                do {
+                    try HistoryCSVExportWorker.write(sessions: exportSnapshot, to: url)
+                    return true
+                } catch {
+                    return false
+                }
+            }.value
+
+            exportActivity.end()
+            if !succeeded {
+                exportError = true
+            }
         }
     }
 }
@@ -121,6 +151,7 @@ struct HistoryView: View {
 private struct HistoryFilterBar: View {
     @Binding var query: HistoryQuery
     let projectOptions: [HistoryProjectOption]
+    let isExportingCSV: Bool
     let onExport: () -> Void
 
     var body: some View {
@@ -213,8 +244,20 @@ private struct HistoryFilterBar: View {
                 Label("Export CSV…", systemImage: "square.and.arrow.down")
             }
             .buttonStyle(.link)
+            .disabled(isExportingCSV)
             .accessibilityLabel("Export History as CSV")
             .accessibilityHint("Saves the currently filtered History sessions as a UTF-8 CSV file")
+
+            if isExportingCSV {
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Exporting…")
+                        .font(.caption)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("History export in progress")
+            }
 
             if query.hasRestrictions {
                 Button("Clear Filters") {
@@ -256,27 +299,12 @@ private struct HistoryEmptyState: View {
     let clearFilters: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: hasAnySessions ? "line.3.horizontal.decrease.circle" : "clock")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(hasAnySessions ? "No Matching Sessions" : "No Sessions Yet")
-                .font(.headline)
-            Text(hasAnySessions
-                 ? "Try changing your search or filters."
-                 : "Saved coding sessions will appear here.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            if canClearFilters {
-                Button("Clear Filters", action: clearFilters)
-                    .buttonStyle(.link)
-                    .accessibilityLabel("Clear History Filters")
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(30)
-        .accessibilityElement(children: .combine)
+        EmptyStateView(
+            content: EmptyStateCopy.history(hasAnySessions: hasAnySessions),
+            actionTitle: canClearFilters ? "Clear Filters" : nil,
+            action: canClearFilters ? clearFilters : nil
+        )
+        .frame(maxHeight: .infinity)
     }
 }
 
@@ -372,11 +400,19 @@ private struct HistoryRow: View {
         var values = [
             session.projectName ?? "No Project",
             session.type.title,
-            CodePulseFormatting.duration(session.activeDuration)
+            CodePulseFormatting.duration(session.activeDuration),
+            "Started \(CodePulseFormatting.time(session.startedAt))",
+            "Finished \(CodePulseFormatting.time(session.endedAt))"
         ]
         if let goal = session.goal { values.append(goal) }
         if let outcome = session.outcome { values.append(outcome) }
         if let branch = session.gitContext?.branchDisplay { values.append(branch) }
+        if let githubContext = session.githubContext {
+            values.append("GitHub \(githubContext.repositoryNameWithOwner)")
+            if let pullRequest = githubContext.pullRequest {
+                values.append("Pull request \(pullRequest.number), \(pullRequest.title), \(pullRequest.statusDisplay)")
+            }
+        }
         if !session.developerToolContexts.isEmpty { values.append(developerToolSummary) }
         return values.joined(separator: ", ")
     }
@@ -426,7 +462,8 @@ private struct SessionDetailView: View {
 
     @ViewBuilder
     private func detailContent(_ session: CompletedSession) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.projectName ?? "No Project")
@@ -499,14 +536,14 @@ private struct SessionDetailView: View {
                 GitHubContextView(context: githubContext)
             }
 
-            Spacer()
-
             Button("Delete Session", role: .destructive) {
                 showDeleteConfirmation = true
             }
             .accessibilityLabel("Delete Session")
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(24)
         .frame(minWidth: 520, idealWidth: 540, maxWidth: 620, minHeight: 380, maxHeight: 620)
     }
 }

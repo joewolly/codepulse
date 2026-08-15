@@ -47,17 +47,6 @@ struct MenuBarLabel: View {
     }
 
     private var accessibilityText: String {
-        let automationStatus = store.activeAutomationStatusLabel
-
-        switch store.phase {
-        case .idle:
-            return "CodePulse, ready to start a session"
-        case .running:
-            return "CodePulse, running, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))" + (automationStatus.map { ", \($0)" } ?? "")
-        case .paused:
-            return "CodePulse, paused, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))" + (automationStatus.map { ", \($0)" } ?? "")
-        case .finishing:
-            return "CodePulse, session complete, \(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))"
-        }
+        store.menuBarAccessibilityText
     }
 }

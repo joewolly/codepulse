@@ -96,7 +96,12 @@ verified recovery backup has been created. Backups can contain paths, bookmarks,
 session notes, and metadata, so treat both exported and automatic recovery files
 as potentially sensitive. No backup is uploaded to CodePulse or a cloud
 service. A moved project whose bookmark cannot resolve remains stored and is
-shown as needing relinking; CodePulse does not silently retarget it.
+shown as needing relinking; CodePulse does not silently retarget it. If the
+existing primary state cannot be decoded, CodePulse keeps the original bytes
+unchanged, disables normal writes, and offers a local recovery window instead
+of showing fresh-install onboarding. An explicit restore preserves those
+unreadable bytes in a private local recovery copy; that copy is not treated as
+a portable backup and is not uploaded.
 
 ## CSV and Markdown exports
 
@@ -146,8 +151,8 @@ CodePulse does not store GitHub credentials, ask for a Personal Access Token, or
 perform GitHub mutations. Downloaded updates are authenticated with an Ed25519
 signature before installation.
 
-Insights in CodePulse 0.7 are derived in memory from the local session records
-already described above. Timeframe totals, counts, project/work-type
+Insights are derived in memory from the local session records already described
+above. Timeframe totals, counts, project/work-type
 breakdowns, developer-tool participation, Git totals, and GitHub repository/PR
 aggregates are not stored in a separate analytics database or uploaded. GitHub
 context shown for a historical session is the snapshot saved with that session;

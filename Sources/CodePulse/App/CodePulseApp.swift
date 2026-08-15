@@ -37,6 +37,19 @@ struct CodePulseApp: App {
         _updateController = StateObject(wrappedValue: updateController)
         _integrationManager = StateObject(wrappedValue: integrationManager)
         menuBarItemInserted = true
+
+        // SessionStore has completed state recovery before this deferred
+        // informational window is considered. The status item is also
+        // installed on the next run-loop turn, so onboarding cannot become an
+        // authority over lifecycle recovery or menu-bar availability.
+        DispatchQueue.main.async { [weak windowCoordinator] in
+            guard let windowCoordinator else { return }
+            if store.isInRecoveryMode {
+                windowCoordinator.showRecoveryIfNeeded()
+            } else {
+                windowCoordinator.showOnboardingIfNeeded()
+            }
+        }
     }
 
     var body: some Scene {
@@ -50,6 +63,7 @@ struct CodePulseApp: App {
         Settings {
             SettingsView()
                 .environmentObject(store)
+                .environmentObject(windowCoordinator)
                 .environmentObject(menuBarStatusItem)
                 .environmentObject(updateController)
                 .environmentObject(integrationManager)

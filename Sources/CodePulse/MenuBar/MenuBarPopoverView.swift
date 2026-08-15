@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarPopoverView: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.dismiss) private var dismiss
     private let onDismiss: (() -> Void)?
     private let onOpenInsights: (() -> Void)?
@@ -16,22 +17,63 @@ struct MenuBarPopoverView: View {
         let dismissPopover = onDismiss ?? { dismiss() }
 
         VStack(alignment: .leading, spacing: 0) {
-            switch store.phase {
-            case .idle:
-                IdleSessionView()
-            case .running, .paused:
-                ActiveSessionView()
-            case .finishing:
-                FinishingSessionView()
+            if let lifecycleErrorMessage = store.lifecycleErrorMessage,
+               !store.isInRecoveryMode {
+                HStack(alignment: .top, spacing: 8) {
+                    Label(lifecycleErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Dismiss", action: store.dismissLifecycleError)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHint("Dismisses this save error without changing the current session")
+                }
+                .accessibilityElement(children: .contain)
+                .padding(.bottom, 12)
             }
 
-            Divider()
-                .padding(.top, 16)
+            if store.isInRecoveryMode {
+                RecoveryUnavailablePopoverView {
+                    windowCoordinator.showRecovery()
+                }
+            } else {
+                switch store.phase {
+                case .idle:
+                    IdleSessionView()
+                case .running, .paused:
+                    ActiveSessionView()
+                case .finishing:
+                    FinishingSessionView()
+                }
 
-            PopoverFooter(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
+                Divider()
+                    .padding(.top, 16)
+
+                PopoverFooter(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
+            }
         }
         .padding(18)
         .frame(width: 350)
+    }
+}
+
+private struct RecoveryUnavailablePopoverView: View {
+    let showRecovery: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Saved data unavailable", systemImage: "lock.trianglebadge.exclamationmark")
+                .font(.headline)
+            Text("CodePulse is read-only until you restore a valid backup.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open Recovery…", action: showRecovery)
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint("Opens options to restore a backup or show the local data folder")
+        }
     }
 }
 
@@ -56,10 +98,11 @@ private struct IdleSessionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if store.sessionPresetsAvailableForManualStart.isEmpty {
-                        Label("Saved presets are unavailable until their projects are restored or repaired.", systemImage: "archivebox")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
+                    if EmptyStateCopy.presetAvailability(
+                        savedCount: store.sessionPresetsSorted.count,
+                        availableCount: store.sessionPresetsAvailableForManualStart.count
+                    ) == .savedButUnavailable {
+                        EmptyStateView(content: EmptyStateCopy.unavailablePresets)
                     }
 
                     HStack {
@@ -190,6 +233,7 @@ private struct ActiveSessionView: View {
                 .font(.system(size: 34, weight: .medium, design: .monospaced))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel("Elapsed time")
+                .accessibilityValue(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
 
             if store.phase == .paused {
                 Label("Paused", systemImage: "pause.fill")
@@ -252,6 +296,7 @@ private struct ActiveSessionView: View {
 private struct FinishingSessionView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var outcome = ""
+    @State private var outcomeSaveWorkItem: DispatchWorkItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -316,6 +361,22 @@ private struct FinishingSessionView: View {
             .accessibilityLabel("Discard Session")
             .accessibilityValue("Discard Session")
             .accessibilityHint("Discards the completed coding session")
+        }
+        .onAppear {
+            outcome = store.activeSession?.outcome ?? ""
+        }
+        .onChange(of: outcome) { newValue in
+            outcomeSaveWorkItem?.cancel()
+            let workItem = DispatchWorkItem {
+                _ = store.updateFinishingOutcome(newValue)
+            }
+            outcomeSaveWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
+        }
+        .onDisappear {
+            outcomeSaveWorkItem?.cancel()
+            outcomeSaveWorkItem = nil
+            _ = store.updateFinishingOutcome(outcome)
         }
     }
 }

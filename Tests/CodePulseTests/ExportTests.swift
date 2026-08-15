@@ -67,6 +67,91 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(persistence.state, AppState(completedSessions: sessions))
     }
 
+    func testHistoryCSVWorkerUsesCapturedSnapshotAfterStoreChanges() throws {
+        let reference = date(year: 2024, month: 4, day: 20, hour: 12)
+        let sessions = historyFixture(reference: reference)
+        let persistence = ExportTestPersistence(AppState(completedSessions: sessions))
+        let store = SessionStore(
+            persistence: persistence,
+            clock: ExportTestClock(reference),
+            calendar: calendar,
+            automaticallyRefresh: false
+        )
+        let query = HistoryQuery(searchText: "comma")
+        let snapshot = store.historySessions(for: query, referenceDate: reference)
+        let removedID = try XCTUnwrap(snapshot.first?.id)
+        store.deleteCompletedSession(id: removedID)
+
+        XCTAssertTrue(store.historySessions(for: query, referenceDate: reference).isEmpty)
+
+        let url = temporaryExportURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try HistoryCSVExportWorker.write(sessions: snapshot, to: url)
+
+        XCTAssertEqual(try Data(contentsOf: url), HistoryCSVExporter.data(for: snapshot))
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains(removedID.uuidString))
+    }
+
+    func testHistoryCSVWorkerMatchesCanonicalBytesOffMainThread() throws {
+        let sessions = [representativeHistoryCSVSession(
+            reference: date(year: 2024, month: 4, day: 20, hour: 10)
+        )]
+        let expected = HistoryCSVExporter.data(for: sessions)
+        let url = temporaryExportURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let completion = DispatchSemaphore(value: 0)
+        var writeSucceededOffMainThread = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { completion.signal() }
+            do {
+                try HistoryCSVExportWorker.write(sessions: sessions, to: url)
+                writeSucceededOffMainThread = !Thread.isMainThread
+            } catch {
+                writeSucceededOffMainThread = false
+            }
+        }
+
+        XCTAssertEqual(completion.wait(timeout: .now() + 10), .success)
+        XCTAssertTrue(writeSucceededOffMainThread)
+        XCTAssertEqual(try Data(contentsOf: url), expected)
+    }
+
+    func testHistoryCSVExportActivityRejectsDuplicateStartsAndAllowsRetryAfterReset() {
+        var activity = HistoryCSVExportActivity()
+
+        XCTAssertFalse(activity.isActive)
+        XCTAssertTrue(activity.begin())
+        XCTAssertTrue(activity.isActive)
+        XCTAssertFalse(activity.begin())
+        XCTAssertTrue(activity.isActive)
+
+        activity.end()
+        XCTAssertFalse(activity.isActive)
+        XCTAssertTrue(activity.begin())
+        activity.end()
+        XCTAssertFalse(activity.isActive)
+    }
+
+    func testHistoryCSVWorkerPropagatesWriterFailureAndActivityResetsForRetry() {
+        var activity = HistoryCSVExportActivity()
+        let writer = FailingExportWriter()
+
+        XCTAssertTrue(activity.begin())
+        XCTAssertThrowsError(
+            try HistoryCSVExportWorker.write(
+                sessions: [],
+                to: temporaryExportURL(),
+                writer: writer
+            )
+        )
+        activity.end()
+
+        XCTAssertFalse(activity.isActive)
+        XCTAssertTrue(activity.begin())
+        activity.end()
+    }
+
     func testHistoryCSVHasStableSchemaAndEscapesRFC4180Fields() {
         let start = date(year: 2024, month: 4, day: 20, hour: 10)
         let context = DeveloperToolSessionContext(
@@ -486,6 +571,64 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), data)
     }
 
+    private func temporaryExportURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("codepulse-history-export-\(UUID().uuidString).csv")
+    }
+
+    private func representativeHistoryCSVSession(reference: Date) -> CompletedSession {
+        let developerContext = DeveloperToolSessionContext(
+            tool: .codex,
+            externalSessionID: "worker-codex-session",
+            workingDirectory: "/private/worker",
+            firstActivityAt: reference,
+            lastActivityAt: reference.addingTimeInterval(100),
+            model: "GPT-5.6",
+            profile: "Builder"
+        )
+        let pullRequest = GitHubPullRequestSnapshot(
+            number: 7,
+            title: "Review, \"quoted\"",
+            state: .open,
+            isDraft: true,
+            url: "https://github.com/owner/repository/pull/7"
+        )
+
+        return CompletedSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000041")!,
+            projectID: alphaProjectID,
+            projectName: "Café 🚀",
+            type: .coding,
+            goal: "=Project, \"quoted\"\r\nnext",
+            outcome: "-Outcome\n🙂",
+            startedAt: reference,
+            endedAt: reference.addingTimeInterval(3_720),
+            pauseIntervals: [
+                PauseInterval(
+                    startedAt: reference.addingTimeInterval(1_800),
+                    endedAt: reference.addingTimeInterval(1_920)
+                )
+            ],
+            gitContext: GitSessionContext(
+                repositoryRoot: "/private/worker-repository",
+                branchAtStart: "@branch",
+                startWasDetached: false,
+                branchAtEnd: "feature/export",
+                endWasDetached: false,
+                commitCount: 2,
+                filesChanged: 3,
+                insertions: 12,
+                deletions: 4
+            ),
+            githubContext: GitHubSessionContext(
+                repositoryNameWithOwner: "owner/repository",
+                repositoryURL: "https://github.com/owner/repository",
+                pullRequest: pullRequest
+            ),
+            developerToolContexts: [developerContext]
+        )
+    }
+
     private func historyFixture(reference: Date) -> [CompletedSession] {
         let alphaGit = GitSessionContext(
             repositoryRoot: "/private/alpha-repository",
@@ -672,6 +815,16 @@ final class ExportTests: XCTestCase {
 
     private func date(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0) -> Date {
         calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    }
+}
+
+private struct FailingExportWriter: ExportFileWriting {
+    enum Failure: Error {
+        case expected
+    }
+
+    func write(_ data: Data, to url: URL) throws {
+        throw Failure.expected
     }
 }
 

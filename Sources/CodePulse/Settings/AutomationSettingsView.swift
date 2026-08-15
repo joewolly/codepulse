@@ -16,26 +16,30 @@ struct AutomationSettingsView: View {
             ))
             .accessibilityHint("Allows enabled developer-tool and frontmost-application rules to control eligible sessions")
 
+            if !store.state.settings.automationEnabled {
+                Text("Session Automation is off. Enabled rules are saved but will not run until you turn it on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .combine)
+            }
+
             Text("Optional and local. Developer-tool rules use lifecycle metadata and project paths. Application rules observe only the current frontmost application's bundle identifier while enabled; they do not inspect windows or collect usage history.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if store.automationRulesSorted.isEmpty {
-                Text("No automation rules yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let emptyState = EmptyStateCopy.automationEmptyState(
+                ruleCount: store.automationRulesSorted.count
+            ) {
+                EmptyStateView(content: emptyState)
             } else {
                 ForEach(store.automationRulesSorted) { rule in
                     let preset = store.sessionPreset(id: rule.presetID)
-                    let projectArchived = preset?.projectID.flatMap { projectID in
-                        store.state.projects.first(where: { $0.id == projectID })?.isArchived
-                    } == true
                     AutomationRuleRow(
                         rule: rule,
                         preset: preset,
-                        projectArchived: projectArchived,
-                        isUsable: store.isAutomationRuleUsable(rule),
+                        statusLabel: store.automationRuleStatusLabel(for: rule),
                         edit: {
                             ruleBeingEdited = rule
                             isPresentingEditor = true
@@ -53,6 +57,13 @@ struct AutomationSettingsView: View {
             }
             .disabled(store.sessionPresetsAvailableForAutomation.isEmpty)
             .accessibilityHint(store.sessionPresetsAvailableForAutomation.isEmpty ? "Create a session preset for an active project before creating an automation rule" : "Creates a local developer-tool or application session rule")
+
+            if store.sessionPresetsAvailableForAutomation.isEmpty {
+                Text("Add an active, relinked project preset before creating an automation rule.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .sheet(isPresented: $isPresentingEditor) {
             AutomationRuleEditorView(
@@ -73,38 +84,34 @@ struct AutomationSettingsView: View {
 private struct AutomationRuleRow: View {
     let rule: SessionAutomationRule
     let preset: SessionPreset?
-    let projectArchived: Bool
-    let isUsable: Bool
+    let statusLabel: String
     let edit: () -> Void
     let delete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: iconName)
-                .foregroundStyle(rule.isEnabled && isUsable ? Color.accentColor : Color.secondary)
+                .foregroundStyle(statusLabel == "Enabled" ? Color.accentColor : Color.secondary)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(rule.name)
                         .font(.subheadline.weight(.medium))
-                    if !rule.isEnabled {
-                        Text("Disabled")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    } else if projectArchived {
-                        Text("Project Archived")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    } else if !isUsable {
-                        Text("Needs attention")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                    }
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(rule.name)
+                    Text(statusLabel)
+                        .font(.caption2)
+                        .foregroundStyle(statusLabel == "Enabled" ? .green : .orange)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 Text("\(triggerSummary) → \(preset?.name ?? "Missing preset")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Text("Pause \(Int(rule.pauseDelay))s · finish \(Int(rule.finishDelay))s · minimum \(Int(rule.minimumSavedDuration))s")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -146,11 +153,6 @@ private struct AutomationRuleRow: View {
         }
     }
 
-    private var statusLabel: String {
-        if !rule.isEnabled { return "Disabled" }
-        if projectArchived { return "Project Archived" }
-        return isUsable ? "Enabled" : "Needs attention"
-    }
 }
 
 private enum AutomationTriggerKind: String, CaseIterable, Identifiable {
