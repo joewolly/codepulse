@@ -1,4 +1,7 @@
-# CodePulse
+<h1>
+  <img src="docs/images/codepulse-icon.png" width="42" alt="CodePulse icon" align="absmiddle">
+  CodePulse
+</h1>
 
 [![macOS validation](https://github.com/joewolly/codepulse/actions/workflows/validation.yml/badge.svg?branch=main)](https://github.com/joewolly/codepulse/actions/workflows/validation.yml)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
@@ -18,6 +21,16 @@ The current release is CodePulse **1.0.0 (build 1000)**.
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
 </p>
+
+## Screenshots
+
+### History
+
+<img src="docs/images/history.png" alt="CodePulse History showing privacy-safe sample coding sessions" width="760">
+
+### Insights
+
+<img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, activity, work types, and project totals" width="760">
 
 ## What it does
 
@@ -199,16 +212,6 @@ ambiguous presets/projects, expired/rejected commands, and local transport
 failures. A response timeout is exit code 7; a mutation may already have been
 applied, so re-read `status` before retrying. The embedded tool is not installed
 into `/usr/local/bin`; add a shell alias or use its bundle path explicitly.
-
-## Screenshots
-
-### History
-
-![CodePulse History showing privacy-safe sample coding sessions](docs/images/history.png)
-
-### Insights
-
-![CodePulse Insights showing local summary metrics, activity, work types, and project totals](docs/images/insights.png)
 
 ## Local data and privacy
 
