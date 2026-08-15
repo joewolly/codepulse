@@ -1,4 +1,7 @@
-# CodePulse
+<h1>
+  <img src="docs/images/codepulse-icon.png" width="42" alt="CodePulse icon" align="absmiddle">
+  CodePulse
+</h1>
 
 [![macOS validation](https://github.com/joewolly/codepulse/actions/workflows/validation.yml/badge.svg?branch=main)](https://github.com/joewolly/codepulse/actions/workflows/validation.yml)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white)
