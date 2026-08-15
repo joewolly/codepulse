@@ -22,6 +22,16 @@ The current release is CodePulse **1.0.0 (build 1000)**.
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
 </p>
 
+## Screenshots
+
+### History
+
+![CodePulse History showing privacy-safe sample coding sessions](docs/images/history.png)
+
+### Insights
+
+![CodePulse Insights showing local summary metrics, activity, work types, and project totals](docs/images/insights.png)
+
 ## What it does
 
 - Starts, pauses, resumes, and finishes focused work sessions from the menu bar.
@@ -202,16 +212,6 @@ ambiguous presets/projects, expired/rejected commands, and local transport
 failures. A response timeout is exit code 7; a mutation may already have been
 applied, so re-read `status` before retrying. The embedded tool is not installed
 into `/usr/local/bin`; add a shell alias or use its bundle path explicitly.
-
-## Screenshots
-
-### History
-
-![CodePulse History showing privacy-safe sample coding sessions](docs/images/history.png)
-
-### Insights
-
-![CodePulse Insights showing local summary metrics, activity, work types, and project totals](docs/images/insights.png)
 
 ## Local data and privacy
 
