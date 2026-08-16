@@ -2352,3 +2352,7 @@ final class SessionStore: ObservableObject {
         )
     }
 }
+
+extension SessionStore: DigestStateProviding {
+    var digestAppState: AppState { state }
+}

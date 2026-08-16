@@ -20,7 +20,7 @@ VOLUME_NAME="CodePulse"
 
 APP_ONLY=false
 SKIP_SMOKE=false
-ADHOC_SIGN="${CODEPULSE_ADHOC_SIGN:-0}"
+ADHOC_SIGN="${CODEPULSE_ADHOC_SIGN:-1}"
 TEMP_DIR=""
 MOUNT_POINT=""
 MOUNTED=false
@@ -43,12 +43,13 @@ usage() {
   cat <<'USAGE'
 Usage: ./script/package_release.sh [options]
 
-Build a native CodePulse release app and an unsigned drag-to-install DMG.
+Build a native CodePulse release app and an ad-hoc-signed drag-to-install DMG.
 
 Options:
   --app-only     Build and validate CodePulse.app without creating a DMG.
   --skip-smoke   Skip the read-only DMG mount/install-layout validation.
-  --adhoc-sign   Apply an optional local ad-hoc signature to the app bundle.
+  --adhoc-sign   Apply a local ad-hoc signature to the app bundle (default).
+  --unsigned     Skip Apple code signing for diagnostic testing only.
   --help         Show this help text.
 
 Version overrides:
@@ -79,9 +80,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 clear_bundle_metadata() {
-  /usr/bin/xattr -cr "$APP_BUNDLE"
-  /usr/bin/xattr -r -d com.apple.FinderInfo "$APP_BUNDLE" >/dev/null 2>&1 || true
-  /usr/bin/xattr -r -d 'com.apple.fileprovider.fpfs#P' "$APP_BUNDLE" >/dev/null 2>&1 || true
+  local bundle_path="${1:-$APP_BUNDLE}"
+  /usr/bin/xattr -cr "$bundle_path"
+  /usr/bin/xattr -r -d com.apple.FinderInfo "$bundle_path" >/dev/null 2>&1 || true
+  /usr/bin/xattr -r -d 'com.apple.fileprovider.fpfs#P' "$bundle_path" >/dev/null 2>&1 || true
 }
 
 parse_options() {
@@ -95,6 +97,9 @@ parse_options() {
         ;;
       --adhoc-sign)
         ADHOC_SIGN=1
+        ;;
+      --unsigned)
+        ADHOC_SIGN=0
         ;;
       --help|-h)
         usage
@@ -346,16 +351,37 @@ stage_app_bundle() {
 
 optionally_adhoc_sign() {
   if [[ "$ADHOC_SIGN" == "1" || "$ADHOC_SIGN" == "true" ]]; then
-    echo "Applying optional ad-hoc signature"
-    /usr/bin/codesign --force --sign - "$APP_BUNDLE"
+    echo "Applying local ad-hoc signature"
+    local signing_bundle="$TEMP_DIR/$APP_NAME.app"
+    local signing_helpers="$signing_bundle/Contents/Helpers"
+
+    # Sign outside the checkout so Finder/File Provider metadata cannot be
+    # reattached between staging and codesign. The verified bundle is copied
+    # back to the release path after the complete signature is sealed.
+    /usr/bin/ditto "$APP_BUNDLE" "$signing_bundle"
+    clear_bundle_metadata "$signing_bundle"
+
+    # Sign nested executables before the outer app so the app seal contains
+    # valid helper signatures. Sparkle ships its own ad-hoc-signed nested
+    # framework components; preserve those signatures and verify them below.
+    /usr/bin/codesign --force --sign - "$signing_helpers/codepulse-integration"
+    /usr/bin/codesign --force --sign - "$signing_helpers/codepulsectl"
+    /usr/bin/codesign --verify --strict --verbose=2 "$signing_helpers/codepulse-integration"
+    /usr/bin/codesign --verify --strict --verbose=2 "$signing_helpers/codepulsectl"
+    /usr/bin/codesign --verify --strict --verbose=2 "$signing_bundle/Contents/Frameworks/Sparkle.framework"
+    /usr/bin/codesign --force --sign - "$signing_bundle"
+    /usr/bin/codesign --verify --strict --verbose=2 "$signing_bundle"
+
+    /bin/rm -rf "$APP_BUNDLE"
+    /usr/bin/ditto "$signing_bundle" "$APP_BUNDLE"
     clear_bundle_metadata
   else
-    echo "Signing: intentionally unsigned (no Developer ID or ad-hoc signature)"
+    echo "Signing: intentionally unsigned diagnostic bundle (no Developer ID or ad-hoc signature)"
   fi
 }
 
 verify_bundle() {
-  local bundle_id bundle_executable display_name package_type short_version bundle_version minimum_system ls_ui_element icon_file architecture_info feed_url public_ed_key
+  local bundle_id bundle_executable display_name package_type short_version bundle_version minimum_system ls_ui_element icon_file architecture_info feed_url public_ed_key signature_details
 
   [[ -d "$APP_BUNDLE/Contents" ]] || die "missing app bundle Contents directory"
   [[ -f "$INFO_PLIST" ]] || die "missing app Info.plist"
@@ -403,7 +429,13 @@ verify_bundle() {
   /usr/bin/otool -l "$APP_BINARY" | /usr/bin/grep -A2 LC_RPATH | /usr/bin/grep -F '@executable_path/../Frameworks' >/dev/null || die "final executable is missing the Sparkle framework rpath"
 
   if [[ "$ADHOC_SIGN" == "1" || "$ADHOC_SIGN" == "true" ]]; then
+    clear_bundle_metadata
     /usr/bin/codesign --verify --strict --verbose=2 "$APP_BUNDLE"
+    signature_details="$(/usr/bin/codesign -dv --verbose=4 "$APP_BUNDLE" 2>&1)"
+    [[ "$signature_details" == *"Identifier=$BUNDLE_ID"* ]] || die "ad-hoc signature identifier mismatch"
+    [[ "$signature_details" == *"Signature=adhoc"* ]] || die "release app is not ad-hoc signed"
+    [[ "$signature_details" == *"TeamIdentifier=not set"* ]] || die "release app unexpectedly has a signing team identifier"
+    [[ "$signature_details" != *"Authority="* ]] || die "release app unexpectedly has a Developer ID certificate chain"
   fi
 }
 

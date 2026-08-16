@@ -152,6 +152,29 @@ enum InsightsCalculator {
             calendar: calendar,
             interval: interval
         )
+        return summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: referenceDate,
+            interval: interval,
+            comparisonInterval: comparisonInterval,
+            timeframe: timeframe,
+            project: project
+        )
+    }
+
+    /// Computes a summary for an explicit interval. This is the single shared
+    /// analytics path: the timeframe-based entry point above and the local
+    /// digest calculator both flow through here so they cannot drift apart.
+    static func summary(
+        state: AppState,
+        calendar: Calendar,
+        referenceDate: Date,
+        interval: DateInterval,
+        comparisonInterval: DateInterval?,
+        timeframe: InsightsTimeframe,
+        project: InsightsProjectFilter = .allProjects
+    ) -> InsightsSummary {
         let sources = sources(
             state: state,
             project: project,

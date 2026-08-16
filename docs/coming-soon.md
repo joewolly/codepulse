@@ -3,10 +3,12 @@
 This document tracks feature directions accepted after the 1.0.0 release. It
 is a working note, not a release commitment: ideas move between statuses as
 they are specified, sized, and scheduled into milestone trains. Nothing here
-requires cloud services, accounts, telemetry, or Apple code-signing.
+requires cloud services, accounts, telemetry, Developer ID signing, or
+notarization.
 
 ## Status
 
+- **Implemented** — shipped and working.
 - **Accepted** — the direction is worth building; it may still need a spec.
 - **Considering** — interesting, but not yet settled (scope, sizing, or fit).
 - **Deferred** — intentionally not building for now; revisit later.
@@ -20,13 +22,33 @@ to turn recorded data into guidance without any cloud involvement.
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Weekly / daily local digest | Accepted | Summarize active time, sessions, projects, work types, and developer-tool participation for the period. Local notification; no account needed. |
+| Weekly / daily local digest | Implemented | Summarize active time, sessions, projects, work types, and developer-tool participation for the period. Local notification; no account needed. |
 | Goal vs. actual tracking | Accepted | Sessions already capture goals and outcomes. Compare planned intent against time spent, and surface unfinished goals in History and Insights. |
 | Focus trends and streaks | Considering | Deep-work block detection, longest focus streak, context-switch cost, time-of-day heatmap. Needs a definition of "deep work" that fits one-window-at-a-time local data. |
 | Per-project outcome narrative | Considering | What got finished vs. abandoned per project, per period. Draws on existing goal/outcome text; formatting needs care to stay useful, not fluffy. |
 
 All computation stays local and deterministic, consistent with the existing
 Markdown report export.
+
+### Local daily and weekly digests
+
+Daily and weekly digests are **opt-in** (Settings → Actionable Insights) and
+disabled by default, including for existing installs. When enabled, CodePulse
+summarizes the **previous completed local calendar day or week** — active time,
+session count, top project and work type, and Codex/OpenCode participation,
+plus a comparison with the preceding equivalent period — and delivers it as a
+native macOS notification at the configured time. Delivery uses the local
+`UNUserNotificationCenter`; no network request, account, or remote service is
+involved, and nothing from a session's goal, outcome, paths, repositories,
+branches, or pull requests ever appears in a notification.
+
+Notification permission is requested only when a digest is first enabled, and
+CodePulse remains fully usable if permission is denied. Sessions are clipped
+at calendar boundaries using the same active-time rules as Insights, so a
+session or pause crossing midnight or a week boundary is never double-counted.
+A digest period is delivered once: pending requests are replaced (never
+duplicated) when settings change, and a small local ledger prevents re-notifying
+a period after relaunch.
 
 ---
 
@@ -66,7 +88,8 @@ opt-in and disabled by default.
 ## Out of scope
 
 - **Apple Developer ID signing and notarization** — deliberately not pursued;
-  the app stays unsigned and non-notarized. Gatekeeper friction on first
-  launch is accepted, and `docs/releasing.md` documents the safe path.
+  releases are ad-hoc signed locally and remain non-notarized. Gatekeeper
+  friction on first launch is accepted, and `docs/releasing.md` documents the
+  safe path.
 - **Cloud sync, accounts, telemetry, or product analytics** — always out of
   scope; the local-first story is the product.

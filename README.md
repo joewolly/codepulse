@@ -57,6 +57,8 @@ The current release is CodePulse **1.0.0 (build 1000)**.
 - Exports the currently filtered History as standard UTF-8 CSV.
 - Exports the currently selected Insights timeframe and project as a deterministic
   local Markdown report.
+- Optionally delivers opt-in daily and weekly local notification digests for
+  the previous completed day or week, computed entirely on this Mac.
 - Archives projects that are no longer active without deleting their saved
   sessions, Insights, exports, presets, or automation rules.
 - Exports and restores a versioned JSON backup of local CodePulse state.
@@ -69,7 +71,9 @@ for Apple silicon and Intel Macs.
 Download the latest DMG from
 [GitHub Releases](https://github.com/joewolly/codepulse/releases/latest), open
 it, and drag CodePulse to Applications. The current build is intentionally not
-Developer ID signed or notarized, so macOS may require an explicit first-launch
+Developer ID signed or notarized; it is ad-hoc signed locally for macOS runtime
+compatibility. Ad-hoc signing does not establish publisher identity or
+notarization trust, so macOS may still require an explicit first-launch
 approval. Follow the safe first-launch instructions in
 [`docs/releasing.md`](docs/releasing.md#installation-and-gatekeeper); do not
 disable Gatekeeper globally.
@@ -156,6 +160,21 @@ Insights summary and contains no AI-generated commentary or cloud data.
 
 Both exports are created locally at the destination you choose. CodePulse does
 not upload CSV or Markdown exports.
+
+## Local daily and weekly digests
+
+Settings → **Actionable Insights** offers opt-in daily and weekly digests
+(disabled by default). A digest summarizes the **previous completed local
+calendar day or week** — active time, session count, top project and work type,
+and Codex/OpenCode participation, with a comparison to the preceding equivalent
+period — and delivers it as a native macOS notification at a time you choose.
+
+Everything is computed on this Mac from the same local Insights data; digests
+use no network, account, or cloud service. Notifications contain only metrics
+and project names — never session goals or outcomes, file paths, repository
+URLs, branches, or pull-request titles. macOS asks for notification permission
+only when you first enable a digest, and CodePulse keeps working normally if
+you decline. A digest period is delivered once, even across relaunches.
 
 ## Project archiving
 

@@ -613,6 +613,70 @@ enum IdleAppearance: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// A wall-clock delivery time for a local digest. Only the hour and minute are
+/// persisted; the calendar derives the next actual delivery date.
+struct DigestDeliveryTime: Codable, Equatable, Hashable {
+    let hour: Int
+    let minute: Int
+
+    init(hour: Int, minute: Int) {
+        self.hour = min(23, max(0, hour))
+        self.minute = min(59, max(0, minute))
+    }
+
+    static let defaultMorning = DigestDeliveryTime(hour: 9, minute: 0)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            hour: try container.decode(Int.self, forKey: .hour),
+            minute: try container.decode(Int.self, forKey: .minute)
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hour, minute
+    }
+}
+
+/// Weekday numbering matches `Calendar.weekday` (1 = Sunday … 7 = Saturday) so
+/// scheduling can hand the value directly to calendar date-matching components.
+enum DigestWeekday: Int, Codable, CaseIterable, Identifiable, Equatable {
+    case sunday = 1
+    case monday = 2
+    case tuesday = 3
+    case wednesday = 4
+    case thursday = 5
+    case friday = 6
+    case saturday = 7
+
+    var id: Int { rawValue }
+}
+
+/// Per-kind local digest delivery configuration. Both digests are opt-in and
+/// disabled by default so upgrades stay silent.
+struct DigestSettings: Codable, Equatable {
+    var dailyEnabled: Bool
+    var dailyTime: DigestDeliveryTime
+    var weeklyEnabled: Bool
+    var weeklyWeekday: DigestWeekday
+    var weeklyTime: DigestDeliveryTime
+
+    init(
+        dailyEnabled: Bool = false,
+        dailyTime: DigestDeliveryTime = .defaultMorning,
+        weeklyEnabled: Bool = false,
+        weeklyWeekday: DigestWeekday = .monday,
+        weeklyTime: DigestDeliveryTime = .defaultMorning
+    ) {
+        self.dailyEnabled = dailyEnabled
+        self.dailyTime = dailyTime
+        self.weeklyEnabled = weeklyEnabled
+        self.weeklyWeekday = weeklyWeekday
+        self.weeklyTime = weeklyTime
+    }
+}
+
 struct CodePulseSettings: Codable, Equatable {
     var launchAtLogin: Bool
     var menuBarDisplay: MenuBarDisplay
@@ -622,6 +686,7 @@ struct CodePulseSettings: Codable, Equatable {
     var globalShortcutEnabled: Bool
     var automationEnabled: Bool
     var hasCompletedOnboarding: Bool
+    var digests: DigestSettings
 
     init(
         launchAtLogin: Bool = false,
@@ -631,7 +696,8 @@ struct CodePulseSettings: Codable, Equatable {
         specificProjectID: UUID? = nil,
         globalShortcutEnabled: Bool = true,
         automationEnabled: Bool = false,
-        hasCompletedOnboarding: Bool = false
+        hasCompletedOnboarding: Bool = false,
+        digests: DigestSettings = DigestSettings()
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -641,12 +707,14 @@ struct CodePulseSettings: Codable, Equatable {
         self.globalShortcutEnabled = globalShortcutEnabled
         self.automationEnabled = automationEnabled
         self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.digests = digests
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
         case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, automationEnabled
         case hasCompletedOnboarding
+        case digests
     }
 
     init(from decoder: Decoder) throws {
@@ -666,6 +734,10 @@ struct CodePulseSettings: Codable, Equatable {
         } else {
             hasCompletedOnboarding = true
         }
+        // Digest configuration is additive and optional. Older states and
+        // malformed optional configuration decode to the safe default, which
+        // keeps both digest kinds disabled.
+        digests = (try? container.decodeIfPresent(DigestSettings.self, forKey: .digests)) ?? DigestSettings()
     }
 }
 
