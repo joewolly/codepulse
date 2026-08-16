@@ -53,7 +53,7 @@ Options:
   --help         Show this help text.
 
 Version overrides:
-  CODEPULSE_VERSION=1.1.1 CODEPULSE_BUILD=1101 ./script/package_release.sh
+  CODEPULSE_VERSION=1.1.2 CODEPULSE_BUILD=1102 ./script/package_release.sh
 USAGE
 }
 

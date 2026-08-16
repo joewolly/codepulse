@@ -88,6 +88,8 @@ struct CodePulseApp: App {
         // CodePulse owns every user-facing window through AppWindowCoordinator.
         // Keep SwiftUI's App lifecycle without registering a launchable scene
         // on macOS 13, where a lone Settings scene is presented automatically.
-        SceneBuilder.buildBlock()
+        if #available(macOS 999, *) {
+            Settings { EmptyView() }
+        }
     }
 }

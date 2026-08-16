@@ -19,8 +19,8 @@ final class ReleaseReadinessTests: XCTestCase {
             ) as? [String: Any]
         )
 
-        XCTAssertEqual(metadata["CFBundleShortVersionString"] as? String, "1.1.1")
-        XCTAssertEqual(metadata["CFBundleVersion"] as? String, "1101")
+        XCTAssertEqual(metadata["CFBundleShortVersionString"] as? String, "1.1.2")
+        XCTAssertEqual(metadata["CFBundleVersion"] as? String, "1102")
         XCTAssertEqual(metadata["LSMinimumSystemVersion"] as? String, "13.0")
         XCTAssertEqual(metadata["LSUIElement"] as? Bool, true)
         XCTAssertEqual(
