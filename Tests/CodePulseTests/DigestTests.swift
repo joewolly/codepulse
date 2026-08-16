@@ -110,6 +110,45 @@ final class DigestTests: XCTestCase {
         XCTAssertEqual(due, date(year: 2023, month: 1, day: 4, hour: 9))
     }
 
+    func testDeliveryDateReturnsDailyPeriodEndAtExactMidnight() {
+        let settings = DigestSettings(dailyTime: DigestDeliveryTime(hour: 0, minute: 0))
+        let periodEnd = date(year: 2023, month: 1, day: 4)
+        let due = DigestPeriodCalculator.deliveryDate(
+            kind: .daily,
+            forPeriodEnding: periodEnd,
+            settings: settings,
+            calendar: calendar
+        )
+        XCTAssertEqual(due, periodEnd)
+    }
+
+    func testDeliveryDateReturnsWeeklyPeriodEndAtExactMondayMidnight() {
+        let settings = DigestSettings(
+            weeklyWeekday: .monday,
+            weeklyTime: DigestDeliveryTime(hour: 0, minute: 0)
+        )
+        let periodEnd = date(year: 2023, month: 1, day: 2)
+        let due = DigestPeriodCalculator.deliveryDate(
+            kind: .weekly,
+            forPeriodEnding: periodEnd,
+            settings: settings,
+            calendar: calendar
+        )
+        XCTAssertEqual(due, periodEnd)
+    }
+
+    func testNextDeliveryDateRemainsStrictlyFutureAfterSundayNight() {
+        let settings = DigestSettings(dailyTime: DigestDeliveryTime(hour: 0, minute: 0))
+        let reference = date(year: 2023, month: 1, day: 1, hour: 23, minute: 30)
+        let due = DigestPeriodCalculator.nextDeliveryDate(
+            kind: .daily,
+            after: reference,
+            settings: settings,
+            calendar: calendar
+        )
+        XCTAssertEqual(due, date(year: 2023, month: 1, day: 2))
+    }
+
     func testDigestDeliveryTimeDecodingClampsOutOfRangeComponentsAndPreservesRoundTrip() throws {
         let decoder = JSONDecoder()
         let malformed = try decoder.decode(

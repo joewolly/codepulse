@@ -48,6 +48,49 @@ enum DigestPeriodCalculator {
         )
     }
 
+    /// The delivery date belonging to an already completed period. This uses
+    /// on-or-after semantics when the period ends exactly at the configured
+    /// delivery instant, while preserving the strictly-future behavior of
+    /// `nextDeliveryDate(after:)`.
+    static func deliveryDate(
+        kind: DigestKind,
+        forPeriodEnding periodEnd: Date,
+        settings: DigestSettings,
+        calendar: Calendar
+    ) -> Date? {
+        let components: DateComponents
+        let periodComponents: DateComponents
+        switch kind {
+        case .daily:
+            components = DateComponents(
+                hour: settings.dailyTime.hour,
+                minute: settings.dailyTime.minute
+            )
+            periodComponents = calendar.dateComponents([.hour, .minute], from: periodEnd)
+            if periodComponents.hour == components.hour,
+               periodComponents.minute == components.minute {
+                return periodEnd
+            }
+        case .weekly:
+            components = DateComponents(
+                hour: settings.weeklyTime.hour,
+                minute: settings.weeklyTime.minute,
+                weekday: settings.weeklyWeekday.rawValue
+            )
+            periodComponents = calendar.dateComponents([.weekday, .hour, .minute], from: periodEnd)
+            if periodComponents.weekday == components.weekday,
+               periodComponents.hour == components.hour,
+               periodComponents.minute == components.minute {
+                return periodEnd
+            }
+        }
+        return calendar.nextDate(
+            after: periodEnd,
+            matching: components,
+            matchingPolicy: .nextTime
+        )
+    }
+
     private static func dailyPeriod(referenceDate: Date, calendar: Calendar) -> DigestPeriod {
         let todayStart = calendar.startOfDay(for: referenceDate)
         let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart

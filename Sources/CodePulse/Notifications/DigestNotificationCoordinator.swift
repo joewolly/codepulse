@@ -119,9 +119,9 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         let calendar = stateProvider.calendar
         let now = clock.now
         let period = DigestPeriodCalculator.completedPeriod(kind: kind, referenceDate: now, calendar: calendar)
-        guard let due = DigestPeriodCalculator.nextDeliveryDate(
+        guard let due = DigestPeriodCalculator.deliveryDate(
             kind: kind,
-            after: period.interval.end,
+            forPeriodEnding: period.interval.end,
             settings: settings,
             calendar: calendar
         ) else { return }
