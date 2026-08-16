@@ -16,7 +16,7 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release is CodePulse **1.1.0 (build 1100)**.
+The current release is CodePulse **1.1.1 (build 1101)**.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
