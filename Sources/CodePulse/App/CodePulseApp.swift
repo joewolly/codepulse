@@ -47,6 +47,29 @@ struct CodePulseApp: App {
         _digestCoordinator = StateObject(wrappedValue: digestCoordinator)
         menuBarItemInserted = true
 
+        windowCoordinator.configureSettingsWindow { [weak store, weak windowCoordinator, weak menuBarStatusItem, weak updateController, weak integrationManager, weak digestCoordinator] in
+            guard let store,
+                  let windowCoordinator,
+                  let menuBarStatusItem,
+                  let updateController,
+                  let integrationManager,
+                  let digestCoordinator else {
+                return NSHostingController(rootView: EmptyView())
+            }
+
+            let content = SettingsView()
+                .environmentObject(store)
+                .environmentObject(windowCoordinator)
+                .environmentObject(menuBarStatusItem)
+                .environmentObject(updateController)
+                .environmentObject(integrationManager)
+                .environmentObject(digestCoordinator)
+            return NSHostingController(rootView: content)
+        }
+        appDelegate.configureSettingsAction { [weak windowCoordinator] in
+            windowCoordinator?.showSettings()
+        }
+
         // SessionStore has completed state recovery before this deferred
         // informational window is considered. The status item is also
         // installed on the next run-loop turn, so onboarding cannot become an
@@ -62,14 +85,9 @@ struct CodePulseApp: App {
     }
 
     var body: some Scene {
-        Settings {
-            SettingsView()
-                .environmentObject(store)
-                .environmentObject(windowCoordinator)
-                .environmentObject(menuBarStatusItem)
-                .environmentObject(updateController)
-                .environmentObject(integrationManager)
-                .environmentObject(digestCoordinator)
-        }
+        // CodePulse owns every user-facing window through AppWindowCoordinator.
+        // Keep SwiftUI's App lifecycle without registering a launchable scene
+        // on macOS 13, where a lone Settings scene is presented automatically.
+        SceneBuilder.buildBlock()
     }
 }
