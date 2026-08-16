@@ -71,7 +71,9 @@ for Apple silicon and Intel Macs.
 Download the latest DMG from
 [GitHub Releases](https://github.com/joewolly/codepulse/releases/latest), open
 it, and drag CodePulse to Applications. The current build is intentionally not
-Developer ID signed or notarized, so macOS may require an explicit first-launch
+Developer ID signed or notarized; it is ad-hoc signed locally for macOS runtime
+compatibility. Ad-hoc signing does not establish publisher identity or
+notarization trust, so macOS may still require an explicit first-launch
 approval. Follow the safe first-launch instructions in
 [`docs/releasing.md`](docs/releasing.md#installation-and-gatekeeper); do not
 disable Gatekeeper globally.

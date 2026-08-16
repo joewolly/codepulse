@@ -3,7 +3,8 @@
 This document tracks feature directions accepted after the 1.0.0 release. It
 is a working note, not a release commitment: ideas move between statuses as
 they are specified, sized, and scheduled into milestone trains. Nothing here
-requires cloud services, accounts, telemetry, or Apple code-signing.
+requires cloud services, accounts, telemetry, Developer ID signing, or
+notarization.
 
 ## Status
 
@@ -87,7 +88,8 @@ opt-in and disabled by default.
 ## Out of scope
 
 - **Apple Developer ID signing and notarization** — deliberately not pursued;
-  the app stays unsigned and non-notarized. Gatekeeper friction on first
-  launch is accepted, and `docs/releasing.md` documents the safe path.
+  releases are ad-hoc signed locally and remain non-notarized. Gatekeeper
+  friction on first launch is accepted, and `docs/releasing.md` documents the
+  safe path.
 - **Cloud sync, accounts, telemetry, or product analytics** — always out of
   scope; the local-first story is the product.

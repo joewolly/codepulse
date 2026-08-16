@@ -1,7 +1,7 @@
 # CodePulse macOS release packaging
 
 The current release candidate is CodePulse **1.0.0 (build 1000)**. The
-instructions below describe the existing unsigned Universal 2 packaging and
+instructions below describe the local ad-hoc-signed Universal 2 packaging and
 the separate Sparkle update-signing path.
 
 ## What the artifact is
@@ -10,10 +10,13 @@ CodePulse is distributed as a native macOS application inside a drag-to-install
 `.dmg`. The package is built from Swift Package Manager source and does not
 use Electron, Catalyst, or an installer package.
 
-CodePulse 1.0 remains intentionally unsigned and non-notarized. No Apple
-Developer Program account or Developer ID signing credentials are required to
-build it. Sparkle provides authenticated in-app updates using the existing
-Ed25519 update-signing key; Sparkle signing is separate from Apple code signing.
+CodePulse 1.0 is ad-hoc signed locally for macOS runtime compatibility and is
+not notarized. No Apple Developer Program account, Developer ID identity, or
+paid signing credential is required to build it. Ad-hoc signing provides bundle
+integrity and a local code identity for macOS bundle registration; it does not
+establish publisher identity or notarization trust. Sparkle provides
+authenticated in-app updates using the existing Ed25519 update-signing key;
+Sparkle signing is separate from Apple code signing.
 
 ## Requirements
 
@@ -46,11 +49,13 @@ Optional iteration modes are available:
 ./script/package_release.sh --app-only
 ./script/package_release.sh --skip-smoke
 ./script/package_release.sh --adhoc-sign
+./script/package_release.sh --unsigned
 ```
 
 `--app-only` omits DMG creation. `--skip-smoke` omits the read-only DMG mount
-and layout check. `--adhoc-sign` applies a local ad-hoc signature for bundle
-integrity checks; it does not identify CodePulse to Gatekeeper and is not
+and layout check. The normal package is ad-hoc signed; `--adhoc-sign` makes that
+choice explicit. `--unsigned` skips Apple code signing for diagnostic A/B tests
+only. An ad-hoc signature does not identify CodePulse to Gatekeeper and is not
 Developer ID signing.
 
 The version and build number can be overridden without editing source files:
@@ -147,8 +152,9 @@ the appcast signature and published archive are expected to stay in sync.
 
 ## Installation and Gatekeeper
 
-The DMG is not Developer ID signed and is not notarized. On a Mac with normal
-Gatekeeper protections, the first manual installation may show an
+The DMG is ad-hoc signed locally, but is not Developer ID signed and is not
+notarized. On a Mac with normal Gatekeeper protections, the first manual
+installation may show an
 unidentified-developer or cannot-verify-developer warning. That warning is
 expected for this distribution model and is not a corrupt-DMG indication.
 
@@ -187,14 +193,16 @@ otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
 shasum -a 256 dist/release/CodePulse-1.0.0.dmg
 ```
 
-The default package is intentionally unsigned, so `codesign --verify` is
-expected to fail because CodePulse has no Apple code signature. Sparkle's
-EdDSA signature authenticates the update archive independently of Apple code
-signing.
+The default package is ad-hoc signed locally. `codesign --verify --strict`
+should pass for the app, its helpers, and the embedded Sparkle framework, while
+`codesign -dv --verbose=4` should report `Signature=adhoc` and
+`TeamIdentifier=not set`. The normal package therefore has no Developer ID
+identity and no notarization ticket. Sparkle's EdDSA signature authenticates
+the update archive independently of Apple code signing.
 
-With `--adhoc-sign`, the packaging script runs strict `codesign` verification;
-an ad-hoc signature verifies bundle integrity but still provides no developer
-identity or notarization ticket.
+`--unsigned` is an explicit diagnostic mode. Its outer app bundle is expected
+to fail `codesign --verify` because it has no Apple bundle signature; that mode
+is not a release artifact and cannot provide local notification authorization.
 
 ## Staged development-app verification
 
@@ -211,8 +219,9 @@ metadata mutation, not a release-signing change; a subsequent strict check of
 that copied path can therefore report disallowed Finder information even though
 the local stage passed. Repeat the launcher, or reproduce the strict check by
 staging under a local temporary directory outside the File Provider-managed
-checkout. The unsigned release packager remains independent of this
-development-only caveat and does not weaken strict verification.
+checkout. The release packager also clears this metadata before its signing
+checks; `--unsigned` remains an explicit diagnostic mode and does not weaken
+the normal strict verification path.
 
 ## Compatibility notes
 
