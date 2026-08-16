@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @EnvironmentObject private var updateController: SparkleUpdateController
     @EnvironmentObject private var integrationManager: DeveloperToolIntegrationManager
+    @EnvironmentObject private var digestCoordinator: DigestNotificationCoordinator
     @State private var projectToRename: ProjectRecord?
     @State private var renameText = ""
     @State private var projectToArchive: ProjectRecord?
@@ -96,6 +97,12 @@ struct SettingsView: View {
 
             SessionPresetSettingsView()
             AutomationSettingsView()
+
+            Section("Actionable Insights") {
+                DigestSettingsView()
+                    .environmentObject(store)
+                    .environmentObject(digestCoordinator)
+            }
 
             Section("Workflow") {
                 Toggle("Open History with ⌥⌘T", isOn: Binding(

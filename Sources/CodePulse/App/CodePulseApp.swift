@@ -13,6 +13,7 @@ struct CodePulseApp: App {
     @StateObject private var menuBarStatusItem: MenuBarStatusItemController
     @StateObject private var updateController: SparkleUpdateController
     @StateObject private var integrationManager: DeveloperToolIntegrationManager
+    @StateObject private var digestCoordinator: DigestNotificationCoordinator
 
     init() {
         MenuBarInsertionState.restoreOnLaunch()
@@ -27,6 +28,13 @@ struct CodePulseApp: App {
         )
         let updateController = SparkleUpdateController()
         let integrationManager = DeveloperToolIntegrationManager.live()
+        let digestCoordinator = DigestNotificationCoordinator(
+            stateProvider: store,
+            notifications: SystemLocalNotificationScheduler(),
+            ledger: UserDefaultsDigestDeliveryLedger(),
+            clock: store.clock
+        )
+        digestCoordinator.start()
         shortcutController.start(store: store) { [weak windowCoordinator] in
             windowCoordinator?.showHistoryIfEnabled()
         }
@@ -36,6 +44,7 @@ struct CodePulseApp: App {
         _menuBarStatusItem = StateObject(wrappedValue: menuBarStatusItem)
         _updateController = StateObject(wrappedValue: updateController)
         _integrationManager = StateObject(wrappedValue: integrationManager)
+        _digestCoordinator = StateObject(wrappedValue: digestCoordinator)
         menuBarItemInserted = true
 
         // SessionStore has completed state recovery before this deferred
@@ -67,6 +76,7 @@ struct CodePulseApp: App {
                 .environmentObject(menuBarStatusItem)
                 .environmentObject(updateController)
                 .environmentObject(integrationManager)
+                .environmentObject(digestCoordinator)
         }
     }
 }
