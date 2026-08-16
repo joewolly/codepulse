@@ -62,13 +62,6 @@ struct CodePulseApp: App {
     }
 
     var body: some Scene {
-        Window("Insights", id: "insights") {
-            InsightsView()
-                .environmentObject(store)
-                .environmentObject(menuBarStatusItem)
-        }
-        .defaultSize(width: 760, height: 620)
-
         Settings {
             SettingsView()
                 .environmentObject(store)
