@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 
 /// Minimal state surface the digest coordinator needs from the app.
 @MainActor
@@ -17,6 +18,7 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
     private let notifications: LocalNotificationScheduling
     private let ledger: DigestDeliveryLedgerStoring
     private let clock: SessionClock
+    private let logger = Logger(subsystem: "com.joewolly.CodePulse", category: "notifications")
     private var timer: Timer?
 
     static let pendingRequestPrefix = "codepulse-digest."
@@ -124,7 +126,9 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         ) else { return }
 
         if now >= due {
-            await handleOverdue(kind: kind, period: period, due: due, calendar: calendar)
+            guard await handleOverdue(kind: kind, period: period, due: due, calendar: calendar) else {
+                return
+            }
         }
         await ensureScheduled(kind: kind, settings: settings, calendar: calendar)
     }
@@ -134,18 +138,20 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         period: DigestPeriod,
         due: Date,
         calendar: Calendar
-    ) async {
+    ) async -> Bool {
         let identifier = Self.requestIdentifier(kind)
         let periodID = DigestIdentity.periodIdentifier(periodStart: period.interval.start, calendar: calendar)
-        guard ledger.lastDeliveredPeriodIdentifier(for: kind) != periodID else { return }
+        guard ledger.lastDeliveredPeriodIdentifier(for: kind) != periodID else { return true }
 
         let pending = await notifications.pendingRequests()
         if let existing = pending.first(where: { $0.identifier == identifier }) {
             if calendar.isDate(existing.fireDate, equalTo: due, toGranularity: .minute) {
                 // The request for this due date never fired (Mac asleep, app
                 // relaunched past the minute). Deliver it now instead.
+                guard await deliverNow(kind: kind, period: period, calendar: calendar) else {
+                    return false
+                }
                 notifications.removePending(withIdentifiers: [identifier])
-                await deliverNow(kind: kind, period: period, calendar: calendar)
                 ledger.recordDelivery(periodIdentifier: periodID, for: kind)
             } else {
                 // A later request is pending; the due request already fired
@@ -159,9 +165,12 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         } else {
             // Nothing was ever scheduled for this due date (for example a
             // fresh enable): deliver the completed period now.
-            await deliverNow(kind: kind, period: period, calendar: calendar)
+            guard await deliverNow(kind: kind, period: period, calendar: calendar) else {
+                return false
+            }
             ledger.recordDelivery(periodIdentifier: periodID, for: kind)
         }
+        return true
     }
 
     private func ensureScheduled(kind: DigestKind, settings: DigestSettings, calendar: Calendar) async {
@@ -204,14 +213,18 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
             return
         }
 
-        try? await notifications.add(request)
-        ledger.recordScheduledDue(
-            identifier: DigestIdentity.dueIdentifier(date: due, calendar: calendar),
-            for: kind
-        )
+        do {
+            try await notifications.add(request)
+            ledger.recordScheduledDue(
+                identifier: DigestIdentity.dueIdentifier(date: due, calendar: calendar),
+                for: kind
+            )
+        } catch {
+            logSubmissionFailure(operation: "schedule", error: error)
+        }
     }
 
-    private func deliverNow(kind: DigestKind, period: DigestPeriod, calendar: Calendar) async {
+    private func deliverNow(kind: DigestKind, period: DigestPeriod, calendar: Calendar) async -> Bool {
         let summary = DigestCalculator.summary(
             state: stateProvider.digestAppState,
             period: period,
@@ -220,13 +233,27 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         )
         let content = DigestComposer.content(summary: summary, calendar: calendar)
         let periodID = DigestIdentity.periodIdentifier(periodStart: period.interval.start, calendar: calendar)
-        try? await notifications.add(DigestNotificationRequest(
+        let request = DigestNotificationRequest(
             identifier: "\(Self.pendingRequestPrefix)\(kind.rawValue).delivered.\(periodID)",
             title: content.title,
             body: content.body,
             fireDate: clock.now,
             userInfo: [Self.userInfoPeriodStartKey: periodID]
-        ))
+        )
+        do {
+            try await notifications.add(request)
+            return true
+        } catch {
+            logSubmissionFailure(operation: "deliverNow", error: error)
+            return false
+        }
+    }
+
+    private func logSubmissionFailure(operation: String, error: Error) {
+        let nsError = error as NSError
+        logger.error(
+            "Digest notification submission failed [operation: \(operation, privacy: .public) domain: \(nsError.domain, privacy: .public) code: \(nsError.code, privacy: .public) description: \(nsError.localizedDescription, privacy: .public)]"
+        )
     }
 
     static func requestIdentifier(_ kind: DigestKind) -> String {

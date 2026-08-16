@@ -11,10 +11,15 @@ private final class DigestTestClock: SessionClock {
     }
 }
 
+private enum FakeNotificationSchedulerError: Error {
+    case addFailed
+}
+
 private final class FakeNotificationScheduler: LocalNotificationScheduling {
     weak var deliveryDelegate: LocalNotificationDelivering?
 
     var authorizationResult: DigestNotificationAuthorization = .authorized
+    var addError: Error?
     private(set) var authorizationRequestCount = 0
     private(set) var addCount = 0
     private(set) var requests: [String: DigestNotificationRequest] = [:]
@@ -30,6 +35,9 @@ private final class FakeNotificationScheduler: LocalNotificationScheduling {
 
     func add(_ request: DigestNotificationRequest) async throws {
         addCount += 1
+        if let addError {
+            throw addError
+        }
         requests[request.identifier] = request
     }
 
@@ -234,6 +242,75 @@ final class DigestNotificationCoordinatorTests: XCTestCase {
         XCTAssertEqual(scheduler.requests.count, 1)
         XCTAssertEqual(Set(scheduler.requests.keys), ["codepulse-digest.daily"])
         XCTAssertEqual(scheduler.addCount, 1)
+    }
+
+    func testFailedScheduledAddLeavesLedgerUntouched() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 4, hour: 8))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        let scheduler = FakeNotificationScheduler()
+        scheduler.addError = FakeNotificationSchedulerError.addFailed
+        let (coordinator, _, _, ledger) = makeCoordinator(state: state, clock: clock, scheduler: scheduler)
+
+        await coordinator.runSchedulingPass()
+
+        XCTAssertTrue(scheduler.requests.isEmpty)
+        XCTAssertNil(ledger.scheduledDue["daily"])
+        XCTAssertNil(ledger.delivered["daily"])
+    }
+
+    func testFailedScheduledAddRetriesOnNextPass() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 4, hour: 8))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        let scheduler = FakeNotificationScheduler()
+        scheduler.addError = FakeNotificationSchedulerError.addFailed
+        let (coordinator, _, _, ledger) = makeCoordinator(state: state, clock: clock, scheduler: scheduler)
+
+        await coordinator.runSchedulingPass()
+        scheduler.addError = nil
+        await coordinator.runSchedulingPass()
+
+        XCTAssertNotNil(scheduler.requests["codepulse-digest.daily"])
+        XCTAssertEqual(ledger.scheduledDue["daily"], "2023-01-04T09:00")
+    }
+
+    func testFailedImmediateDeliveryLeavesPeriodUndelivered() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 4, hour: 9, minute: 30))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        let scheduler = FakeNotificationScheduler()
+        scheduler.addError = FakeNotificationSchedulerError.addFailed
+        let (coordinator, _, _, ledger) = makeCoordinator(state: state, clock: clock, scheduler: scheduler)
+
+        await coordinator.runSchedulingPass()
+
+        XCTAssertFalse(scheduler.requests.values.contains { $0.identifier.contains(".delivered.") })
+        XCTAssertNil(ledger.delivered["daily"])
+        XCTAssertNil(ledger.scheduledDue["daily"])
+    }
+
+    func testSuccessfulImmediateRetryRecordsDeliveryOnce() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 4, hour: 9, minute: 30))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        let scheduler = FakeNotificationScheduler()
+        scheduler.addError = FakeNotificationSchedulerError.addFailed
+        let (coordinator, _, _, ledger) = makeCoordinator(state: state, clock: clock, scheduler: scheduler)
+
+        await coordinator.runSchedulingPass()
+        scheduler.addError = nil
+        await coordinator.runSchedulingPass()
+
+        let delivered = scheduler.requests.values.filter { $0.identifier.contains(".delivered.") }
+        XCTAssertEqual(delivered.count, 1)
+        XCTAssertEqual(ledger.delivered["daily"], "2023-01-03T00:00")
+        let addCountAfterRetry = scheduler.addCount
+
+        await coordinator.runSchedulingPass()
+
+        XCTAssertEqual(scheduler.requests.values.filter { $0.identifier.contains(".delivered.") }.count, 1)
+        XCTAssertEqual(scheduler.addCount, addCountAfterRetry)
     }
 
     func testAuthorizationDeniedIsFailSoft() async {
