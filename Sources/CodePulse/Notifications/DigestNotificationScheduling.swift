@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UserNotifications
 
 enum DigestNotificationAuthorization: Equatable {
@@ -56,6 +57,7 @@ final class SystemLocalNotificationScheduler: NSObject, LocalNotificationSchedul
     weak var deliveryDelegate: LocalNotificationDelivering?
 
     private let center: UNUserNotificationCenter
+    private let logger = Logger(subsystem: "com.joewolly.CodePulse", category: "notifications")
 
     init(center: UNUserNotificationCenter = .current()) {
         self.center = center
@@ -69,7 +71,26 @@ final class SystemLocalNotificationScheduler: NSObject, LocalNotificationSchedul
     }
 
     func requestAuthorization() async -> Bool {
-        (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+        do {
+            let didGrant = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            logger.info("Requested authorization [didGrant: \(didGrant, privacy: .public) hasError: false]")
+            return didGrant
+        } catch {
+            let nsError = error as NSError
+            let failureReason = nsError.localizedFailureReason ?? "<none>"
+            let recoverySuggestion = nsError.localizedRecoverySuggestion ?? "<none>"
+            let underlyingDescription: String
+            if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                underlyingDescription = "domain=\(underlyingError.domain) code=\(underlyingError.code) description=\(underlyingError.localizedDescription)"
+            } else {
+                underlyingDescription = "<none>"
+            }
+
+            logger.error(
+                "Requested authorization [didGrant: false hasError: true domain: \(nsError.domain, privacy: .public) code: \(nsError.code, privacy: .public) description: \(nsError.localizedDescription, privacy: .public) failureReason: \(failureReason, privacy: .public) recoverySuggestion: \(recoverySuggestion, privacy: .public) underlying: \(underlyingDescription, privacy: .public)]"
+            )
+            return false
+        }
     }
 
     func add(_ request: DigestNotificationRequest) async throws {
