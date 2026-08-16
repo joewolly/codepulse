@@ -174,11 +174,6 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         ) else { return }
 
         let pending = await notifications.pendingRequests()
-        if let existing = pending.first(where: { $0.identifier == identifier }),
-           calendar.isDate(existing.fireDate, equalTo: due, toGranularity: .minute) {
-            return
-        }
-
         let contentPeriod = DigestPeriodCalculator.completedPeriod(
             kind: kind,
             referenceDate: due,
@@ -187,11 +182,11 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
         let summary = DigestCalculator.summary(
             state: stateProvider.digestAppState,
             period: contentPeriod,
-            referenceDate: due,
+            referenceDate: min(clock.now, contentPeriod.interval.end),
             calendar: calendar
         )
         let content = DigestComposer.content(summary: summary, calendar: calendar)
-        try? await notifications.add(DigestNotificationRequest(
+        let request = DigestNotificationRequest(
             identifier: identifier,
             title: content.title,
             body: content.body,
@@ -200,7 +195,16 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
                 Self.userInfoPeriodStartKey:
                     DigestIdentity.periodIdentifier(periodStart: contentPeriod.interval.start, calendar: calendar)
             ]
-        ))
+        )
+        if let existing = pending.first(where: { $0.identifier == identifier }),
+           calendar.isDate(existing.fireDate, equalTo: due, toGranularity: .minute),
+           existing.title == request.title,
+           existing.body == request.body,
+           existing.userInfo == request.userInfo {
+            return
+        }
+
+        try? await notifications.add(request)
         ledger.recordScheduledDue(
             identifier: DigestIdentity.dueIdentifier(date: due, calendar: calendar),
             for: kind

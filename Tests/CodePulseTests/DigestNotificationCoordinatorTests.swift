@@ -16,6 +16,7 @@ private final class FakeNotificationScheduler: LocalNotificationScheduling {
 
     var authorizationResult: DigestNotificationAuthorization = .authorized
     private(set) var authorizationRequestCount = 0
+    private(set) var addCount = 0
     private(set) var requests: [String: DigestNotificationRequest] = [:]
     private(set) var removedIdentifiers: [String] = []
 
@@ -28,6 +29,7 @@ private final class FakeNotificationScheduler: LocalNotificationScheduling {
     }
 
     func add(_ request: DigestNotificationRequest) async throws {
+        addCount += 1
         requests[request.identifier] = request
     }
 
@@ -115,6 +117,50 @@ final class DigestNotificationCoordinatorTests: XCTestCase {
         XCTAssertEqual(daily.userInfo["periodStart"], "2023-01-03T00:00")
     }
 
+    func testScheduledContentRefreshesWithoutChangingIdentityOrFireDate() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 2, hour: 9, minute: 1))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        let (coordinator, provider, scheduler, _) = makeCoordinator(state: state, clock: clock)
+
+        await coordinator.runSchedulingPass()
+
+        let original = try! XCTUnwrap(scheduler.requests["codepulse-digest.daily"])
+        let initialAddCount = scheduler.addCount
+
+        provider.digestAppState.completedSessions = [completedSession(
+            startedAt: date(year: 2023, month: 1, day: 2, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 2, hour: 11)
+        )]
+        clock.now = date(year: 2023, month: 1, day: 2, hour: 11, minute: 1)
+
+        await coordinator.runSchedulingPass()
+
+        let updated = try! XCTUnwrap(scheduler.requests["codepulse-digest.daily"])
+        XCTAssertEqual(scheduler.requests.values.filter { $0.identifier == "codepulse-digest.daily" }.count, 1)
+        XCTAssertEqual(updated.identifier, original.identifier)
+        XCTAssertEqual(updated.fireDate, original.fireDate)
+        XCTAssertNotEqual(updated.body, original.body)
+        XCTAssertTrue(updated.body.contains("1h 00m across 1 session"))
+        XCTAssertEqual(scheduler.addCount, initialAddCount + 1)
+    }
+
+    func testScheduledActiveSessionUsesCurrentTimeNotFutureFireDate() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 2, hour: 9, minute: 1))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        state.activeSession = ActiveSession(
+            startedAt: date(year: 2023, month: 1, day: 2, hour: 9)
+        )
+        let (coordinator, _, scheduler, _) = makeCoordinator(state: state, clock: clock)
+
+        await coordinator.runSchedulingPass()
+
+        let daily = try! XCTUnwrap(scheduler.requests["codepulse-digest.daily"])
+        XCTAssertTrue(daily.body.hasPrefix("1m across 1 session"))
+        XCTAssertFalse(daily.body.contains("15h"))
+    }
+
     func testEnablingWeeklySchedulesWeekdayAndTime() async {
         let clock = DigestTestClock(date(year: 2023, month: 1, day: 4, hour: 8))
         var state = AppState()
@@ -187,6 +233,7 @@ final class DigestNotificationCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(scheduler.requests.count, 1)
         XCTAssertEqual(Set(scheduler.requests.keys), ["codepulse-digest.daily"])
+        XCTAssertEqual(scheduler.addCount, 1)
     }
 
     func testAuthorizationDeniedIsFailSoft() async {
