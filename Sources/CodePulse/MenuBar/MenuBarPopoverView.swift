@@ -384,7 +384,6 @@ private struct FinishingSessionView: View {
 private struct PopoverFooter: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
-    @Environment(\.openWindow) private var openWindow
     let onDismiss: () -> Void
     let onOpenInsights: (() -> Void)?
 
@@ -414,7 +413,7 @@ private struct PopoverFooter: View {
                 if let onOpenInsights {
                     onOpenInsights()
                 } else {
-                    openWindow(id: "insights")
+                    windowCoordinator.showInsights()
                 }
                 onDismiss()
                 activateApp()
@@ -444,19 +443,12 @@ private struct PopoverFooter: View {
 }
 
 private struct SettingsButton: View {
+    @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     let onDismiss: () -> Void
 
     var body: some View {
         Button("Settings") {
-            NSApp.activate(ignoringOtherApps: true)
-            if let settingsItem = NSApp.mainMenu?
-                .item(withTitle: "CodePulse")?
-                .submenu?
-                .item(withTitle: "Settings…") {
-                if let action = settingsItem.action {
-                    NSApp.sendAction(action, to: settingsItem.target, from: settingsItem)
-                }
-            }
+            windowCoordinator.showSettings()
             onDismiss()
         }
         .buttonStyle(.link)

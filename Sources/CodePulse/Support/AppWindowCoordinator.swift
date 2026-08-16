@@ -6,11 +6,17 @@ final class AppWindowCoordinator: ObservableObject {
     private let store: SessionStore
     private var historyWindow: NSWindow?
     private var insightsWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var recoveryWindow: NSWindow?
+    private var settingsContentFactory: (() -> NSViewController)?
 
     init(store: SessionStore) {
         self.store = store
+    }
+
+    func configureSettingsWindow(contentFactory: @escaping () -> NSViewController) {
+        settingsContentFactory = contentFactory
     }
 
     func showHistoryIfEnabled() {
@@ -60,6 +66,31 @@ final class AppWindowCoordinator: ObservableObject {
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             insightsWindow = newWindow
+            window = newWindow
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func showSettings() {
+        let window: NSWindow
+        if let settingsWindow {
+            window = settingsWindow
+        } else if let existingWindow = NSApp.windows.first(where: { $0.title == "Settings" }) {
+            settingsWindow = existingWindow
+            window = existingWindow
+        } else {
+            guard let settingsContentFactory else { return }
+            let newWindow = NSWindow(contentViewController: settingsContentFactory())
+            newWindow.title = "Settings"
+            newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            newWindow.setContentSize(NSSize(width: 520, height: 700))
+            newWindow.minSize = NSSize(width: 520, height: 560)
+            newWindow.isReleasedWhenClosed = false
+            newWindow.isRestorable = false
+            newWindow.center()
+            settingsWindow = newWindow
             window = newWindow
         }
 
