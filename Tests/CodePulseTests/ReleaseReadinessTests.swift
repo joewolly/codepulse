@@ -32,4 +32,22 @@ final class ReleaseReadinessTests: XCTestCase {
             "https://github.com/joewolly/codepulse/releases/latest/download/appcast.xml"
         )
     }
+
+    func testReleasePackagerDefaultsToAdHocSigningAndChecksNestedCode() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let scriptURL = repositoryRoot.appendingPathComponent("script/package_release.sh")
+        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+
+        XCTAssertTrue(script.contains("ADHOC_SIGN=\"${CODEPULSE_ADHOC_SIGN:-1}\""))
+        XCTAssertTrue(script.contains("--unsigned"))
+        XCTAssertTrue(script.contains("/usr/bin/codesign --force --sign - \"$signing_helpers/codepulse-integration\""))
+        XCTAssertTrue(script.contains("/usr/bin/codesign --force --sign - \"$signing_helpers/codepulsectl\""))
+        XCTAssertTrue(script.contains("/usr/bin/codesign --verify --strict --verbose=2 \"$signing_bundle/Contents/Frameworks/Sparkle.framework\""))
+        XCTAssertTrue(script.contains("/usr/bin/codesign --verify --strict --verbose=2 \"$APP_BUNDLE\""))
+        XCTAssertTrue(script.contains("Signature=adhoc"))
+        XCTAssertTrue(script.contains("TeamIdentifier=not set"))
+    }
 }
