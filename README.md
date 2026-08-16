@@ -16,7 +16,7 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release is CodePulse **1.0.0 (build 1000)**.
+The current release is CodePulse **1.1.0 (build 1100)**.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -113,7 +113,7 @@ Use **Settings → Data → Export Backup…** to save a portable, pretty-printe
 backup of local CodePulse projects, settings, presets, automation rules, saved
 sessions, captured Git/GitHub context, developer-tool session context, and any
 active-session timeline. The backup format remains `codepulse-backup` version 1,
-so backups exported by CodePulse 0.8 and 0.9 can be restored by 1.0.0.
+so backups exported by CodePulse 0.8 and 0.9 can be restored by 1.0.0 and 1.1.0.
 
 Use **Settings → Data → Restore Backup…** to inspect the selected backup before
 confirming. Restore replaces the current local CodePulse data; it does not merge
