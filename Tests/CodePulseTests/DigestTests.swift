@@ -110,6 +110,71 @@ final class DigestTests: XCTestCase {
         XCTAssertEqual(due, date(year: 2023, month: 1, day: 4, hour: 9))
     }
 
+    func testDigestDeliveryTimeDecodingClampsOutOfRangeComponentsAndPreservesRoundTrip() throws {
+        let decoder = JSONDecoder()
+        let malformed = try decoder.decode(
+            DigestDeliveryTime.self,
+            from: Data(#"{"hour":100,"minute":-20}"#.utf8)
+        )
+        XCTAssertEqual(malformed, DigestDeliveryTime(hour: 23, minute: 0))
+
+        let otherMalformed = try decoder.decode(
+            DigestDeliveryTime.self,
+            from: Data(#"{"hour":-1,"minute":60}"#.utf8)
+        )
+        XCTAssertEqual(otherMalformed, DigestDeliveryTime(hour: 0, minute: 59))
+
+        let normal = DigestDeliveryTime(hour: 14, minute: 35)
+        let encoded = try JSONEncoder().encode(normal)
+        XCTAssertEqual(try decoder.decode(DigestDeliveryTime.self, from: encoded), normal)
+    }
+
+    func testMalformedDigestDeliveryTimeDoesNotMakeAppStateUndecodable() throws {
+        let data = Data("""
+        {
+            "settings": {
+                "digests": {
+                    "dailyEnabled": true,
+                    "dailyTime": {"hour": 100, "minute": -20},
+                    "weeklyEnabled": false,
+                    "weeklyWeekday": 2,
+                    "weeklyTime": {"hour": -1, "minute": 60}
+                }
+            }
+        }
+        """.utf8)
+
+        let state = try JSONDecoder().decode(AppState.self, from: data)
+
+        XCTAssertEqual(state.settings.digests.dailyTime, DigestDeliveryTime(hour: 23, minute: 0))
+        XCTAssertEqual(state.settings.digests.weeklyTime, DigestDeliveryTime(hour: 0, minute: 59))
+    }
+
+    func testDigestTimeEditorUsesInjectedCalendarForReadAndWrite() {
+        var editorCalendar = Calendar(identifier: .gregorian)
+        editorCalendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        editorCalendar.locale = Locale(identifier: "en_US_POSIX")
+        let referenceDate = Date(timeIntervalSince1970: 0)
+        let time = DigestDeliveryTime(hour: 7, minute: 45)
+
+        let pickerDate = DigestTimeEditorSupport.date(
+            for: time,
+            calendar: editorCalendar,
+            referenceDate: referenceDate
+        )
+        let pickerComponents = editorCalendar.dateComponents([.hour, .minute], from: pickerDate)
+        XCTAssertEqual(pickerComponents.hour, 7)
+        XCTAssertEqual(pickerComponents.minute, 45)
+
+        let editedDate = editorCalendar.date(
+            from: DateComponents(year: 1970, month: 1, day: 1, hour: 18, minute: 20)
+        )!
+        XCTAssertEqual(
+            DigestTimeEditorSupport.time(from: editedDate, calendar: editorCalendar, fallback: time),
+            DigestDeliveryTime(hour: 18, minute: 20)
+        )
+    }
+
     // MARK: - Metrics
 
     func testDailyDigestMetricsAndComparison() {
@@ -155,6 +220,58 @@ final class DigestTests: XCTestCase {
         XCTAssertEqual(summary.comparisonSessionCount, 1)
         XCTAssertEqual(summary.activeTimeDelta ?? -1, 1_800, accuracy: 0.001)
         XCTAssertEqual(summary.sessionCountDelta, 0)
+    }
+
+    func testDigestTopProjectExcludesOnlySyntheticNoProjectBucket() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        let userProjectID = UUID()
+        let syntheticNoProject = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 3, hour: 9),
+            endedAt: date(year: 2023, month: 1, day: 3, hour: 12),
+            pauseIntervals: []
+        )
+        let realProjectNamedNoProject = CompletedSession(
+            id: UUID(),
+            projectID: userProjectID,
+            projectName: "No Project",
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 3, hour: 13),
+            endedAt: date(year: 2023, month: 1, day: 3, hour: 14),
+            pauseIntervals: []
+        )
+        var state = AppState()
+        state.completedSessions = [syntheticNoProject, realProjectNamedNoProject]
+
+        let insights = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            interval: DigestPeriodCalculator.completedPeriod(
+                kind: .daily,
+                referenceDate: reference,
+                calendar: calendar
+            ).interval,
+            comparisonInterval: nil,
+            timeframe: .allTime
+        )
+        let summary = DigestCalculator.summary(
+            state: state,
+            kind: .daily,
+            referenceDate: reference,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(insights.projectBreakdown.first?.id, "no-project")
+        XCTAssertEqual(summary.topProject?.label, "No Project")
+        XCTAssertEqual(summary.topProject?.duration ?? -1, 3_600, accuracy: 0.001)
     }
 
     func testWeeklyDigestMatchesSharedInsightsCalculation() {
@@ -389,7 +506,7 @@ final class DigestTests: XCTestCase {
             developerToolParticipation: DigestDeveloperToolParticipation(
                 sessionsWithAnyTool: 8, sessionsWithCodex: 8, sessionsWithOpenCode: 0
             ),
-            comparisonTotalActiveTime: 37_560, // +2h 18m
+            comparisonTotalActiveTime: 37_560, // +2h 20m delta
             comparisonSessionCount: 9
         )
         let content = DigestComposer.content(summary: summary, calendar: calendar)

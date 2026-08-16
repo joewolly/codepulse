@@ -18,9 +18,11 @@ struct DigestSettingsView: View {
                 Toggle("Send daily digest", isOn: dailyEnabledBinding)
                     .accessibilityLabel("Send daily digest")
                     .accessibilityHint("Requests a daily local notification summarizing the previous completed day")
+                    .disabled(store.isInRecoveryMode)
 
                 if store.state.settings.digests.dailyEnabled {
-                    DigestTimeEditor(title: "Time", time: dailyTimeBinding)
+                    DigestTimeEditor(title: "Time", calendar: store.calendar, time: dailyTimeBinding)
+                        .disabled(store.isInRecoveryMode)
                 }
             }
 
@@ -28,6 +30,7 @@ struct DigestSettingsView: View {
                 Toggle("Send weekly digest", isOn: weeklyEnabledBinding)
                     .accessibilityLabel("Send weekly digest")
                     .accessibilityHint("Requests a weekly local notification summarizing the previous completed week")
+                    .disabled(store.isInRecoveryMode)
 
                 if store.state.settings.digests.weeklyEnabled {
                     Picker("Day", selection: weeklyWeekdayBinding) {
@@ -37,8 +40,10 @@ struct DigestSettingsView: View {
                     }
                     .accessibilityLabel("Weekly digest delivery day")
                     .accessibilityValue(weekdaySymbol(for: store.state.settings.digests.weeklyWeekday))
+                    .disabled(store.isInRecoveryMode)
 
-                    DigestTimeEditor(title: "Time", time: weeklyTimeBinding)
+                    DigestTimeEditor(title: "Time", calendar: store.calendar, time: weeklyTimeBinding)
+                        .disabled(store.isInRecoveryMode)
                 }
             }
 
@@ -58,6 +63,7 @@ struct DigestSettingsView: View {
         Binding(
             get: { store.state.settings.digests.dailyEnabled },
             set: { value in
+                guard !store.isInRecoveryMode else { return }
                 store.updateSettings { $0.digests.dailyEnabled = value }
                 Task { await digestCoordinator.handleDigestToggled(.daily, enabled: value) }
             }
@@ -68,6 +74,7 @@ struct DigestSettingsView: View {
         Binding(
             get: { store.state.settings.digests.weeklyEnabled },
             set: { value in
+                guard !store.isInRecoveryMode else { return }
                 store.updateSettings { $0.digests.weeklyEnabled = value }
                 Task { await digestCoordinator.handleDigestToggled(.weekly, enabled: value) }
             }
@@ -78,6 +85,7 @@ struct DigestSettingsView: View {
         Binding(
             get: { store.state.settings.digests.dailyTime },
             set: { value in
+                guard !store.isInRecoveryMode else { return }
                 store.updateSettings { $0.digests.dailyTime = value }
                 Task { digestCoordinator.schedulePass() }
             }
@@ -88,6 +96,7 @@ struct DigestSettingsView: View {
         Binding(
             get: { store.state.settings.digests.weeklyTime },
             set: { value in
+                guard !store.isInRecoveryMode else { return }
                 store.updateSettings { $0.digests.weeklyTime = value }
                 Task { digestCoordinator.schedulePass() }
             }
@@ -98,6 +107,7 @@ struct DigestSettingsView: View {
         Binding(
             get: { store.state.settings.digests.weeklyWeekday },
             set: { value in
+                guard !store.isInRecoveryMode else { return }
                 store.updateSettings { $0.digests.weeklyWeekday = value }
                 Task { digestCoordinator.schedulePass() }
             }
@@ -123,8 +133,34 @@ struct DigestSettingsView: View {
     }
 }
 
+enum DigestTimeEditorSupport {
+    static func date(
+        for time: DigestDeliveryTime,
+        calendar: Calendar,
+        referenceDate: Date
+    ) -> Date {
+        var components = calendar.dateComponents([.year, .month, .day], from: referenceDate)
+        components.hour = time.hour
+        components.minute = time.minute
+        return calendar.date(from: components) ?? referenceDate
+    }
+
+    static func time(
+        from date: Date,
+        calendar: Calendar,
+        fallback: DigestDeliveryTime
+    ) -> DigestDeliveryTime {
+        let components = calendar.dateComponents([.hour, .minute], from: date)
+        return DigestDeliveryTime(
+            hour: components.hour ?? fallback.hour,
+            minute: components.minute ?? fallback.minute
+        )
+    }
+}
+
 private struct DigestTimeEditor: View {
     let title: String
+    let calendar: Calendar
     @Binding var time: DigestDeliveryTime
 
     var body: some View {
@@ -135,17 +171,10 @@ private struct DigestTimeEditor: View {
     private var dateBinding: Binding<Date> {
         Binding(
             get: {
-                var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-                components.hour = time.hour
-                components.minute = time.minute
-                return Calendar.current.date(from: components) ?? Date()
+                DigestTimeEditorSupport.date(for: time, calendar: calendar, referenceDate: Date())
             },
             set: { date in
-                let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-                time = DigestDeliveryTime(
-                    hour: components.hour ?? time.hour,
-                    minute: components.minute ?? time.minute
-                )
+                time = DigestTimeEditorSupport.time(from: date, calendar: calendar, fallback: time)
             }
         )
     }

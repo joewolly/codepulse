@@ -625,6 +625,18 @@ struct DigestDeliveryTime: Codable, Equatable, Hashable {
     }
 
     static let defaultMorning = DigestDeliveryTime(hour: 9, minute: 0)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            hour: try container.decode(Int.self, forKey: .hour),
+            minute: try container.decode(Int.self, forKey: .minute)
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hour, minute
+    }
 }
 
 /// Weekday numbering matches `Calendar.weekday` (1 = Sunday … 7 = Saturday) so

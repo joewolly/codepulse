@@ -21,15 +21,29 @@ enum DigestNotificationAuthorization: Equatable {
     }
 }
 
-/// A value-type description of a pending local notification request. This
-/// isolates the deterministic scheduling logic from the macOS notification
-/// daemon so it can be tested with fakes.
+enum DigestNotificationDelivery: Equatable {
+    case immediate
+    case scheduled(Date)
+
+    var scheduledDate: Date? {
+        guard case .scheduled(let date) = self else { return nil }
+        return date
+    }
+}
+
+/// A value-type description of a local notification request. This isolates
+/// the deterministic scheduling logic from the macOS notification daemon so
+/// it can be tested with fakes.
 struct DigestNotificationRequest: Equatable {
     let identifier: String
     let title: String
     let body: String
-    let fireDate: Date
+    let delivery: DigestNotificationDelivery
     let userInfo: [String: String]
+
+    /// The scheduled fire date, when this request is calendar-triggered.
+    /// Immediate requests intentionally have no date.
+    var fireDate: Date? { delivery.scheduledDate }
 }
 
 /// Forwards notification-center delivery events to the coordinator without
@@ -98,11 +112,17 @@ final class SystemLocalNotificationScheduler: NSObject, LocalNotificationSchedul
         content.title = request.title
         content.body = request.body
         content.userInfo = request.userInfo
-        let components = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: request.fireDate
-        )
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let trigger: UNNotificationTrigger?
+        switch request.delivery {
+        case .immediate:
+            trigger = nil
+        case .scheduled(let date):
+            let components = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute],
+                from: date
+            )
+            trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        }
         let native = UNNotificationRequest(
             identifier: request.identifier,
             content: content,
@@ -123,7 +143,7 @@ final class SystemLocalNotificationScheduler: NSObject, LocalNotificationSchedul
                 identifier: request.identifier,
                 title: request.content.title,
                 body: request.content.body,
-                fireDate: fireDate,
+                delivery: .scheduled(fireDate),
                 userInfo: request.content.userInfo as? [String: String] ?? [:]
             )
         }
@@ -144,12 +164,21 @@ final class SystemLocalNotificationScheduler: NSObject, LocalNotificationSchedul
             identifier: request.identifier,
             title: request.content.title,
             body: request.content.body,
-            fireDate: notification.date,
+            delivery: .scheduled(notification.date),
             userInfo: request.content.userInfo as? [String: String] ?? [:]
         )
+
+        let presentationOptions = Self.presentationOptions(for: request.identifier)
+        completionHandler(presentationOptions)
+
+        guard !presentationOptions.isEmpty, let deliveryDelegate else { return }
         Task {
-            let shouldPresent = await deliveryDelegate?.willPresent(request: mapped) ?? false
-            completionHandler(shouldPresent ? [.banner, .list, .sound] : [])
+            _ = await deliveryDelegate.willPresent(request: mapped)
         }
+    }
+
+    static func presentationOptions(for identifier: String) -> UNNotificationPresentationOptions {
+        guard identifier.hasPrefix(DigestNotificationCoordinator.pendingRequestPrefix) else { return [] }
+        return [.banner, .list, .sound]
     }
 }

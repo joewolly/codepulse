@@ -112,7 +112,7 @@ enum DigestCalculator {
             totalActiveTime: insights.totalDuration,
             sessionCount: insights.sessionCount,
             topProject: insights.projectBreakdown
-                .first { $0.label != "No Project" }
+                .first { $0.id != "no-project" }
                 .map { DigestTopItem(label: $0.label, duration: $0.duration) },
             topType: insights.typeBreakdown.first
                 .map { DigestTopItem(label: $0.label, duration: $0.duration) },

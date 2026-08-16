@@ -21,7 +21,7 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
     private let logger = Logger(subsystem: "com.joewolly.CodePulse", category: "notifications")
     private var timer: Timer?
 
-    static let pendingRequestPrefix = "codepulse-digest."
+    nonisolated static let pendingRequestPrefix = "codepulse-digest."
     static let userInfoPeriodStartKey = "periodStart"
 
     init(
@@ -60,6 +60,7 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
     /// path requests notification authorization; launch-time scheduling never
     /// nags for permission.
     func handleDigestToggled(_ kind: DigestKind, enabled: Bool) async {
+        guard !stateProvider.isInRecoveryMode else { return }
         if enabled {
             let status = await notifications.authorization()
             authorizationStatus = status
@@ -90,7 +91,7 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
 
     func willPresent(request: DigestNotificationRequest) async -> Bool {
         guard request.identifier.hasPrefix(Self.pendingRequestPrefix) else { return false }
-        await runSchedulingPass()
+        schedulePass()
         return true
     }
 
@@ -145,7 +146,8 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
 
         let pending = await notifications.pendingRequests()
         if let existing = pending.first(where: { $0.identifier == identifier }) {
-            if calendar.isDate(existing.fireDate, equalTo: due, toGranularity: .minute) {
+            guard let fireDate = existing.fireDate else { return false }
+            if calendar.isDate(fireDate, equalTo: due, toGranularity: .minute) {
                 // The request for this due date never fired (Mac asleep, app
                 // relaunched past the minute). Deliver it now instead.
                 guard await deliverNow(kind: kind, period: period, calendar: calendar) else {
@@ -199,14 +201,15 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
             identifier: identifier,
             title: content.title,
             body: content.body,
-            fireDate: due,
+            delivery: .scheduled(due),
             userInfo: [
                 Self.userInfoPeriodStartKey:
                     DigestIdentity.periodIdentifier(periodStart: contentPeriod.interval.start, calendar: calendar)
             ]
         )
         if let existing = pending.first(where: { $0.identifier == identifier }),
-           calendar.isDate(existing.fireDate, equalTo: due, toGranularity: .minute),
+           let fireDate = existing.fireDate,
+           calendar.isDate(fireDate, equalTo: due, toGranularity: .minute),
            existing.title == request.title,
            existing.body == request.body,
            existing.userInfo == request.userInfo {
@@ -237,7 +240,7 @@ final class DigestNotificationCoordinator: ObservableObject, LocalNotificationDe
             identifier: "\(Self.pendingRequestPrefix)\(kind.rawValue).delivered.\(periodID)",
             title: content.title,
             body: content.body,
-            fireDate: clock.now,
+            delivery: .immediate,
             userInfo: [Self.userInfoPeriodStartKey: periodID]
         )
         do {
