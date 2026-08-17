@@ -243,7 +243,7 @@ private struct HistoryFilterBar: View {
                     }
                 }
             } label: {
-                Label("Goal / Outcome", systemImage: "target")
+                Label(goalOutcomeTitle, systemImage: "target")
             }
             .menuStyle(.borderlessButton)
             .accessibilityLabel("Goal and outcome filter")
@@ -298,6 +298,17 @@ private struct HistoryFilterBar: View {
             })?.title ?? "Project"
         case .historicalName(let name):
             return name
+        }
+    }
+
+    private var goalOutcomeTitle: String {
+        switch query.goalOutcome {
+        case .allSessions:
+            return "Goal / Outcome"
+        case .needsFollowUp:
+            return "Needs Follow-Up"
+        case .closedLoop:
+            return "Closed Loop"
         }
     }
 
