@@ -29,6 +29,12 @@ struct InsightsView: View {
                     if summary.hasActivity {
                         InsightSummarySection(summary: summary)
                         GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
+                        FocusPatternsSection(
+                            insights: summary.focusInsights,
+                            comparison: summary.comparisonFocusInsights,
+                            calendar: store.calendar,
+                            timeframe: timeframe
+                        )
                         ActivityChart(
                             activity: summary.dailyActivity,
                             timeframe: timeframe,
@@ -390,6 +396,211 @@ private struct InsightSection<Content: View>: View {
                 .accessibilityAddTraits(.isHeader)
             content()
         }
+    }
+}
+
+private struct FocusPatternsSection: View {
+    let insights: FocusInsights
+    let comparison: FocusInsights?
+    let calendar: Calendar
+    let timeframe: InsightsTimeframe
+
+    var body: some View {
+        InsightSection(title: "Focus Patterns", systemImage: "scope") {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 135), alignment: .leading)],
+                alignment: .leading,
+                spacing: 16
+            ) {
+                InsightMetric(
+                    title: "Focus Blocks",
+                    value: "\(insights.focusBlockCount)",
+                    detail: nil
+                )
+                InsightMetric(
+                    title: "Longest Focus",
+                    value: CodePulseFormatting.duration(insights.longestFocusBlockDuration),
+                    detail: longestComparison
+                )
+                InsightMetric(
+                    title: "Average Focus Block",
+                    value: CodePulseFormatting.duration(insights.averageFocusBlockDuration),
+                    detail: nil
+                )
+                InsightMetric(
+                    title: "Sustained Focus",
+                    value: CodePulseFormatting.duration(insights.sustainedFocusDuration),
+                    detail: sustainedDetail
+                )
+                InsightMetric(
+                    title: "Project Switches",
+                    value: "\(insights.projectSwitchCount)",
+                    detail: projectSwitchDetail
+                )
+                InsightMetric(
+                    title: "Peak Focus Hour",
+                    value: insights.peakFocusHour.map { hourRange($0, calendar: calendar) } ?? "—",
+                    detail: nil
+                )
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
+
+            if let bestFocusDay = insights.bestFocusDay {
+                Text("Best focus day: \(shortDate(bestFocusDay.date, calendar: calendar)) · \(CodePulseFormatting.duration(bestFocusDay.duration)) sustained focus")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            FocusHourChart(hourly: insights.hourlySustainedFocus, calendar: calendar)
+
+            Text("Focus blocks join work on the same project across brief interruptions of up to 15 minutes. Sustained focus means at least 30 minutes of active time. Project switches count rapid transitions between identified projects; CodePulse does not estimate their cognitive cost.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var comparisonLabel: String {
+        switch timeframe {
+        case .thisWeek: return "vs last week"
+        case .lastWeek: return "vs the week before"
+        case .thisMonth: return "vs last month"
+        case .last30Days: return "vs the previous 30 days"
+        case .last90Days: return "vs the previous 90 days"
+        case .allTime: return ""
+        }
+    }
+
+    private var longestComparison: String? {
+        guard let comparison else { return nil }
+        return "\(CodePulseFormatting.signedDuration(insights.longestFocusBlockDuration - comparison.longestFocusBlockDuration)) \(comparisonLabel)"
+    }
+
+    private var sustainedDetail: String? {
+        guard let share = insights.sustainedFocusShare else { return nil }
+        var detail = "\(percentage(share)) of active time"
+        if let comparisonShare = comparison?.sustainedFocusShare {
+            let points = (share - comparisonShare) * 100
+            let sign = points < 0 ? "−" : "+"
+            detail += " · \(sign)\(Int(abs(points).rounded())) pts \(comparisonLabel)"
+        }
+        return detail
+    }
+
+    private var projectSwitchDetail: String? {
+        guard let comparison else { return "within 15m" }
+        return "\(insights.projectSwitchCount) vs \(comparison.projectSwitchCount) \(comparisonPeriod) · within 15m"
+    }
+
+    private var comparisonPeriod: String {
+        switch timeframe {
+        case .thisWeek: return "last week"
+        case .lastWeek: return "the week before"
+        case .thisMonth: return "last month"
+        case .last30Days: return "the previous 30 days"
+        case .last90Days: return "the previous 90 days"
+        case .allTime: return "comparison"
+        }
+    }
+
+    private func percentage(_ value: Double) -> String {
+        "\(Int((value * 100).rounded()))%"
+    }
+
+    private func hourRange(_ hour: Int, calendar: Calendar) -> String {
+        let start = dateForHour(hour, calendar: calendar)
+        let end = dateForHour((hour + 1) % 24, calendar: calendar)
+        let hourFormatter = DateFormatter()
+        hourFormatter.calendar = calendar
+        hourFormatter.locale = calendar.locale ?? .current
+        hourFormatter.timeZone = calendar.timeZone
+        hourFormatter.dateFormat = "h"
+        let periodFormatter = DateFormatter()
+        periodFormatter.calendar = calendar
+        periodFormatter.locale = calendar.locale ?? .current
+        periodFormatter.timeZone = calendar.timeZone
+        periodFormatter.dateFormat = "a"
+        let startPeriod = periodFormatter.string(from: start)
+        let endPeriod = periodFormatter.string(from: end)
+        if startPeriod == endPeriod {
+            return "\(hourFormatter.string(from: start))–\(hourFormatter.string(from: end)) \(startPeriod)"
+        }
+        return "\(hourFormatter.string(from: start)) \(startPeriod)–\(hourFormatter.string(from: end)) \(endPeriod)"
+    }
+
+    private func dateForHour(_ hour: Int, calendar: Calendar) -> Date {
+        calendar.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: hour)) ?? .distantPast
+    }
+
+    private func shortDate(_ date: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
+    }
+}
+
+private struct FocusHourChart: View {
+    let hourly: [HourlyFocusActivity]
+    let calendar: Calendar
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Sustained Focus by Hour")
+                .font(.subheadline.weight(.semibold))
+            if hourly.allSatisfy({ $0.duration == 0 }) {
+                Text("No sustained focus blocks in this period.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Chart(hourly) { value in
+                    BarMark(
+                        x: .value("Hour", value.hour),
+                        y: .value("Sustained Focus Hours", value.duration / 3_600)
+                    )
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityLabel(Text(hourLabel(value.hour)))
+                    .accessibilityValue(Text(CodePulseFormatting.duration(value.duration)))
+                }
+                .chartYAxisLabel("Hours")
+                .chartXAxis {
+                    AxisMarks(values: Array(stride(from: 0, through: 20, by: 4))) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel()
+                    }
+                }
+                .frame(height: 150)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Sustained Focus by Hour")
+                .accessibilityValue(accessibilitySummary)
+            }
+        }
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "h a"
+        let date = calendar.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: hour)) ?? .distantPast
+        return formatter.string(from: date)
+    }
+
+    private var accessibilitySummary: String {
+        let total = hourly.reduce(0) { $0 + $1.duration }
+        let nonzero = hourly.filter { $0.duration > 0 }.count
+        guard total > 0 else { return "No sustained focus blocks in this period" }
+        return "\(CodePulseFormatting.duration(total)) across \(nonzero) local hours"
     }
 }
 

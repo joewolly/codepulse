@@ -366,6 +366,17 @@ final class ExportTests: XCTestCase {
             "- Outcome only: 2",
             "- Untracked: 17",
             "",
+            "## Focus Patterns",
+            "- Focus blocks: 5",
+            "- Longest focus block: 2h 08m (+20m vs last month)",
+            "- Average focus block: 1h 15m",
+            "- Sustained focus blocks: 3",
+            "- Sustained focus active time: 12h 00m",
+            "- Sustained focus share: 64% (+5 percentage points vs last month)",
+            "- Project switches: 3 within 15m (5 vs last month)",
+            "- Peak focus hour: 10–11 AM",
+            "- Best focus day: 2024-08-11 (3h 00m sustained focus)",
+            "",
             "## Daily Activity",
             "| Date | Active Time |",
             "| --- | ---: |",
@@ -529,9 +540,55 @@ final class ExportTests: XCTestCase {
             "No CodePulse activity was recorded for this selection.",
             "",
             "## Goal vs Actual",
-            "No completed sessions in this period yet."
+            "No completed sessions in this period yet.",
+            "",
+            "## Focus Patterns",
+            "No focus blocks in this period."
         ].joined(separator: "\n") + "\n")
         XCTAssertFalse(report.contains("## Summary"))
+    }
+
+    func testMarkdownFocusPatternsUsesAggregateSummaryWithoutPrivateSessionText() {
+        let reference = date(year: 2024, month: 8, day: 13, hour: 16)
+        let start = date(year: 2024, month: 8, day: 13, hour: 9)
+        let session = CompletedSession(
+            id: UUID(),
+            projectID: alphaProjectID,
+            projectName: "CodePulse",
+            type: .coding,
+            goal: "SENTINEL_GOAL_TEXT",
+            outcome: "SENTINEL_OUTCOME_TEXT",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_600),
+            pauseIntervals: [],
+            gitContext: GitSessionContext(
+                repositoryRoot: "/private/SENTINEL_PATH",
+                commitCount: 1,
+                filesChanged: 1,
+                insertions: 1,
+                deletions: 1
+            )
+        )
+        var state = AppState()
+        state.completedSessions = [session]
+        let summary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisWeek
+        )
+        let report = InsightsMarkdownExporter.markdown(
+            summary: summary,
+            projectTitle: "CodePulse",
+            calendar: calendar
+        )
+        let focusSection = report.components(separatedBy: "## Focus Patterns").last ?? ""
+
+        XCTAssertTrue(focusSection.contains("Focus blocks:"))
+        XCTAssertTrue(focusSection.contains("Sustained focus share:"))
+        XCTAssertFalse(focusSection.contains("SENTINEL_GOAL_TEXT"))
+        XCTAssertFalse(focusSection.contains("SENTINEL_OUTCOME_TEXT"))
+        XCTAssertFalse(focusSection.contains("/private/SENTINEL_PATH"))
     }
 
     func testMarkdownGoalOutcomeSectionIsAggregateOnlyAndHandlesNoCompletedSessions() {
@@ -890,6 +947,35 @@ final class ExportTests: XCTestCase {
                 needsFollowUpCount: 4,
                 outcomeOnlyCount: 2,
                 untrackedCount: 17
+            ),
+            focusInsights: FocusInsights(
+                totalActiveDuration: 18 * 3_600 + 42 * 60,
+                focusBlockCount: 5,
+                longestFocusBlockDuration: 2 * 3_600 + 8 * 60,
+                averageFocusBlockDuration: 1 * 3_600 + 15 * 60,
+                sustainedFocusBlockCount: 3,
+                sustainedFocusDuration: 12 * 3_600,
+                projectSwitchCount: 3,
+                hourlySustainedFocus: (0..<24).map { hour in
+                    HourlyFocusActivity(hour: hour, duration: hour == 10 ? 3 * 3_600 : 0)
+                },
+                bestFocusDay: DailyActivity(
+                    date: date(year: 2024, month: 8, day: 11),
+                    duration: 3 * 3_600
+                )
+            ),
+            comparisonFocusInsights: FocusInsights(
+                totalActiveDuration: 17 * 3_600,
+                focusBlockCount: 6,
+                longestFocusBlockDuration: 1 * 3_600 + 48 * 60,
+                averageFocusBlockDuration: 1 * 3_600,
+                sustainedFocusBlockCount: 3,
+                sustainedFocusDuration: 10 * 3_600,
+                projectSwitchCount: 5,
+                hourlySustainedFocus: (0..<24).map { hour in
+                    HourlyFocusActivity(hour: hour, duration: hour == 11 ? 2 * 3_600 : 0)
+                },
+                bestFocusDay: nil
             )
         )
     }

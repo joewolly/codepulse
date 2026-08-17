@@ -23,6 +23,13 @@ struct InsightsMarkdownExporter {
         guard summary.hasActivity else {
             lines += ["", "No CodePulse activity was recorded for this selection."]
             appendGoalOutcomeInsights(&lines, summary.goalOutcomeInsights)
+            appendFocusInsights(
+                &lines,
+                summary.focusInsights,
+                comparison: summary.comparisonFocusInsights,
+                calendar: calendar,
+                timeframe: summary.timeframe
+            )
             return output(lines)
         }
 
@@ -33,6 +40,13 @@ struct InsightsMarkdownExporter {
         lines.append("- Longest Session: \(summary.sessionCount == 0 ? "—" : CodePulseFormatting.duration(summary.longestSessionDuration))")
 
         appendGoalOutcomeInsights(&lines, summary.goalOutcomeInsights)
+        appendFocusInsights(
+            &lines,
+            summary.focusInsights,
+            comparison: summary.comparisonFocusInsights,
+            calendar: calendar,
+            timeframe: summary.timeframe
+        )
 
         appendDailyActivity(&lines, summary.dailyActivity, calendar: calendar)
         appendDurationBreakdown(&lines, title: "Work Type", columnTitle: "Type", values: summary.typeBreakdown)
@@ -90,6 +104,55 @@ struct InsightsMarkdownExporter {
         ]
         for value in activity {
             lines.append("| \(date(value.date, calendar: calendar)) | \(CodePulseFormatting.duration(value.duration)) |")
+        }
+    }
+
+    private static func appendFocusInsights(
+        _ lines: inout [String],
+        _ insights: FocusInsights,
+        comparison: FocusInsights?,
+        calendar: Calendar,
+        timeframe: InsightsTimeframe
+    ) {
+        lines += ["", "## Focus Patterns"]
+        guard insights.focusBlockCount > 0 else {
+            lines.append("No focus blocks in this period.")
+            return
+        }
+
+        lines.append("- Focus blocks: \(insights.focusBlockCount)")
+        var longest = "- Longest focus block: \(CodePulseFormatting.duration(insights.longestFocusBlockDuration))"
+        if let comparison {
+            longest += " (\(CodePulseFormatting.signedDuration(insights.longestFocusBlockDuration - comparison.longestFocusBlockDuration)) \(comparisonLabel(timeframe)))"
+        }
+        lines.append(longest)
+        lines.append("- Average focus block: \(CodePulseFormatting.duration(insights.averageFocusBlockDuration))")
+        lines.append("- Sustained focus blocks: \(insights.sustainedFocusBlockCount)")
+        lines.append("- Sustained focus active time: \(CodePulseFormatting.duration(insights.sustainedFocusDuration))")
+
+        if let share = insights.sustainedFocusShare {
+            var shareLine = "- Sustained focus share: \(percentage(share))"
+            if let comparisonShare = comparison?.sustainedFocusShare {
+                let points = (share - comparisonShare) * 100
+                let sign = points < 0 ? "−" : "+"
+                shareLine += " (\(sign)\(Int(abs(points).rounded())) percentage points \(comparisonLabel(timeframe)))"
+            }
+            lines.append(shareLine)
+        } else {
+            lines.append("- Sustained focus share: —")
+        }
+
+        var switches = "- Project switches: \(insights.projectSwitchCount) within 15m"
+        if let comparison {
+            switches += " (\(comparison.projectSwitchCount) \(comparisonLabel(timeframe)))"
+        }
+        lines.append(switches)
+
+        if let peakHour = insights.peakFocusHour {
+            lines.append("- Peak focus hour: \(hourRange(peakHour, calendar: calendar))")
+        }
+        if let bestFocusDay = insights.bestFocusDay {
+            lines.append("- Best focus day: \(date(bestFocusDay.date, calendar: calendar)) (\(CodePulseFormatting.duration(bestFocusDay.duration)) sustained focus)")
         }
     }
 
@@ -195,6 +258,38 @@ struct InsightsMarkdownExporter {
 
     private static func percentage(_ value: Double) -> String {
         "\(Int((value * 100).rounded()))%"
+    }
+
+    private static func comparisonLabel(_ timeframe: InsightsTimeframe) -> String {
+        switch timeframe {
+        case .thisWeek: return "vs last week"
+        case .lastWeek: return "vs the week before"
+        case .thisMonth: return "vs last month"
+        case .last30Days: return "vs the previous 30 days"
+        case .last90Days: return "vs the previous 90 days"
+        case .allTime: return "vs comparison"
+        }
+    }
+
+    private static func hourRange(_ hour: Int, calendar: Calendar) -> String {
+        let start = calendar.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: hour)) ?? .distantPast
+        let end = calendar.date(from: DateComponents(year: 2000, month: 1, day: 1, hour: (hour + 1) % 24)) ?? .distantPast
+        let hourFormatter = DateFormatter()
+        hourFormatter.calendar = calendar
+        hourFormatter.locale = calendar.locale ?? .current
+        hourFormatter.timeZone = calendar.timeZone
+        hourFormatter.dateFormat = "h"
+        let periodFormatter = DateFormatter()
+        periodFormatter.calendar = calendar
+        periodFormatter.locale = calendar.locale ?? .current
+        periodFormatter.timeZone = calendar.timeZone
+        periodFormatter.dateFormat = "a"
+        let startPeriod = periodFormatter.string(from: start)
+        let endPeriod = periodFormatter.string(from: end)
+        if startPeriod == endPeriod {
+            return "\(hourFormatter.string(from: start))–\(hourFormatter.string(from: end)) \(startPeriod)"
+        }
+        return "\(hourFormatter.string(from: start)) \(startPeriod)–\(hourFormatter.string(from: end)) \(endPeriod)"
     }
 
     private static func escape(_ value: String) -> String {
