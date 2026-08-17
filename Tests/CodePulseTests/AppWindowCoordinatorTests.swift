@@ -96,6 +96,9 @@ final class AppWindowCoordinatorTests: XCTestCase {
         XCTAssertEqual(application.windows.filter { $0.title == "Insights" }.count, 1)
         insightsWindow?.close()
         XCTAssertFalse(insightsWindow?.isVisible == true)
+        coordinator.showInsights()
+        XCTAssertTrue(insightsWindow?.isVisible == true)
+        insightsWindow?.close()
 
         coordinator.showHistory()
         let historyWindow = application.windows.first(where: { $0.title == "History" })
