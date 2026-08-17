@@ -45,7 +45,6 @@ final class CodePulseRuntime {
         shortcutController.start(store: store) { [weak windowCoordinator] in
             windowCoordinator?.showHistoryIfEnabled()
         }
-        UserDefaults.standard.set(true, forKey: MenuBarInsertionState.preferenceKey)
 
         windowCoordinator.configureSettingsWindow { [weak store, weak windowCoordinator, weak menuBarStatusItem, weak updateController, weak integrationManager, weak digestCoordinator] in
             guard let store,

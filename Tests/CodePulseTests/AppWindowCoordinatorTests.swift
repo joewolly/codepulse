@@ -25,6 +25,10 @@ final class AppWindowCoordinatorTests: XCTestCase {
         defer { application.mainMenu = originalMenu }
 
         let delegate = CodePulseApplicationDelegate()
+        var settingsInvocationCount = 0
+        delegate.configureSettingsAction {
+            settingsInvocationCount += 1
+        }
         delegate.installApplicationMenu()
 
         guard let appMenu = application.mainMenu?.items.first?.submenu else {
@@ -81,6 +85,12 @@ final class AppWindowCoordinatorTests: XCTestCase {
         XCTAssertEqual(settingsItem?.keyEquivalent, ",")
         XCTAssertEqual(settingsItem?.keyEquivalentModifierMask, [.command])
         XCTAssertTrue(settingsItem?.target === delegate)
+        if let settingsItem, let action = settingsItem.action {
+            XCTAssertTrue(application.sendAction(action, to: settingsItem.target, from: settingsItem))
+        } else {
+            XCTFail("CodePulse Settings menu item is missing its action")
+        }
+        XCTAssertEqual(settingsInvocationCount, 1)
         XCTAssertNotNil(quitItem)
         XCTAssertEqual(quitItem?.keyEquivalent, "q")
         XCTAssertEqual(quitItem?.keyEquivalentModifierMask, [.command])
@@ -120,6 +130,10 @@ final class AppWindowCoordinatorTests: XCTestCase {
 
     func testInsightsAndHistoryWindowsAreExplicitAndReusable() {
         let application = NSApplication.shared
+        for window in application.windows where ["Insights", "History"].contains(window.title) {
+            window.close()
+            window.title = "Closed test window"
+        }
         let store = SessionStore(
             persistence: CoordinatorTestPersistence(),
             clock: CoordinatorTestClock(),
@@ -147,6 +161,11 @@ final class AppWindowCoordinatorTests: XCTestCase {
         let historyWindow = application.windows.first(where: { $0.title == "History" })
         XCTAssertNotNil(historyWindow)
         XCTAssertTrue(historyWindow?.isVisible == true)
+
+        coordinator.showHistory()
+        let historyWindows = application.windows.filter { $0.title == "History" }
+        XCTAssertEqual(historyWindows.count, 1)
+        XCTAssertTrue(historyWindows.first === historyWindow)
         historyWindow?.close()
         XCTAssertFalse(historyWindow?.isVisible == true)
     }

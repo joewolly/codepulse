@@ -7,7 +7,6 @@ final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func configureSettingsAction(_ action: @escaping () -> Void) {
         settingsAction = action
-        installSettingsMenuItem()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -127,17 +126,5 @@ final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = NSApp
         quitItem.keyEquivalentModifierMask = [.command]
         appMenu.addItem(quitItem)
-    }
-
-    private func installSettingsMenuItem() {
-        guard let appMenu = NSApp.mainMenu?.items.first?.submenu,
-              let settingsItem = appMenu.item(withTitle: "Settings…") else {
-            return
-        }
-
-        settingsItem.target = self
-        settingsItem.action = #selector(showSettings(_:))
-        settingsItem.keyEquivalent = ","
-        settingsItem.keyEquivalentModifierMask = [.command]
     }
 }
