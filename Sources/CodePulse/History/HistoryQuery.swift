@@ -94,6 +94,22 @@ enum HistoryDeveloperToolFilter: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+enum HistoryGoalOutcomeFilter: String, CaseIterable, Identifiable, Hashable {
+    case allSessions
+    case needsFollowUp
+    case closedLoop
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .allSessions: return "All Sessions"
+        case .needsFollowUp: return "Needs Follow-Up"
+        case .closedLoop: return "Closed Loop"
+        }
+    }
+}
+
 enum HistoryProjectFilter: Hashable {
     case allProjects
     case noProject
@@ -123,6 +139,7 @@ struct HistoryQuery: Equatable {
     var type: HistoryTypeFilter = .allTypes
     var git: HistoryGitFilter = .allSessions
     var developerTool: HistoryDeveloperToolFilter = .anyTool
+    var goalOutcome: HistoryGoalOutcomeFilter = .allSessions
 
     var normalizedSearchText: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,7 +151,8 @@ struct HistoryQuery: Equatable {
         date != .allTime ||
         type != .allTypes ||
         git != .allSessions ||
-        developerTool != .anyTool
+        developerTool != .anyTool ||
+        goalOutcome != .allSessions
     }
 
     func matches(
@@ -179,6 +197,17 @@ struct HistoryQuery: Equatable {
                   tools.contains(developerTool) else { return false }
         case .noDeveloperTool:
             guard tools.isEmpty else { return false }
+        }
+
+        let hasGoal = MeaningfulText.exists(session.goal)
+        let hasOutcome = MeaningfulText.exists(session.outcome)
+        switch goalOutcome {
+        case .allSessions:
+            break
+        case .needsFollowUp:
+            guard hasGoal, !hasOutcome else { return false }
+        case .closedLoop:
+            guard hasGoal, hasOutcome else { return false }
         }
 
         let query = normalizedSearchText

@@ -236,6 +236,19 @@ private struct HistoryFilterBar: View {
             .accessibilityLabel("Developer tool filter")
             .accessibilityValue(query.developerTool.title)
 
+            Menu {
+                Picker("Goal / Outcome", selection: $query.goalOutcome) {
+                    ForEach(HistoryGoalOutcomeFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+            } label: {
+                Label(goalOutcomeTitle, systemImage: "target")
+            }
+            .menuStyle(.borderlessButton)
+            .accessibilityLabel("Goal and outcome filter")
+            .accessibilityValue(query.goalOutcome.title)
+
             Spacer()
 
             Button {
@@ -285,6 +298,17 @@ private struct HistoryFilterBar: View {
             })?.title ?? "Project"
         case .historicalName(let name):
             return name
+        }
+    }
+
+    private var goalOutcomeTitle: String {
+        switch query.goalOutcome {
+        case .allSessions:
+            return "Goal / Outcome"
+        case .needsFollowUp:
+            return "Needs Follow-Up"
+        case .closedLoop:
+            return "Closed Loop"
         }
     }
 
@@ -362,16 +386,23 @@ private struct HistoryRow: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
 
-            if let goal = session.goal {
+            if let goal = session.goal, MeaningfulText.exists(goal) {
                 Text(goal)
                     .font(.body)
                     .lineLimit(2)
             }
-            if let outcome = session.outcome {
+            if let outcome = session.outcome, MeaningfulText.exists(outcome) {
                 Text(outcome)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+            }
+            if needsFollowUp {
+                Label("Needs Outcome", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Needs Outcome")
+                    .accessibilityHint("This completed session has a goal but no recorded outcome")
             }
             if let branch = session.gitContext?.branchDisplay {
                 Label(branch, systemImage: "arrow.triangle.branch")
@@ -404,8 +435,9 @@ private struct HistoryRow: View {
             "Started \(CodePulseFormatting.time(session.startedAt))",
             "Finished \(CodePulseFormatting.time(session.endedAt))"
         ]
-        if let goal = session.goal { values.append(goal) }
-        if let outcome = session.outcome { values.append(outcome) }
+        if let goal = session.goal, MeaningfulText.exists(goal) { values.append(goal) }
+        if let outcome = session.outcome, MeaningfulText.exists(outcome) { values.append(outcome) }
+        if needsFollowUp { values.append("Needs Outcome: this completed session has a goal but no recorded outcome") }
         if let branch = session.gitContext?.branchDisplay { values.append(branch) }
         if let githubContext = session.githubContext {
             values.append("GitHub \(githubContext.repositoryNameWithOwner)")
@@ -420,6 +452,10 @@ private struct HistoryRow: View {
     private var developerToolSummary: String {
         let names = Set(session.developerToolContexts.map(\.tool.title)).sorted()
         return names.joined(separator: ", ")
+    }
+
+    private var needsFollowUp: Bool {
+        MeaningfulText.exists(session.goal) && !MeaningfulText.exists(session.outcome)
     }
 }
 

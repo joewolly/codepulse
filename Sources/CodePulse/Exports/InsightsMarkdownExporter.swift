@@ -22,6 +22,7 @@ struct InsightsMarkdownExporter {
 
         guard summary.hasActivity else {
             lines += ["", "No CodePulse activity was recorded for this selection."]
+            appendGoalOutcomeInsights(&lines, summary.goalOutcomeInsights)
             return output(lines)
         }
 
@@ -30,6 +31,8 @@ struct InsightsMarkdownExporter {
         lines.append("- Sessions: \(summary.sessionCount)")
         lines.append("- Average Session: \(summary.sessionCount == 0 ? "—" : CodePulseFormatting.duration(summary.averageSessionDuration))")
         lines.append("- Longest Session: \(summary.sessionCount == 0 ? "—" : CodePulseFormatting.duration(summary.longestSessionDuration))")
+
+        appendGoalOutcomeInsights(&lines, summary.goalOutcomeInsights)
 
         appendDailyActivity(&lines, summary.dailyActivity, calendar: calendar)
         appendDurationBreakdown(&lines, title: "Work Type", columnTitle: "Type", values: summary.typeBreakdown)
@@ -44,6 +47,32 @@ struct InsightsMarkdownExporter {
         }
 
         return output(lines)
+    }
+
+    private static func appendGoalOutcomeInsights(
+        _ lines: inout [String],
+        _ insights: GoalOutcomeInsights
+    ) {
+        lines += ["", "## Goal vs Actual"]
+        guard insights.completedSessionCount > 0 else {
+            lines.append("No completed sessions in this period yet.")
+            return
+        }
+
+        lines.append("- Completed sessions: \(insights.completedSessionCount)")
+        lines.append("- Goals set: \(insights.sessionsWithGoal)")
+        lines.append("- Outcomes recorded: \(insights.sessionsWithOutcome)")
+        lines.append("- Closed loop: \(insights.closedLoopCount)")
+        if let rate = insights.closedLoopRate {
+            lines.append("- Closed-loop rate: \(percentage(rate))")
+        }
+        lines.append("- Needs follow-up: \(insights.needsFollowUpCount)")
+        if insights.outcomeOnlyCount > 0 {
+            lines.append("- Outcome only: \(insights.outcomeOnlyCount)")
+        }
+        if insights.untrackedCount > 0 {
+            lines.append("- Untracked: \(insights.untrackedCount)")
+        }
     }
 
     private static func appendDailyActivity(
@@ -162,6 +191,10 @@ struct InsightsMarkdownExporter {
         formatter.timeZone = calendar.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    private static func percentage(_ value: Double) -> String {
+        "\(Int((value * 100).rounded()))%"
     }
 
     private static func escape(_ value: String) -> String {

@@ -89,6 +89,31 @@ struct GitHubInsights: Equatable {
     let repositoryBreakdown: [InsightsBreakdown]
 }
 
+struct GoalOutcomeInsights: Equatable {
+    let completedSessionCount: Int
+    let sessionsWithGoal: Int
+    let sessionsWithOutcome: Int
+    let closedLoopCount: Int
+    let needsFollowUpCount: Int
+    let outcomeOnlyCount: Int
+    let untrackedCount: Int
+
+    var closedLoopRate: Double? {
+        guard sessionsWithGoal > 0 else { return nil }
+        return Double(closedLoopCount) / Double(sessionsWithGoal)
+    }
+
+    static let empty = GoalOutcomeInsights(
+        completedSessionCount: 0,
+        sessionsWithGoal: 0,
+        sessionsWithOutcome: 0,
+        closedLoopCount: 0,
+        needsFollowUpCount: 0,
+        outcomeOnlyCount: 0,
+        untrackedCount: 0
+    )
+}
+
 struct InsightsSummary: Equatable {
     let timeframe: InsightsTimeframe
     let interval: DateInterval
@@ -105,6 +130,43 @@ struct InsightsSummary: Equatable {
     let developerToolInsights: DeveloperToolInsights
     let gitInsights: GitInsights
     let githubInsights: GitHubInsights
+    let goalOutcomeInsights: GoalOutcomeInsights
+
+    init(
+        timeframe: InsightsTimeframe,
+        interval: DateInterval,
+        comparisonInterval: DateInterval?,
+        totalDuration: TimeInterval,
+        comparisonDuration: TimeInterval,
+        sessionCount: Int,
+        comparisonSessionCount: Int?,
+        averageSessionDuration: TimeInterval,
+        longestSessionDuration: TimeInterval,
+        projectBreakdown: [InsightsBreakdown],
+        typeBreakdown: [InsightsBreakdown],
+        dailyActivity: [DailyActivity],
+        developerToolInsights: DeveloperToolInsights,
+        gitInsights: GitInsights,
+        githubInsights: GitHubInsights,
+        goalOutcomeInsights: GoalOutcomeInsights = .empty
+    ) {
+        self.timeframe = timeframe
+        self.interval = interval
+        self.comparisonInterval = comparisonInterval
+        self.totalDuration = totalDuration
+        self.comparisonDuration = comparisonDuration
+        self.sessionCount = sessionCount
+        self.comparisonSessionCount = comparisonSessionCount
+        self.averageSessionDuration = averageSessionDuration
+        self.longestSessionDuration = longestSessionDuration
+        self.projectBreakdown = projectBreakdown
+        self.typeBreakdown = typeBreakdown
+        self.dailyActivity = dailyActivity
+        self.developerToolInsights = developerToolInsights
+        self.gitInsights = gitInsights
+        self.githubInsights = githubInsights
+        self.goalOutcomeInsights = goalOutcomeInsights
+    }
 
     var hasComparison: Bool { comparisonInterval != nil }
 
@@ -211,7 +273,8 @@ enum InsightsCalculator {
             ),
             developerToolInsights: developerToolInsights(primaryRecords),
             gitInsights: gitInsights(primaryRecords),
-            githubInsights: githubInsights(primaryRecords)
+            githubInsights: githubInsights(primaryRecords),
+            goalOutcomeInsights: goalOutcomeInsights(primaryRecords)
         )
     }
 
@@ -319,6 +382,9 @@ enum InsightsCalculator {
         let projectID: UUID?
         let projectName: String?
         let type: SessionType
+        let goal: String?
+        let outcome: String?
+        let isCompleted: Bool
         let startedAt: Date
         let endedAt: Date?
         let pauseIntervals: [PauseInterval]
@@ -376,6 +442,9 @@ enum InsightsCalculator {
                 projectID: session.projectID,
                 projectName: session.projectName,
                 type: session.type,
+                goal: session.goal,
+                outcome: session.outcome,
+                isCompleted: true,
                 startedAt: session.startedAt,
                 endedAt: session.endedAt,
                 pauseIntervals: session.pauseIntervals,
@@ -390,6 +459,9 @@ enum InsightsCalculator {
                 projectID: session.projectID,
                 projectName: session.projectName,
                 type: session.type,
+                goal: session.goal,
+                outcome: session.outcome,
+                isCompleted: false,
                 startedAt: session.startedAt,
                 endedAt: session.endedAt,
                 pauseIntervals: session.pauseIntervals,
@@ -421,6 +493,41 @@ enum InsightsCalculator {
             sessionCount: records.count,
             averageDuration: records.isEmpty ? 0 : total / Double(records.count),
             longestDuration: longest
+        )
+    }
+
+    private static func goalOutcomeInsights(_ records: [SessionRecord]) -> GoalOutcomeInsights {
+        let completed = records.filter { $0.source.isCompleted }
+        var sessionsWithGoal = 0
+        var sessionsWithOutcome = 0
+        var closedLoop = 0
+        var needsFollowUp = 0
+        var outcomeOnly = 0
+        var untracked = 0
+
+        for record in completed {
+            let hasGoal = MeaningfulText.exists(record.source.goal)
+            let hasOutcome = MeaningfulText.exists(record.source.outcome)
+
+            if hasGoal { sessionsWithGoal += 1 }
+            if hasOutcome { sessionsWithOutcome += 1 }
+
+            switch (hasGoal, hasOutcome) {
+            case (true, true): closedLoop += 1
+            case (true, false): needsFollowUp += 1
+            case (false, true): outcomeOnly += 1
+            case (false, false): untracked += 1
+            }
+        }
+
+        return GoalOutcomeInsights(
+            completedSessionCount: completed.count,
+            sessionsWithGoal: sessionsWithGoal,
+            sessionsWithOutcome: sessionsWithOutcome,
+            closedLoopCount: closedLoop,
+            needsFollowUpCount: needsFollowUp,
+            outcomeOnlyCount: outcomeOnly,
+            untrackedCount: untracked
         )
     }
 
