@@ -18,6 +18,7 @@ jobs:
 
       - name: Show toolchain
         run: |
+          sw_vers
           swift --version
           xcodebuild -version
 
