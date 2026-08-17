@@ -19,6 +19,32 @@ private final class CoordinatorTestPersistence: StatePersisting {
 
 @MainActor
 final class AppWindowCoordinatorTests: XCTestCase {
+    func testApplicationMenuContainsSettingsAndQuitCommands() {
+        let application = NSApplication.shared
+        let originalMenu = application.mainMenu
+        defer { application.mainMenu = originalMenu }
+
+        let delegate = CodePulseApplicationDelegate()
+        delegate.installApplicationMenu()
+
+        guard let appMenu = application.mainMenu?.items.first?.submenu else {
+            XCTFail("CodePulse did not install an application menu")
+            return
+        }
+        let settingsItem = appMenu.item(withTitle: "Settings…")
+        let quitItem = appMenu.item(withTitle: "Quit CodePulse")
+
+        XCTAssertNotNil(settingsItem)
+        XCTAssertEqual(settingsItem?.keyEquivalent, ",")
+        XCTAssertEqual(settingsItem?.keyEquivalentModifierMask, [.command])
+        XCTAssertTrue(settingsItem?.target === delegate)
+        XCTAssertNotNil(quitItem)
+        XCTAssertEqual(quitItem?.keyEquivalent, "q")
+        XCTAssertEqual(quitItem?.keyEquivalentModifierMask, [.command])
+        XCTAssertTrue(quitItem?.target === application)
+        XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(application))
+    }
+
     func testSettingsWindowIsExplicitlyCreatedReusedAndReopened() {
         _ = NSApplication.shared
         let store = SessionStore(
@@ -47,5 +73,35 @@ final class AppWindowCoordinatorTests: XCTestCase {
         coordinator.showSettings()
         XCTAssertTrue(firstWindow?.isVisible == true)
         firstWindow?.close()
+    }
+
+    func testInsightsAndHistoryWindowsAreExplicitAndReusable() {
+        let application = NSApplication.shared
+        let store = SessionStore(
+            persistence: CoordinatorTestPersistence(),
+            clock: CoordinatorTestClock(),
+            automaticallyRefresh: false
+        )
+        let coordinator = AppWindowCoordinator(store: store)
+
+        XCTAssertNil(application.windows.first(where: { $0.title == "Insights" }))
+        XCTAssertNil(application.windows.first(where: { $0.title == "History" }))
+
+        coordinator.showInsights()
+        let insightsWindow = application.windows.first(where: { $0.title == "Insights" })
+        XCTAssertNotNil(insightsWindow)
+        XCTAssertTrue(insightsWindow?.isVisible == true)
+
+        coordinator.showInsights()
+        XCTAssertEqual(application.windows.filter { $0.title == "Insights" }.count, 1)
+        insightsWindow?.close()
+        XCTAssertFalse(insightsWindow?.isVisible == true)
+
+        coordinator.showHistory()
+        let historyWindow = application.windows.first(where: { $0.title == "History" })
+        XCTAssertNotNil(historyWindow)
+        XCTAssertTrue(historyWindow?.isVisible == true)
+        historyWindow?.close()
+        XCTAssertFalse(historyWindow?.isVisible == true)
     }
 }

@@ -1,6 +1,8 @@
 import AppKit
 
+@MainActor
 final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
+    private var runtime: CodePulseRuntime?
     private var settingsAction: (() -> Void)?
 
     func configureSettingsAction(_ action: @escaping () -> Void) {
@@ -9,7 +11,14 @@ final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        installSettingsMenuItem()
+        installApplicationMenu()
+
+        let runtime = CodePulseRuntime()
+        self.runtime = runtime
+        configureSettingsAction { [weak runtime] in
+            runtime?.showSettings()
+        }
+        runtime.start()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -20,15 +29,23 @@ final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
         settingsAction?()
     }
 
-    private func installSettingsMenuItem() {
-        guard let appMenu = NSApp.mainMenu?.items.first?.submenu else { return }
+    func installApplicationMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "CodePulse")
+        appMenuItem.title = "CodePulse"
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+        NSApp.mainMenu = mainMenu
 
-        if let settingsItem = appMenu.item(withTitle: "Settings…") {
-            settingsItem.target = self
-            settingsItem.action = #selector(showSettings(_:))
-            settingsItem.keyEquivalent = ","
-            return
-        }
+        let aboutItem = NSMenuItem(
+            title: "About CodePulse",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ""
+        )
+        aboutItem.target = NSApp
+        appMenu.addItem(aboutItem)
+        appMenu.addItem(.separator())
 
         let settingsItem = NSMenuItem(
             title: "Settings…",
@@ -36,6 +53,29 @@ final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ","
         )
         settingsItem.target = self
-        appMenu.insertItem(settingsItem, at: min(2, appMenu.items.count))
+        settingsItem.keyEquivalentModifierMask = [.command]
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit CodePulse",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quitItem.target = NSApp
+        quitItem.keyEquivalentModifierMask = [.command]
+        appMenu.addItem(quitItem)
+    }
+
+    private func installSettingsMenuItem() {
+        guard let appMenu = NSApp.mainMenu?.items.first?.submenu,
+              let settingsItem = appMenu.item(withTitle: "Settings…") else {
+            return
+        }
+
+        settingsItem.target = self
+        settingsItem.action = #selector(showSettings(_:))
+        settingsItem.keyEquivalent = ","
+        settingsItem.keyEquivalentModifierMask = [.command]
     }
 }
