@@ -22,9 +22,9 @@ to turn recorded data into guidance without any cloud involvement.
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Weekly / daily local digest | Implemented | Summarize active time, sessions, projects, work types, and developer-tool participation for the period. Local notification; no account needed. |
-| Goal vs. actual tracking | Accepted | Sessions already capture goals and outcomes. Compare planned intent against time spent, and surface unfinished goals in History and Insights. |
-| Focus trends and streaks | Considering | Deep-work block detection, longest focus streak, context-switch cost, time-of-day heatmap. Needs a definition of "deep work" that fits one-window-at-a-time local data. |
+| Weekly / daily local digest | Implemented | Summarize active time, sessions, projects, work types, developer-tool participation, and aggregate missing-outcome follow-up reminders for the period. Local notification; no account needed. |
+| Goal vs. actual tracking | Implemented | Insights aggregates, the History follow-up/closed-loop workflow, Markdown aggregate export, and a digest follow-up signal compare recorded goals with outcomes without judging achievement. |
+| Focus trends and streaks | Implemented | Deterministic Focus Patterns provide focus blocks, sustained-focus share, rapid identified project switches, a best focus day, and local time-of-day distribution. This version has no productivity score and does not claim to measure deep-work quality or cognitive cost. |
 | Per-project outcome narrative | Considering | What got finished vs. abandoned per project, per period. Draws on existing goal/outcome text; formatting needs care to stay useful, not fluffy. |
 
 All computation stays local and deterministic, consistent with the existing
@@ -35,8 +35,9 @@ Markdown report export.
 Daily and weekly digests are **opt-in** (Settings → Actionable Insights) and
 disabled by default, including for existing installs. When enabled, CodePulse
 summarizes the **previous completed local calendar day or week** — active time,
-session count, top project and work type, and Codex/OpenCode participation,
-plus a comparison with the preceding equivalent period — and delivers it as a
+session count, top project and work type, Codex/OpenCode participation, and an
+aggregate count of completed goal-bearing sessions missing outcomes when
+applicable, plus a comparison with the preceding equivalent period — and delivers it as a
 native macOS notification at the configured time. Delivery uses the local
 `UNUserNotificationCenter`; no network request, account, or remote service is
 involved, and nothing from a session's goal, outcome, paths, repositories,
