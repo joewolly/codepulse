@@ -16,7 +16,10 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release is CodePulse **1.1.2 (build 1102)**.
+The current release candidate is CodePulse **1.1.3 (build 1103)**. This patch
+fixes the immediate launch crash affecting the public v1.1.2 application by
+moving application lifecycle ownership to AppKit while keeping SwiftUI as the
+UI framework for explicitly managed windows.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">

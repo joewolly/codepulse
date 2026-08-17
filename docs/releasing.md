@@ -1,12 +1,15 @@
 # CodePulse macOS release packaging
 
-The current release candidate is CodePulse **1.1.2 (build 1102)**. The
+The current release candidate is CodePulse **1.1.3 (build 1103)**. The
 instructions below describe the local ad-hoc-signed Universal 2 packaging and
 the separate Sparkle update-signing path.
 
-CodePulse v1.1.2 fixes an issue where the Settings window could open
-automatically at launch. CodePulse now launches normally as a menu-bar app,
-while Settings and Insights remain available when explicitly requested.
+CodePulse v1.1.3 fixes the immediate launch crash affecting the public v1.1.2
+application on the release toolchain. Application lifecycle ownership is now
+handled directly by AppKit while existing SwiftUI interfaces remain hosted
+through AppKit windows. The release workflow executes the packaged application
+before publication, and CodePulse launches normally as a menu-bar app while
+Settings and Insights remain available when explicitly requested.
 
 ## What the artifact is
 
@@ -65,7 +68,7 @@ Developer ID signing.
 The version and build number can be overridden without editing source files:
 
 ```sh
-CODEPULSE_VERSION=1.1.2 CODEPULSE_BUILD=1102 ./script/package_release.sh
+CODEPULSE_VERSION=1.1.3 CODEPULSE_BUILD=1103 ./script/package_release.sh
 ```
 
 ## Output
@@ -75,7 +78,7 @@ The default release writes:
 ```text
 dist/release/
 ├── CodePulse.app
-├── CodePulse-1.1.2.dmg
+├── CodePulse-1.1.3.dmg
 └── checksums.txt
 ```
 
@@ -90,7 +93,7 @@ transparent shell alias.
 ## Sparkle updates
 
 CodePulse uses Sparkle for update discovery and installation. Existing public
-v0.9.0, v1.0.0, v1.1.0, and v1.1.1 installations can update to v1.1.2 through the signed appcast
+v0.9.0, v1.0.0, v1.1.0, v1.1.1, and v1.1.2 installations can update to v1.1.3 through the signed appcast
 once the release candidate is published; the installed app and update archive remain
 independently subject to macOS and Sparkle trust checks.
 
@@ -135,8 +138,8 @@ A release is initiated only after its version/build change has been merged to
 ```sh
 git checkout main
 git pull --ff-only
-git tag v1.1.2
-git push origin v1.1.2
+git tag v1.1.3
+git push origin v1.1.3
 ```
 
 The `GitHub Release` workflow then:
@@ -145,11 +148,12 @@ The `GitHub Release` workflow then:
 2. validates that the tagged commit is already contained in `main`
 3. runs the Swift test suite
 4. builds and validates the Universal 2 DMG
-5. signs the update archive with Sparkle EdDSA
-6. creates and validates `appcast.xml`
-7. publishes the normal latest GitHub Release
-8. uploads the DMG, `checksums.txt`, and `appcast.xml`
-9. downloads the published assets and verifies the checksum and appcast again
+5. launches the exact packaged app and requires it to survive the runtime smoke interval
+6. signs the update archive with Sparkle EdDSA
+7. creates and validates `appcast.xml`
+8. publishes the normal latest GitHub Release
+9. uploads the DMG, `checksums.txt`, and `appcast.xml`
+10. downloads the published assets and verifies the checksum and appcast again
 
 Do not manually replace release assets after a successful automated release;
 the appcast signature and published archive are expected to stay in sync.
@@ -184,7 +188,7 @@ flow is also an appropriate way to make the explicit first-launch decision.
 The checksum file uses the release filename:
 
 ```text
-SHA256 (CodePulse-1.1.2.dmg) = <64 hexadecimal characters>
+SHA256 (CodePulse-1.1.3.dmg) = <64 hexadecimal characters>
 ```
 
 Useful local checks include:
@@ -194,7 +198,7 @@ plutil -p dist/release/CodePulse.app/Contents/Info.plist
 file dist/release/CodePulse.app/Contents/MacOS/CodePulse
 lipo -info dist/release/CodePulse.app/Contents/MacOS/CodePulse
 otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
-shasum -a 256 dist/release/CodePulse-1.1.2.dmg
+shasum -a 256 dist/release/CodePulse-1.1.3.dmg
 ```
 
 The default package is ad-hoc signed locally. `codesign --verify --strict`
