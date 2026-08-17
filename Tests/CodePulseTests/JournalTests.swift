@@ -156,6 +156,121 @@ final class JournalTests: XCTestCase {
         XCTAssertFalse(query.matches(wrongType, calendar: calendar, referenceDate: start))
     }
 
+    func testHistoryGoalOutcomeFiltersUseMeaningfulTextAndCompose() {
+        let projectID = UUID()
+        let start = date(year: 2023, month: 8, day: 9, hour: 10)
+        func session(
+            goal: String?,
+            outcome: String?,
+            projectID: UUID? = nil,
+            projectName: String? = nil
+        ) -> CompletedSession {
+            CompletedSession(
+                id: UUID(),
+                projectID: projectID,
+                projectName: projectName,
+                type: .debugging,
+                goal: goal,
+                outcome: outcome,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(600),
+                pauseIntervals: []
+            )
+        }
+
+        let closedLoop = session(goal: "Plan", outcome: "Done", projectID: projectID, projectName: "CodePulse")
+        let needsFollowUp = session(goal: "Follow up", outcome: nil, projectID: projectID, projectName: "CodePulse")
+        let outcomeOnly = session(goal: nil, outcome: "Recorded")
+        let untracked = session(goal: "\n", outcome: " \t")
+
+        XCTAssertFalse(HistoryQuery().hasRestrictions)
+        XCTAssertTrue(HistoryQuery(goalOutcome: .needsFollowUp).hasRestrictions)
+
+        let all = [closedLoop, needsFollowUp, outcomeOnly, untracked]
+        XCTAssertEqual(
+            all.filter { HistoryQuery().matches($0, calendar: calendar, referenceDate: start) }.count,
+            all.count
+        )
+        XCTAssertEqual(
+            all.filter { HistoryQuery(goalOutcome: .needsFollowUp).matches($0, calendar: calendar, referenceDate: start) },
+            [needsFollowUp]
+        )
+        XCTAssertEqual(
+            all.filter { HistoryQuery(goalOutcome: .closedLoop).matches($0, calendar: calendar, referenceDate: start) },
+            [closedLoop]
+        )
+
+        let composed = HistoryQuery(
+            searchText: "follow",
+            project: .projectID(projectID),
+            date: .today,
+            type: .debugging,
+            goalOutcome: .needsFollowUp
+        )
+        XCTAssertTrue(composed.matches(needsFollowUp, calendar: calendar, referenceDate: start))
+        XCTAssertFalse(composed.matches(closedLoop, calendar: calendar, referenceDate: start))
+        XCTAssertFalse(composed.matches(outcomeOnly, calendar: calendar, referenceDate: start))
+        XCTAssertFalse(composed.matches(untracked, calendar: calendar, referenceDate: start))
+    }
+
+    func testEditingFollowUpOutcomeClosesLoopAndRefreshesInsights() {
+        let start = date(year: 2023, month: 8, day: 9, hour: 10)
+        let session = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            type: .coding,
+            goal: "Finish the workflow",
+            outcome: nil,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_600),
+            pauseIntervals: []
+        )
+        let persistence = JournalTestPersistence(AppState(completedSessions: [session]))
+        let insightsReference = start.addingTimeInterval(7_200)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: JournalTestClock(insightsReference),
+            calendar: calendar,
+            automaticallyRefresh: false
+        )
+
+        let beforeRevision = store.stateRevision
+        let followUp = HistoryQuery(goalOutcome: .needsFollowUp)
+        XCTAssertEqual(store.historySessions(for: followUp, referenceDate: start).map(\.id), [session.id])
+        XCTAssertEqual(
+            InsightsCalculator.summary(state: store.state, calendar: calendar, referenceDate: insightsReference)
+                .goalOutcomeInsights.needsFollowUpCount,
+            1
+        )
+
+        XCTAssertTrue(store.updateCompletedSession(
+            id: session.id,
+            type: .coding,
+            goal: session.goal,
+            outcome: "Completed the workflow",
+            project: .keepSnapshot,
+            startedAt: session.startedAt
+        ))
+
+        XCTAssertGreaterThan(store.stateRevision, beforeRevision)
+        XCTAssertTrue(store.historySessions(for: followUp, referenceDate: start).isEmpty)
+        XCTAssertEqual(
+            store.historySessions(
+                for: HistoryQuery(goalOutcome: .closedLoop),
+                referenceDate: start
+            ).map(\.id),
+            [session.id]
+        )
+        let after = InsightsCalculator.summary(
+            state: store.state,
+            calendar: calendar,
+            referenceDate: insightsReference
+        ).goalOutcomeInsights
+        XCTAssertEqual(after.closedLoopCount, 1)
+        XCTAssertEqual(after.needsFollowUpCount, 0)
+    }
+
     func testHistoryQuerySupportsNoProjectAndNonGitSessions() {
         let start = date(year: 2023, month: 8, day: 9, hour: 10)
         let session = CompletedSession(
