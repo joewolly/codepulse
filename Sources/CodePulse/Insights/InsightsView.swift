@@ -28,6 +28,7 @@ struct InsightsView: View {
                 if let summary = calculatedSummary {
                     if summary.hasActivity {
                         InsightSummarySection(summary: summary)
+                        GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
                         ActivityChart(
                             activity: summary.dailyActivity,
                             timeframe: timeframe,
@@ -52,6 +53,7 @@ struct InsightsView: View {
                             GitHubInsightSection(insights: summary.githubInsights)
                         }
                     } else {
+                        GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
                         InsightsEmptyState(
                             timeframe: timeframe,
                             projectTitle: project.title(options: calculatedProjectOptions),
@@ -271,6 +273,80 @@ private struct InsightSummarySection: View {
         let difference = summary.sessionCount - comparisonSessionCount
         let sign = difference < 0 ? "−" : "+"
         return "\(sign)\(abs(difference)) \(comparisonLabel)"
+    }
+}
+
+private struct GoalOutcomeInsightSection: View {
+    let insights: GoalOutcomeInsights
+
+    var body: some View {
+        InsightSection(title: "Goal vs Actual", systemImage: "target") {
+            if insights.completedSessionCount == 0 {
+                Text("No completed sessions in this period yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("No completed sessions in this period yet")
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 135), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 16
+                ) {
+                    InsightMetric(
+                        title: "Goals Set",
+                        value: "\(insights.sessionsWithGoal)",
+                        detail: nil
+                    )
+                    InsightMetric(
+                        title: "Outcomes Recorded",
+                        value: "\(insights.sessionsWithOutcome)",
+                        detail: nil
+                    )
+                    InsightMetric(
+                        title: "Closed Loop",
+                        value: "\(insights.closedLoopCount)",
+                        detail: insights.closedLoopRate.map { "\(percentage($0)) of goal sessions" }
+                    )
+                    InsightMetric(
+                        title: "Needs Follow-Up",
+                        value: "\(insights.needsFollowUpCount)",
+                        detail: nil
+                    )
+                }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                )
+
+                if insights.outcomeOnlyCount > 0 {
+                    Text("\(insights.outcomeOnlyCount) \(sessionLabel(insights.outcomeOnlyCount)) recorded \(insights.outcomeOnlyCount == 1 ? "an outcome" : "outcomes") without \(insights.outcomeOnlyCount == 1 ? "a goal" : "goals").")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if insights.untrackedCount > 0 {
+                    Text("\(insights.untrackedCount) completed \(sessionLabel(insights.untrackedCount)) had neither a goal nor outcome.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Text("Actual reflects the outcome you recorded. CodePulse does not judge whether a goal was achieved.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func sessionLabel(_ count: Int) -> String {
+        count == 1 ? "session" : "sessions"
+    }
+
+    private func percentage(_ value: Double) -> String {
+        "\(Int((value * 100).rounded()))%"
     }
 }
 

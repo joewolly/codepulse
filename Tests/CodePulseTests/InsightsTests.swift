@@ -169,6 +169,46 @@ final class InsightsTests: XCTestCase {
         XCTAssertEqual(summary.typeBreakdown.first?.label, "Coding")
     }
 
+    func testLegacySessionWithoutGoalOrOutcomeIsUntracked() throws {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        let session = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 4, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 4, hour: 11),
+            pauseIntervals: []
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try JSONSerialization.jsonObject(with: encoder.encode(session)) as! [String: Any]
+        object.removeValue(forKey: "goal")
+        object.removeValue(forKey: "outcome")
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let legacy = try decoder.decode(
+            CompletedSession.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        var state = AppState()
+        state.completedSessions = [legacy]
+        let insights = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference
+        ).goalOutcomeInsights
+
+        XCTAssertEqual(insights.completedSessionCount, 1)
+        XCTAssertEqual(insights.untrackedCount, 1)
+        XCTAssertEqual(insights.sessionsWithGoal, 0)
+        XCTAssertEqual(insights.sessionsWithOutcome, 0)
+        XCTAssertNil(insights.closedLoopRate)
+    }
+
     func testSummaryExposesCountAverageAndLongestUsingClippedActiveTime() {
         let reference = date(year: 2023, month: 1, day: 11, hour: 13)
         let crossingWeek = CompletedSession(
@@ -323,6 +363,143 @@ final class InsightsTests: XCTestCase {
         XCTAssertEqual(summary.sessionCount, 1)
         XCTAssertEqual(summary.totalDuration, 3_600, accuracy: 0.001)
         XCTAssertEqual(summary.averageSessionDuration, 3_600, accuracy: 0.001)
+    }
+
+    func testGoalOutcomeInsightsPartitionCompletedSessionsAndExcludeActive() throws {
+        let reference = date(year: 2023, month: 1, day: 11, hour: 13)
+        let projectID = UUID()
+        func completed(
+            goal: String?,
+            outcome: String?,
+            projectID: UUID? = nil,
+            hour: Int
+        ) -> CompletedSession {
+            let start = date(year: 2023, month: 1, day: 10, hour: hour)
+            return CompletedSession(
+                id: UUID(),
+                projectID: projectID,
+                projectName: projectID == nil ? nil : "Tracked",
+                goal: goal,
+                outcome: outcome,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(3_600),
+                pauseIntervals: []
+            )
+        }
+
+        let closedLoop = completed(goal: "Ship", outcome: "Shipped", projectID: projectID, hour: 9)
+        let needsFollowUp = completed(goal: "Review", outcome: nil, projectID: projectID, hour: 10)
+        let outcomeOnly = completed(goal: nil, outcome: "Noted", hour: 11)
+        let untracked = completed(goal: " \n ", outcome: "\t", hour: 12)
+        let otherProject = completed(goal: "Other", outcome: "Done", projectID: UUID(), hour: 13)
+        let active = ActiveSession(
+            projectID: projectID,
+            projectName: "Tracked",
+            goal: "Still working",
+            startedAt: date(year: 2023, month: 1, day: 11, hour: 11)
+        )
+
+        var state = AppState()
+        state.completedSessions = [closedLoop, needsFollowUp, outcomeOnly, untracked, otherProject]
+        state.activeSession = active
+
+        let insights = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference
+        ).goalOutcomeInsights
+
+        XCTAssertEqual(insights.completedSessionCount, 5)
+        XCTAssertEqual(insights.sessionsWithGoal, 3)
+        XCTAssertEqual(insights.sessionsWithOutcome, 3)
+        XCTAssertEqual(insights.closedLoopCount, 2)
+        XCTAssertEqual(insights.needsFollowUpCount, 1)
+        XCTAssertEqual(insights.outcomeOnlyCount, 1)
+        XCTAssertEqual(insights.untrackedCount, 1)
+        XCTAssertEqual(insights.closedLoopCount + insights.needsFollowUpCount, insights.sessionsWithGoal)
+        XCTAssertEqual(insights.closedLoopCount + insights.outcomeOnlyCount, insights.sessionsWithOutcome)
+        XCTAssertEqual(
+            insights.closedLoopCount + insights.needsFollowUpCount + insights.outcomeOnlyCount + insights.untrackedCount,
+            insights.completedSessionCount
+        )
+        XCTAssertEqual(try XCTUnwrap(insights.closedLoopRate), 2.0 / 3.0, accuracy: 0.000_001)
+
+        let projectInsights = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            project: .projectID(projectID)
+        ).goalOutcomeInsights
+        XCTAssertEqual(projectInsights.completedSessionCount, 2)
+        XCTAssertEqual(projectInsights.closedLoopCount, 1)
+        XCTAssertEqual(projectInsights.needsFollowUpCount, 1)
+        XCTAssertEqual(projectInsights.sessionsWithOutcome, 1)
+
+        let noGoals = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            goal: "\n\t",
+            outcome: " ",
+            startedAt: date(year: 2023, month: 1, day: 10, hour: 15),
+            endedAt: date(year: 2023, month: 1, day: 10, hour: 16),
+            pauseIntervals: []
+        )
+        var noGoalState = AppState()
+        noGoalState.completedSessions = [noGoals]
+        let noGoalInsights = InsightsCalculator.summary(
+            state: noGoalState,
+            calendar: calendar,
+            referenceDate: reference
+        ).goalOutcomeInsights
+        XCTAssertEqual(noGoalInsights.completedSessionCount, 1)
+        XCTAssertEqual(noGoalInsights.closedLoopCount, 0)
+        XCTAssertNil(noGoalInsights.closedLoopRate)
+    }
+
+    func testGoalOutcomeInsightsUseTimeframeOverlap() {
+        let reference = date(year: 2023, month: 1, day: 11, hour: 13)
+        let crossing = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            goal: "Cross boundary",
+            outcome: "Recorded",
+            startedAt: date(year: 2023, month: 1, day: 8, hour: 23),
+            endedAt: date(year: 2023, month: 1, day: 9, hour: 1),
+            pauseIntervals: []
+        )
+        let previous = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            goal: "Previous",
+            outcome: nil,
+            startedAt: date(year: 2023, month: 1, day: 8, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 8, hour: 11),
+            pauseIntervals: []
+        )
+        var state = AppState()
+        state.completedSessions = [crossing, previous]
+
+        let thisWeek = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisWeek
+        ).goalOutcomeInsights
+        XCTAssertEqual(thisWeek.completedSessionCount, 1)
+        XCTAssertEqual(thisWeek.closedLoopCount, 1)
+
+        let lastWeek = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .lastWeek
+        ).goalOutcomeInsights
+        XCTAssertEqual(lastWeek.completedSessionCount, 2)
+        XCTAssertEqual(lastWeek.closedLoopCount, 1)
+        XCTAssertEqual(lastWeek.needsFollowUpCount, 1)
     }
 
     func testProjectFiltersIncludeNoProjectAndDeletedHistoricalProject() {
