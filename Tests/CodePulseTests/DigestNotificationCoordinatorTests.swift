@@ -169,6 +169,40 @@ final class DigestNotificationCoordinatorTests: XCTestCase {
         XCTAssertEqual(scheduler.addCount, initialAddCount + 1)
     }
 
+    func testScheduledFollowUpContentRefreshesAfterOutcomeEditWithoutChangingIdentityOrFireDate() async {
+        let clock = DigestTestClock(date(year: 2023, month: 1, day: 4, hour: 8))
+        var state = AppState()
+        state.settings.digests.dailyEnabled = true
+        state.completedSessions = [completedSession(
+            startedAt: date(year: 2023, month: 1, day: 3, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 3, hour: 11),
+            goal: "Finish the task"
+        )]
+        let (coordinator, provider, scheduler, _) = makeCoordinator(state: state, clock: clock)
+
+        await coordinator.runSchedulingPass()
+
+        let original = try! XCTUnwrap(scheduler.requests["codepulse-digest.daily"])
+        XCTAssertTrue(original.body.contains("1 session with a goal still needs an outcome."))
+        let initialAddCount = scheduler.addCount
+
+        provider.digestAppState.completedSessions = [completedSession(
+            startedAt: date(year: 2023, month: 1, day: 3, hour: 10),
+            endedAt: date(year: 2023, month: 1, day: 3, hour: 11),
+            goal: "Finish the task",
+            outcome: "Task finished"
+        )]
+
+        await coordinator.runSchedulingPass()
+
+        let updated = try! XCTUnwrap(scheduler.requests["codepulse-digest.daily"])
+        XCTAssertEqual(scheduler.requests.values.filter { $0.identifier == "codepulse-digest.daily" }.count, 1)
+        XCTAssertEqual(updated.identifier, original.identifier)
+        XCTAssertEqual(updated.fireDate, original.fireDate)
+        XCTAssertFalse(updated.body.contains("1 session with a goal still needs an outcome."))
+        XCTAssertEqual(scheduler.addCount, initialAddCount + 1)
+    }
+
     func testScheduledActiveSessionUsesCurrentTimeNotFutureFireDate() async {
         let clock = DigestTestClock(date(year: 2023, month: 1, day: 2, hour: 9, minute: 1))
         var state = AppState()
@@ -541,14 +575,19 @@ final class DigestNotificationCoordinatorTests: XCTestCase {
         XCTAssertEqual(SystemLocalNotificationScheduler.presentationOptions(for: "unrelated-notification"), [])
     }
 
-    private func completedSession(startedAt: Date, endedAt: Date) -> CompletedSession {
+    private func completedSession(
+        startedAt: Date,
+        endedAt: Date,
+        goal: String? = nil,
+        outcome: String? = nil
+    ) -> CompletedSession {
         CompletedSession(
             id: UUID(),
             projectID: nil,
             projectName: nil,
             type: .coding,
-            goal: nil,
-            outcome: nil,
+            goal: goal,
+            outcome: outcome,
             startedAt: startedAt,
             endedAt: endedAt,
             pauseIntervals: []

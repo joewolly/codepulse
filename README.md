@@ -170,14 +170,17 @@ Settings → **Actionable Insights** offers opt-in daily and weekly digests
 (disabled by default). A digest summarizes the **previous completed local
 calendar day or week** — active time, session count, top project and work type,
 and Codex/OpenCode participation, with a comparison to the preceding equivalent
-period — and delivers it as a native macOS notification at a time you choose.
+period. Digests may also include an aggregate follow-up count when completed
+sessions with goals are missing outcomes. They are delivered as native macOS
+notifications at a time you choose.
 
 Everything is computed on this Mac from the same local Insights data; digests
-use no network, account, or cloud service. Notifications contain only metrics
-and project names — never session goals or outcomes, file paths, repository
-URLs, branches, or pull-request titles. macOS asks for notification permission
-only when you first enable a digest, and CodePulse keeps working normally if
-you decline. A digest period is delivered once, even across relaunches.
+use no network, account, or cloud service. Notifications contain only aggregate
+metrics, follow-up counts, and project names — never session goals or outcomes,
+file paths, repository URLs, branches, or pull-request titles. macOS asks for
+notification permission only when you first enable a digest, and CodePulse keeps
+working normally if you decline. A digest period is delivered once, even across
+relaunches.
 
 ## Project archiving
 

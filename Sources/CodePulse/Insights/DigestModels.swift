@@ -56,6 +56,29 @@ struct DigestSummary: Equatable {
     let developerToolParticipation: DigestDeveloperToolParticipation
     let comparisonTotalActiveTime: TimeInterval?
     let comparisonSessionCount: Int?
+    let goalOutcomeInsights: GoalOutcomeInsights
+
+    init(
+        period: DigestPeriod,
+        totalActiveTime: TimeInterval,
+        sessionCount: Int,
+        topProject: DigestTopItem?,
+        topType: DigestTopItem?,
+        developerToolParticipation: DigestDeveloperToolParticipation,
+        comparisonTotalActiveTime: TimeInterval?,
+        comparisonSessionCount: Int?,
+        goalOutcomeInsights: GoalOutcomeInsights = .empty
+    ) {
+        self.period = period
+        self.totalActiveTime = totalActiveTime
+        self.sessionCount = sessionCount
+        self.topProject = topProject
+        self.topType = topType
+        self.developerToolParticipation = developerToolParticipation
+        self.comparisonTotalActiveTime = comparisonTotalActiveTime
+        self.comparisonSessionCount = comparisonSessionCount
+        self.goalOutcomeInsights = goalOutcomeInsights
+    }
 
     var hasActivity: Bool { totalActiveTime > 0 }
 

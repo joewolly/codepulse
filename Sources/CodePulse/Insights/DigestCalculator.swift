@@ -165,7 +165,8 @@ enum DigestCalculator {
                 sessionsWithOpenCode: insights.developerToolInsights.sessionsWithOpenCode
             ),
             comparisonTotalActiveTime: insights.comparisonInterval.map { _ in insights.comparisonDuration },
-            comparisonSessionCount: insights.comparisonSessionCount
+            comparisonSessionCount: insights.comparisonSessionCount,
+            goalOutcomeInsights: insights.goalOutcomeInsights
         )
     }
 }
