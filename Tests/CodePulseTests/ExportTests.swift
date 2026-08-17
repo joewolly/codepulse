@@ -366,6 +366,10 @@ final class ExportTests: XCTestCase {
             "- Outcome only: 2",
             "- Untracked: 17",
             "",
+            "## Project Outcomes",
+            "Project Outcomes uses only the goals and outcomes you recorded. CodePulse does not decide whether work succeeded, failed, finished, or was abandoned.",
+            "No completed project outcomes in this period yet.",
+            "",
             "## Focus Patterns",
             "- Focus blocks: 5",
             "- Longest focus block: 2h 08m (+20m vs last month)",
@@ -542,6 +546,10 @@ final class ExportTests: XCTestCase {
             "## Goal vs Actual",
             "No completed sessions in this period yet.",
             "",
+            "## Project Outcomes",
+            "Project Outcomes uses only the goals and outcomes you recorded. CodePulse does not decide whether work succeeded, failed, finished, or was abandoned.",
+            "No completed project outcomes in this period yet.",
+            "",
             "## Focus Patterns",
             "No focus blocks in this period."
         ].joined(separator: "\n") + "\n")
@@ -624,8 +632,13 @@ final class ExportTests: XCTestCase {
         XCTAssertTrue(report.contains("- Outcomes recorded: 1"))
         XCTAssertTrue(report.contains("- Closed loop: 1"))
         XCTAssertTrue(report.contains("- Closed-loop rate: 100%"))
-        XCTAssertFalse(report.contains("SENTINEL GOAL"))
-        XCTAssertFalse(report.contains("SENTINEL OUTCOME"))
+        let goalSection = report.components(separatedBy: "## Goal vs Actual").dropFirst().first ?? ""
+        let aggregateSection = goalSection.components(separatedBy: "## Project Outcomes").first ?? ""
+        let projectSection = report.components(separatedBy: "## Project Outcomes").dropFirst().first ?? ""
+        XCTAssertFalse(aggregateSection.contains("SENTINEL GOAL"))
+        XCTAssertFalse(aggregateSection.contains("SENTINEL OUTCOME"))
+        XCTAssertTrue(projectSection.contains("SENTINEL GOAL"))
+        XCTAssertTrue(projectSection.contains("SENTINEL OUTCOME"))
 
         var activeState = AppState()
         activeState.activeSession = ActiveSession(
@@ -646,6 +659,75 @@ final class ExportTests: XCTestCase {
         XCTAssertTrue(activeReport.contains("## Goal vs Actual"))
         XCTAssertTrue(activeReport.contains("No completed sessions in this period yet."))
         XCTAssertFalse(activeReport.contains("Closed-loop rate:"))
+    }
+
+    func testMarkdownProjectOutcomesUseSharedNarrativeAndBoundedUserText() {
+        let reference = date(year: 2024, month: 8, day: 13, hour: 16)
+        let projectID = alphaProjectID
+        let start = date(year: 2024, month: 8, day: 13, hour: 9)
+        let closed = CompletedSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000c001")!,
+            projectID: projectID,
+            projectName: "CodePulse",
+            goal: "  SENTINEL <script>alert(1)</script> # heading | table | **bold** [text](https://example.invalid)  ",
+            outcome: "Recorded result\r\nline2",
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_600),
+            pauseIntervals: []
+        )
+        let outcomeOnly = CompletedSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000c002")!,
+            projectID: projectID,
+            projectName: "CodePulse",
+            goal: nil,
+            outcome: "Outcome only",
+            startedAt: start.addingTimeInterval(3_600),
+            endedAt: start.addingTimeInterval(7_200),
+            pauseIntervals: []
+        )
+        let followUp = CompletedSession(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000c003")!,
+            projectID: projectID,
+            projectName: "CodePulse",
+            goal: "Follow-up goal",
+            outcome: nil,
+            startedAt: start.addingTimeInterval(7_200),
+            endedAt: start.addingTimeInterval(10_800),
+            pauseIntervals: []
+        )
+        var state = AppState()
+        state.completedSessions = [closed, outcomeOnly, followUp]
+        let summary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisWeek
+        )
+        let report = InsightsMarkdownExporter.markdown(
+            summary: summary,
+            projectTitle: "CodePulse",
+            calendar: calendar
+        )
+
+        let goalIndex = try! XCTUnwrap(report.range(of: "## Goal vs Actual"))
+        let projectIndex = try! XCTUnwrap(report.range(of: "## Project Outcomes"))
+        let focusIndex = try! XCTUnwrap(report.range(of: "## Focus Patterns"))
+        XCTAssertLessThan(goalIndex.lowerBound, projectIndex.lowerBound)
+        XCTAssertLessThan(projectIndex.lowerBound, focusIndex.lowerBound)
+        XCTAssertTrue(report.contains("### CodePulse"))
+        XCTAssertTrue(report.contains(ProjectOutcomeNarrativeFormatter.narrative(for: summary.projectOutcomeInsights[0])))
+        XCTAssertTrue(report.contains("- Goal: SENTINEL &lt;script&gt;alert(1)&lt;/script&gt; # heading \\| table \\| \\*\\*bold\\*\\* \\[text\\](https://example.invalid)"))
+        XCTAssertTrue(report.contains("- Actual: Recorded result line2"))
+        XCTAssertTrue(report.contains("- Actual: Outcome only"))
+        XCTAssertFalse(report.contains("Goal: Outcome only"))
+        XCTAssertTrue(report.contains("- Goal: Follow-up goal"))
+        XCTAssertTrue(report.contains("- Actual: not recorded"))
+        XCTAssertFalse(report.contains("<script>"))
+        XCTAssertFalse(report.contains("SENTINEL <script>"))
+        let aggregateOnly = report.components(separatedBy: "## Goal vs Actual").dropFirst().first?
+            .components(separatedBy: "## Project Outcomes").first ?? ""
+        XCTAssertFalse(aggregateOnly.contains("SENTINEL"))
+        XCTAssertFalse(report.components(separatedBy: "## Focus Patterns").last?.contains("SENTINEL") ?? false)
     }
 
     func testMarkdownReportSupportsEveryTimeframeAndSelectedProjectLabel() {

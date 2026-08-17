@@ -167,6 +167,47 @@ struct GoalOutcomeInsights: Equatable {
     )
 }
 
+struct ProjectOutcomeEntry: Identifiable, Equatable {
+    let sessionID: UUID
+    let endedAt: Date
+    let goal: String?
+    let outcome: String?
+
+    var id: UUID { sessionID }
+}
+
+struct ProjectOutcomeInsights: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let completedSessionCount: Int
+    let completedActiveDuration: TimeInterval
+    let sessionsWithGoal: Int
+    let sessionsWithOutcome: Int
+    let closedLoopCount: Int
+    let needsFollowUpCount: Int
+    let outcomeOnlyCount: Int
+    let untrackedCount: Int
+    let recentOutcomes: [ProjectOutcomeEntry]
+    let followUps: [ProjectOutcomeEntry]
+
+    var closedLoopRate: Double? {
+        guard sessionsWithGoal > 0 else { return nil }
+        return Double(closedLoopCount) / Double(sessionsWithGoal)
+    }
+
+    var recordedOutcomeCount: Int {
+        closedLoopCount + outcomeOnlyCount
+    }
+
+    var followUpOverflowCount: Int {
+        max(0, needsFollowUpCount - followUps.count)
+    }
+
+    var outcomeOverflowCount: Int {
+        max(0, recordedOutcomeCount - recentOutcomes.count)
+    }
+}
+
 struct InsightsSummary: Equatable {
     let timeframe: InsightsTimeframe
     let interval: DateInterval
@@ -184,6 +225,7 @@ struct InsightsSummary: Equatable {
     let gitInsights: GitInsights
     let githubInsights: GitHubInsights
     let goalOutcomeInsights: GoalOutcomeInsights
+    let projectOutcomeInsights: [ProjectOutcomeInsights]
     let focusInsights: FocusInsights
     let comparisonFocusInsights: FocusInsights?
 
@@ -204,6 +246,7 @@ struct InsightsSummary: Equatable {
         gitInsights: GitInsights,
         githubInsights: GitHubInsights,
         goalOutcomeInsights: GoalOutcomeInsights = .empty,
+        projectOutcomeInsights: [ProjectOutcomeInsights] = [],
         focusInsights: FocusInsights = .empty,
         comparisonFocusInsights: FocusInsights? = nil
     ) {
@@ -223,6 +266,7 @@ struct InsightsSummary: Equatable {
         self.gitInsights = gitInsights
         self.githubInsights = githubInsights
         self.goalOutcomeInsights = goalOutcomeInsights
+        self.projectOutcomeInsights = projectOutcomeInsights
         self.focusInsights = focusInsights
         self.comparisonFocusInsights = comparisonFocusInsights
     }
@@ -311,6 +355,7 @@ enum InsightsCalculator {
         }
         let metrics = sessionMetrics(primaryRecords)
         let comparisonMetrics = comparisonRecords.map(sessionMetrics)
+        let projectOutcomes = projectOutcomeInsights(primaryRecords)
 
         return InsightsSummary(
             timeframe: timeframe,
@@ -333,7 +378,8 @@ enum InsightsCalculator {
             developerToolInsights: developerToolInsights(primaryRecords),
             gitInsights: gitInsights(primaryRecords),
             githubInsights: githubInsights(primaryRecords),
-            goalOutcomeInsights: goalOutcomeInsights(primaryRecords),
+            goalOutcomeInsights: aggregateGoalOutcomeInsights(from: projectOutcomes),
+            projectOutcomeInsights: projectOutcomes,
             focusInsights: focusInsights(
                 from: sources,
                 in: interval,
@@ -563,6 +609,43 @@ enum InsightsCalculator {
     private struct SessionRecord {
         let source: SessionSource
         let duration: TimeInterval
+    }
+
+    private struct ProjectBucket: Hashable {
+        let id: String
+        let label: String
+
+        static func == (lhs: ProjectBucket, rhs: ProjectBucket) -> Bool {
+            lhs.id == rhs.id
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(id)
+        }
+
+        init(source: SessionSource) {
+            if let projectID = source.projectID {
+                id = "id:\(projectID.uuidString)"
+            } else if let projectName = source.projectName {
+                id = "name:\(projectName)"
+            } else {
+                id = "no-project"
+            }
+            label = source.projectName ?? "No Project"
+        }
+    }
+
+    private enum GoalOutcomeState {
+        case closedLoop
+        case needsFollowUp
+        case outcomeOnly
+        case untracked
+    }
+
+    private struct ClassifiedGoalOutcome {
+        let state: GoalOutcomeState
+        let goal: String?
+        let outcome: String?
     }
 
     private enum FocusContext: Hashable {
@@ -859,52 +942,155 @@ enum InsightsCalculator {
         )
     }
 
-    private static func goalOutcomeInsights(_ records: [SessionRecord]) -> GoalOutcomeInsights {
-        let completed = records.filter { $0.source.isCompleted }
-        var sessionsWithGoal = 0
-        var sessionsWithOutcome = 0
-        var closedLoop = 0
-        var needsFollowUp = 0
-        var outcomeOnly = 0
-        var untracked = 0
-
-        for record in completed {
-            let hasGoal = MeaningfulText.exists(record.source.goal)
-            let hasOutcome = MeaningfulText.exists(record.source.outcome)
-
-            if hasGoal { sessionsWithGoal += 1 }
-            if hasOutcome { sessionsWithOutcome += 1 }
-
-            switch (hasGoal, hasOutcome) {
-            case (true, true): closedLoop += 1
-            case (true, false): needsFollowUp += 1
-            case (false, true): outcomeOnly += 1
-            case (false, false): untracked += 1
-            }
+    private static func classifyGoalOutcome(
+        goal: String?,
+        outcome: String?
+    ) -> ClassifiedGoalOutcome {
+        let normalizedGoal = MeaningfulText.normalized(goal)
+        let normalizedOutcome = MeaningfulText.normalized(outcome)
+        let state: GoalOutcomeState
+        switch (normalizedGoal != nil, normalizedOutcome != nil) {
+        case (true, true): state = .closedLoop
+        case (true, false): state = .needsFollowUp
+        case (false, true): state = .outcomeOnly
+        case (false, false): state = .untracked
         }
-
-        return GoalOutcomeInsights(
-            completedSessionCount: completed.count,
-            sessionsWithGoal: sessionsWithGoal,
-            sessionsWithOutcome: sessionsWithOutcome,
-            closedLoopCount: closedLoop,
-            needsFollowUpCount: needsFollowUp,
-            outcomeOnlyCount: outcomeOnly,
-            untrackedCount: untracked
+        return ClassifiedGoalOutcome(
+            state: state,
+            goal: normalizedGoal,
+            outcome: normalizedOutcome
         )
     }
 
-    private static func breakdownByProject(_ records: [SessionRecord]) -> [InsightsBreakdown] {
-        var totals: [String: (label: String, duration: TimeInterval)] = [:]
-        for record in records {
-            let key = record.source.projectID.map { "id:\($0.uuidString)" }
-                ?? record.source.projectName.map { "name:\($0)" }
-                ?? "no-project"
-            let label = record.source.projectName ?? "No Project"
-            totals[key, default: (label: label, duration: 0)].duration += record.duration
+    private static func aggregateGoalOutcomeInsights(
+        from projects: [ProjectOutcomeInsights]
+    ) -> GoalOutcomeInsights {
+        projects.reduce(into: GoalOutcomeInsights.empty) { result, project in
+            result = GoalOutcomeInsights(
+                completedSessionCount: result.completedSessionCount + project.completedSessionCount,
+                sessionsWithGoal: result.sessionsWithGoal + project.sessionsWithGoal,
+                sessionsWithOutcome: result.sessionsWithOutcome + project.sessionsWithOutcome,
+                closedLoopCount: result.closedLoopCount + project.closedLoopCount,
+                needsFollowUpCount: result.needsFollowUpCount + project.needsFollowUpCount,
+                outcomeOnlyCount: result.outcomeOnlyCount + project.outcomeOnlyCount,
+                untrackedCount: result.untrackedCount + project.untrackedCount
+            )
         }
-        return sortedDurationBreakdown(totals.map { key, value in
-            InsightsBreakdown(id: key, label: value.label, duration: value.duration)
+    }
+
+    private static func projectOutcomeInsights(
+        _ records: [SessionRecord]
+    ) -> [ProjectOutcomeInsights] {
+        struct Accumulator {
+            let bucket: ProjectBucket
+            var completedSessionCount = 0
+            var completedActiveDuration: TimeInterval = 0
+            var sessionsWithGoal = 0
+            var sessionsWithOutcome = 0
+            var closedLoopCount = 0
+            var needsFollowUpCount = 0
+            var outcomeOnlyCount = 0
+            var untrackedCount = 0
+            var outcomeCandidates: [(record: SessionRecord, classified: ClassifiedGoalOutcome)] = []
+            var followUpCandidates: [(record: SessionRecord, classified: ClassifiedGoalOutcome)] = []
+        }
+
+        var accumulators: [ProjectBucket: Accumulator] = [:]
+        for record in records where record.source.isCompleted {
+            let bucket = ProjectBucket(source: record.source)
+            let classified = classifyGoalOutcome(
+                goal: record.source.goal,
+                outcome: record.source.outcome
+            )
+            var accumulator = accumulators[bucket] ?? Accumulator(bucket: bucket)
+            accumulator.completedSessionCount += 1
+            accumulator.completedActiveDuration += record.duration
+            if classified.goal != nil { accumulator.sessionsWithGoal += 1 }
+            if classified.outcome != nil { accumulator.sessionsWithOutcome += 1 }
+
+            switch classified.state {
+            case .closedLoop:
+                accumulator.closedLoopCount += 1
+                accumulator.outcomeCandidates.append((record, classified))
+            case .needsFollowUp:
+                accumulator.needsFollowUpCount += 1
+                accumulator.followUpCandidates.append((record, classified))
+            case .outcomeOnly:
+                accumulator.outcomeOnlyCount += 1
+                accumulator.outcomeCandidates.append((record, classified))
+            case .untracked:
+                accumulator.untrackedCount += 1
+            }
+            accumulators[bucket] = accumulator
+        }
+
+        return accumulators.values.map { accumulator in
+            let outcomes = boundedEntries(from: accumulator.outcomeCandidates)
+            let followUps = boundedEntries(from: accumulator.followUpCandidates)
+            return ProjectOutcomeInsights(
+                id: accumulator.bucket.id,
+                label: accumulator.bucket.label,
+                completedSessionCount: accumulator.completedSessionCount,
+                completedActiveDuration: accumulator.completedActiveDuration,
+                sessionsWithGoal: accumulator.sessionsWithGoal,
+                sessionsWithOutcome: accumulator.sessionsWithOutcome,
+                closedLoopCount: accumulator.closedLoopCount,
+                needsFollowUpCount: accumulator.needsFollowUpCount,
+                outcomeOnlyCount: accumulator.outcomeOnlyCount,
+                untrackedCount: accumulator.untrackedCount,
+                recentOutcomes: outcomes,
+                followUps: followUps
+            )
+        }.sorted(by: projectOutcomePrecedes)
+    }
+
+    private static func boundedEntries(
+        from candidates: [(record: SessionRecord, classified: ClassifiedGoalOutcome)]
+    ) -> [ProjectOutcomeEntry] {
+        candidates
+            .sorted { lhs, rhs in
+                let left = lhs.record.source
+                let right = rhs.record.source
+                let leftEndedAt = left.endedAt ?? .distantPast
+                let rightEndedAt = right.endedAt ?? .distantPast
+                if leftEndedAt != rightEndedAt { return leftEndedAt > rightEndedAt }
+                if left.startedAt != right.startedAt { return left.startedAt > right.startedAt }
+                return left.id.uuidString < right.id.uuidString
+            }
+            .prefix(3)
+            .map { candidate in
+                ProjectOutcomeEntry(
+                    sessionID: candidate.record.source.id,
+                    endedAt: candidate.record.source.endedAt ?? candidate.record.source.startedAt,
+                    goal: candidate.classified.goal,
+                    outcome: candidate.classified.outcome
+                )
+            }
+    }
+
+    private static func projectOutcomePrecedes(
+        _ lhs: ProjectOutcomeInsights,
+        _ rhs: ProjectOutcomeInsights
+    ) -> Bool {
+        if lhs.needsFollowUpCount != rhs.needsFollowUpCount {
+            return lhs.needsFollowUpCount > rhs.needsFollowUpCount
+        }
+        if lhs.completedActiveDuration != rhs.completedActiveDuration {
+            return lhs.completedActiveDuration > rhs.completedActiveDuration
+        }
+        let labelOrder = lhs.label.localizedCaseInsensitiveCompare(rhs.label)
+        if labelOrder != .orderedSame { return labelOrder == .orderedAscending }
+        return lhs.id < rhs.id
+    }
+
+    private static func breakdownByProject(_ records: [SessionRecord]) -> [InsightsBreakdown] {
+        var totals: [ProjectBucket: TimeInterval] = [:]
+        for record in records {
+            let bucket = ProjectBucket(source: record.source)
+            totals[bucket, default: 0] += record.duration
+        }
+        return sortedDurationBreakdown(totals.map { bucket, duration in
+            InsightsBreakdown(id: bucket.id, label: bucket.label, duration: duration)
         })
     }
 
