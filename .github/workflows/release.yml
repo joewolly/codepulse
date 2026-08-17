@@ -68,6 +68,9 @@ jobs:
       - name: Package release
         run: ./script/package_release.sh
 
+      - name: Smoke-launch packaged app
+        run: ./script/smoke_release_launch.sh dist/release/CodePulse.app
+
       - name: Verify release artifacts
         shell: bash
         run: |
