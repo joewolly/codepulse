@@ -42,6 +42,10 @@ enum DigestComposer {
         first += "."
         sentences.append(first)
 
+        if let followUp = goalFollowUpSentence(summary.goalOutcomeInsights) {
+            sentences.append(followUp)
+        }
+
         if let topProject = summary.topProject {
             sentences.append("\(topProject.label) was your top project at \(CodePulseFormatting.duration(topProject.duration)).")
         }
@@ -53,6 +57,17 @@ enum DigestComposer {
         }
 
         return DigestNotificationContent(title: title, body: sentences.joined(separator: " "))
+    }
+
+    private static func goalFollowUpSentence(_ insights: GoalOutcomeInsights) -> String? {
+        switch insights.needsFollowUpCount {
+        case 0:
+            return nil
+        case 1:
+            return "1 session with a goal still needs an outcome."
+        default:
+            return "\(insights.needsFollowUpCount) sessions with goals still need outcomes."
+        }
     }
 
     private static func appendSessionDelta(_ sentence: inout String, _ delta: Int, periodLabel: String) {

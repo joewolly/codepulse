@@ -118,6 +118,14 @@ project summary and reuse the existing in-memory Insights calculations. Reports
 are deterministic local files; CodePulse does not use AI or upload CSV or
 Markdown exports to a cloud service.
 
+## Local daily and weekly digests
+
+Opt-in digest notifications are computed locally from the same Insights data.
+They may contain aggregate goal/outcome completion counts or a follow-up count
+when completed sessions with goals are missing outcomes, but never the
+underlying goal or outcome text. Digests do not include prompts, messages,
+transcripts, paths, repository URLs, branches, or pull-request titles.
+
 Application automation does not collect or retain unrelated application
 durations, window titles, document names, file names, browser URLs, terminal
 contents, clipboard contents, keyboard or mouse input, screen contents, or

@@ -339,6 +339,91 @@ final class DigestTests: XCTestCase {
         XCTAssertEqual(digest.period.comparisonInterval, insights.comparisonInterval)
         XCTAssertEqual(digest.comparisonTotalActiveTime ?? -1, insights.comparisonDuration, accuracy: 0.001)
         XCTAssertEqual(digest.comparisonSessionCount, insights.comparisonSessionCount)
+        XCTAssertEqual(digest.goalOutcomeInsights, insights.goalOutcomeInsights)
+    }
+
+    func testDigestReusesGoalOutcomeInsightsAndExcludesActiveSessions() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        let periodSessionStart = date(year: 2023, month: 1, day: 3, hour: 10)
+        let completedSessions = [
+            CompletedSession(
+                id: UUID(), projectID: nil, projectName: nil, type: .coding,
+                goal: "Ship the change", outcome: "Change shipped",
+                startedAt: periodSessionStart, endedAt: date(year: 2023, month: 1, day: 3, hour: 11),
+                pauseIntervals: []
+            ),
+            CompletedSession(
+                id: UUID(), projectID: nil, projectName: nil, type: .coding,
+                goal: "Follow up", outcome: nil,
+                startedAt: date(year: 2023, month: 1, day: 3, hour: 11), endedAt: date(year: 2023, month: 1, day: 3, hour: 12),
+                pauseIntervals: []
+            ),
+            CompletedSession(
+                id: UUID(), projectID: nil, projectName: nil, type: .coding,
+                goal: nil, outcome: "Recorded without a goal",
+                startedAt: date(year: 2023, month: 1, day: 3, hour: 12), endedAt: date(year: 2023, month: 1, day: 3, hour: 13),
+                pauseIntervals: []
+            ),
+            CompletedSession(
+                id: UUID(), projectID: nil, projectName: nil, type: .coding,
+                goal: nil, outcome: nil,
+                startedAt: date(year: 2023, month: 1, day: 3, hour: 13), endedAt: date(year: 2023, month: 1, day: 3, hour: 14),
+                pauseIntervals: []
+            ),
+            CompletedSession(
+                id: UUID(), projectID: nil, projectName: nil, type: .coding,
+                goal: "   ", outcome: "\n\t",
+                startedAt: date(year: 2023, month: 1, day: 3, hour: 14), endedAt: date(year: 2023, month: 1, day: 3, hour: 15),
+                pauseIntervals: []
+            )
+        ]
+        var state = AppState()
+        state.completedSessions = completedSessions
+        state.activeSession = ActiveSession(
+            type: .coding,
+            goal: "Active goal must not be counted",
+            startedAt: date(year: 2023, month: 1, day: 3, hour: 22)
+        )
+
+        let digest = DigestCalculator.summary(state: state, kind: .daily, referenceDate: reference, calendar: calendar)
+        let insights = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            interval: digest.period.interval,
+            comparisonInterval: digest.period.comparisonInterval,
+            timeframe: .allTime
+        )
+
+        XCTAssertEqual(digest.goalOutcomeInsights, insights.goalOutcomeInsights)
+        XCTAssertEqual(digest.goalOutcomeInsights, GoalOutcomeInsights(
+            completedSessionCount: 5,
+            sessionsWithGoal: 2,
+            sessionsWithOutcome: 2,
+            closedLoopCount: 1,
+            needsFollowUpCount: 1,
+            outcomeOnlyCount: 1,
+            untrackedCount: 2
+        ))
+        XCTAssertEqual(digest.sessionCount, 6)
+        XCTAssertGreaterThan(digest.totalActiveTime, 5 * 3_600)
+    }
+
+    func testActiveOnlyGoalDoesNotProduceDigestFollowUp() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 10)
+        var state = AppState()
+        state.activeSession = ActiveSession(
+            type: .coding,
+            goal: "Active goal",
+            startedAt: date(year: 2023, month: 1, day: 3, hour: 22)
+        )
+
+        let summary = DigestCalculator.summary(state: state, kind: .daily, referenceDate: reference, calendar: calendar)
+        let body = DigestComposer.content(summary: summary, calendar: calendar).body
+
+        XCTAssertTrue(summary.hasActivity)
+        XCTAssertEqual(summary.goalOutcomeInsights, .empty)
+        XCTAssertFalse(body.contains("still needs"))
     }
 
     func testDeveloperToolParticipationIsReusedFromInsights() {
@@ -546,13 +631,23 @@ final class DigestTests: XCTestCase {
                 sessionsWithAnyTool: 8, sessionsWithCodex: 8, sessionsWithOpenCode: 0
             ),
             comparisonTotalActiveTime: 37_560, // +2h 20m delta
-            comparisonSessionCount: 9
+            comparisonSessionCount: 9,
+            goalOutcomeInsights: GoalOutcomeInsights(
+                completedSessionCount: 11,
+                sessionsWithGoal: 3,
+                sessionsWithOutcome: 2,
+                closedLoopCount: 2,
+                needsFollowUpCount: 1,
+                outcomeOnlyCount: 0,
+                untrackedCount: 8
+            )
         )
         let content = DigestComposer.content(summary: summary, calendar: calendar)
         XCTAssertEqual(content.title, "Your CodePulse day")
         XCTAssertEqual(
             content.body,
             "12h 46m across 11 sessions, +2h 20m from the previous day. "
+                + "1 session with a goal still needs an outcome. "
                 + "CodePulse was your top project at 7h 12m. "
                 + "Coding was your top work type at 8h 20m. "
                 + "Codex participated in 8 sessions."
@@ -571,13 +666,23 @@ final class DigestTests: XCTestCase {
                 sessionsWithAnyTool: 2, sessionsWithCodex: 1, sessionsWithOpenCode: 2
             ),
             comparisonTotalActiveTime: 3_600,
-            comparisonSessionCount: 1
+            comparisonSessionCount: 1,
+            goalOutcomeInsights: GoalOutcomeInsights(
+                completedSessionCount: 3,
+                sessionsWithGoal: 3,
+                sessionsWithOutcome: 0,
+                closedLoopCount: 0,
+                needsFollowUpCount: 3,
+                outcomeOnlyCount: 0,
+                untrackedCount: 0
+            )
         )
         let content = DigestComposer.content(summary: summary, calendar: calendar)
         XCTAssertEqual(content.title, "Your CodePulse week")
         XCTAssertEqual(
             content.body,
             "2h 00m across 2 sessions, +1h 00m from the previous week. "
+                + "3 sessions with goals still need outcomes. "
                 + "CodePulse was your top project at 2h 00m. "
                 + "Codex and OpenCode participated in 1 and 2 sessions, respectively."
         )
@@ -638,6 +743,82 @@ final class DigestTests: XCTestCase {
             content.body,
             "1h 00m across 1 session, +30m from the previous day. Coding was your top work type at 1h 00m."
         )
+    }
+
+    func testCompositionOmitsFollowUpWhenNoGoalsNeedOutcomes() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        func summary(_ insights: GoalOutcomeInsights) -> DigestSummary {
+            DigestSummary(
+                period: DigestPeriodCalculator.completedPeriod(kind: .daily, referenceDate: reference, calendar: calendar),
+                totalActiveTime: 3_600,
+                sessionCount: 1,
+                topProject: nil,
+                topType: nil,
+                developerToolParticipation: DigestDeveloperToolParticipation(
+                    sessionsWithAnyTool: 0, sessionsWithCodex: 0, sessionsWithOpenCode: 0
+                ),
+                comparisonTotalActiveTime: nil,
+                comparisonSessionCount: nil,
+                goalOutcomeInsights: insights
+            )
+        }
+
+        let cases = [
+            GoalOutcomeInsights.empty,
+            GoalOutcomeInsights(
+                completedSessionCount: 1, sessionsWithGoal: 1, sessionsWithOutcome: 1,
+                closedLoopCount: 1, needsFollowUpCount: 0, outcomeOnlyCount: 0, untrackedCount: 0
+            ),
+            GoalOutcomeInsights(
+                completedSessionCount: 1, sessionsWithGoal: 0, sessionsWithOutcome: 1,
+                closedLoopCount: 0, needsFollowUpCount: 0, outcomeOnlyCount: 1, untrackedCount: 0
+            ),
+            GoalOutcomeInsights(
+                completedSessionCount: 1, sessionsWithGoal: 0, sessionsWithOutcome: 0,
+                closedLoopCount: 0, needsFollowUpCount: 0, outcomeOnlyCount: 0, untrackedCount: 1
+            )
+        ]
+
+        for insights in cases {
+            let body = DigestComposer.content(summary: summary(insights), calendar: calendar).body
+            XCTAssertFalse(body.contains("still needs"), "Unexpected follow-up for \(insights)")
+        }
+    }
+
+    func testDigestNotificationExcludesGoalAndOutcomeText() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        var state = AppState()
+        state.completedSessions = [
+            CompletedSession(
+                id: UUID(),
+                projectID: nil,
+                projectName: nil,
+                type: .coding,
+                goal: "SENTINEL PRIVATE GOAL TEXT",
+                outcome: nil,
+                startedAt: date(year: 2023, month: 1, day: 3, hour: 10),
+                endedAt: date(year: 2023, month: 1, day: 3, hour: 11),
+                pauseIntervals: []
+            ),
+            CompletedSession(
+                id: UUID(),
+                projectID: nil,
+                projectName: nil,
+                type: .coding,
+                goal: nil,
+                outcome: "SENTINEL PRIVATE OUTCOME TEXT",
+                startedAt: date(year: 2023, month: 1, day: 3, hour: 11),
+                endedAt: date(year: 2023, month: 1, day: 3, hour: 12),
+                pauseIntervals: []
+            )
+        ]
+
+        let summary = DigestCalculator.summary(state: state, kind: .daily, referenceDate: reference, calendar: calendar)
+        let body = DigestComposer.content(summary: summary, calendar: calendar).body
+
+        XCTAssertTrue(body.contains("1 session with a goal still needs an outcome."))
+        XCTAssertFalse(body.contains("SENTINEL PRIVATE GOAL TEXT"))
+        XCTAssertFalse(body.contains("SENTINEL PRIVATE OUTCOME TEXT"))
     }
 
     func testCompositionHandlesNegativeAndEqualComparison() {
