@@ -83,7 +83,7 @@ final class ReadmeScreenshotTests: XCTestCase {
         try render(
             InsightsView()
                 .environmentObject(fixture.makeStore()),
-            size: CGSize(width: 760, height: 620),
+            size: CGSize(width: 760, height: 760),
             name: "insights",
             outputDirectory: outputDirectory
         )

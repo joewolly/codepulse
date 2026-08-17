@@ -55,6 +55,59 @@ struct DailyActivity: Identifiable, Equatable {
     var id: Date { date }
 }
 
+/// Version-one analytical definitions for Focus Patterns. These are kept in
+/// one place so the calculation, UI copy, and tests share the same contract.
+enum FocusDefinition {
+    static let interruptionGrace: TimeInterval = 15 * 60
+    static let sustainedThreshold: TimeInterval = 30 * 60
+}
+
+struct HourlyFocusActivity: Identifiable, Equatable {
+    let hour: Int
+    let duration: TimeInterval
+
+    var id: Int { hour }
+}
+
+struct FocusInsights: Equatable {
+    let totalActiveDuration: TimeInterval
+    let focusBlockCount: Int
+    let longestFocusBlockDuration: TimeInterval
+    let averageFocusBlockDuration: TimeInterval
+    let sustainedFocusBlockCount: Int
+    let sustainedFocusDuration: TimeInterval
+    let projectSwitchCount: Int
+    let hourlySustainedFocus: [HourlyFocusActivity]
+    let bestFocusDay: DailyActivity?
+
+    var sustainedFocusShare: Double? {
+        guard totalActiveDuration > 0 else { return nil }
+        return sustainedFocusDuration / totalActiveDuration
+    }
+
+    var peakFocusHour: Int? {
+        guard let peak = hourlySustainedFocus.max(by: { lhs, rhs in
+            if lhs.duration == rhs.duration { return lhs.hour > rhs.hour }
+            return lhs.duration < rhs.duration
+        }), peak.duration > 0 else {
+            return nil
+        }
+        return peak.hour
+    }
+
+    static let empty = FocusInsights(
+        totalActiveDuration: 0,
+        focusBlockCount: 0,
+        longestFocusBlockDuration: 0,
+        averageFocusBlockDuration: 0,
+        sustainedFocusBlockCount: 0,
+        sustainedFocusDuration: 0,
+        projectSwitchCount: 0,
+        hourlySustainedFocus: (0..<24).map { HourlyFocusActivity(hour: $0, duration: 0) },
+        bestFocusDay: nil
+    )
+}
+
 struct DeveloperToolInsights: Equatable {
     let sessionsWithCodex: Int
     let sessionsWithOpenCode: Int
@@ -131,6 +184,8 @@ struct InsightsSummary: Equatable {
     let gitInsights: GitInsights
     let githubInsights: GitHubInsights
     let goalOutcomeInsights: GoalOutcomeInsights
+    let focusInsights: FocusInsights
+    let comparisonFocusInsights: FocusInsights?
 
     init(
         timeframe: InsightsTimeframe,
@@ -148,7 +203,9 @@ struct InsightsSummary: Equatable {
         developerToolInsights: DeveloperToolInsights,
         gitInsights: GitInsights,
         githubInsights: GitHubInsights,
-        goalOutcomeInsights: GoalOutcomeInsights = .empty
+        goalOutcomeInsights: GoalOutcomeInsights = .empty,
+        focusInsights: FocusInsights = .empty,
+        comparisonFocusInsights: FocusInsights? = nil
     ) {
         self.timeframe = timeframe
         self.interval = interval
@@ -166,6 +223,8 @@ struct InsightsSummary: Equatable {
         self.gitInsights = gitInsights
         self.githubInsights = githubInsights
         self.goalOutcomeInsights = goalOutcomeInsights
+        self.focusInsights = focusInsights
+        self.comparisonFocusInsights = comparisonFocusInsights
     }
 
     var hasComparison: Bool { comparisonInterval != nil }
@@ -274,7 +333,21 @@ enum InsightsCalculator {
             developerToolInsights: developerToolInsights(primaryRecords),
             gitInsights: gitInsights(primaryRecords),
             githubInsights: githubInsights(primaryRecords),
-            goalOutcomeInsights: goalOutcomeInsights(primaryRecords)
+            goalOutcomeInsights: goalOutcomeInsights(primaryRecords),
+            focusInsights: focusInsights(
+                from: sources,
+                in: interval,
+                referenceDate: referenceDate,
+                calendar: calendar
+            ),
+            comparisonFocusInsights: comparisonInterval.map {
+                focusInsights(
+                    from: sources,
+                    in: $0,
+                    referenceDate: referenceDate,
+                    calendar: calendar
+                )
+            }
         )
     }
 
@@ -405,23 +478,131 @@ enum InsightsCalculator {
             }
         }
 
+        var focusContext: FocusContext {
+            if let projectID {
+                return .projectID(projectID)
+            }
+            if let projectName, !projectName.isEmpty {
+                return .historicalName(projectName)
+            }
+            return .noProject(id)
+        }
+
+        func activeSegments(
+            in range: DateInterval,
+            referenceDate: Date
+        ) -> [DateInterval] {
+            guard let normalized = normalizedPauseIntervals(in: range, referenceDate: referenceDate) else {
+                return []
+            }
+
+            var segments: [DateInterval] = []
+            var cursor = normalized.effectiveRange.start
+            for pause in normalized.pauses {
+                if pause.start > cursor {
+                    segments.append(DateInterval(start: cursor, end: pause.start))
+                }
+                cursor = max(cursor, pause.end)
+            }
+            if cursor < normalized.effectiveRange.end {
+                segments.append(DateInterval(start: cursor, end: normalized.effectiveRange.end))
+            }
+            return segments.filter { $0.duration > 0 }
+        }
+
         func activeDuration(in range: DateInterval, referenceDate: Date) -> TimeInterval {
+            guard let normalized = normalizedPauseIntervals(in: range, referenceDate: referenceDate) else {
+                return 0
+            }
+            let paused = normalized.pauses.reduce(into: 0) { total, pause in
+                total += pause.duration
+            }
+            return max(0, normalized.effectiveRange.duration - paused)
+        }
+
+        private func normalizedPauseIntervals(
+            in range: DateInterval,
+            referenceDate: Date
+        ) -> (effectiveRange: DateInterval, pauses: [DateInterval])? {
             let sessionEnd = endedAt ?? referenceDate
             let end = min(sessionEnd, referenceDate, range.end)
             let start = max(startedAt, range.start)
-            guard end > start else { return 0 }
+            guard end > start else { return nil }
 
             let effectiveRange = DateInterval(start: start, end: end)
-            let paused = pauseIntervals.reduce(into: 0) { total, interval in
-                total += interval.overlap(with: effectiveRange, referenceDate: referenceDate)
+            let clippedPauses = pauseIntervals.compactMap { pause -> DateInterval? in
+                let pauseStart = max(pause.startedAt, effectiveRange.start)
+                let pauseEnd = min(pause.endedAt ?? effectiveRange.end, effectiveRange.end)
+                guard pauseEnd > pauseStart else { return nil }
+                return DateInterval(start: pauseStart, end: pauseEnd)
+            }.sorted { lhs, rhs in
+                if lhs.start != rhs.start { return lhs.start < rhs.start }
+                return lhs.end < rhs.end
             }
-            return max(0, effectiveRange.duration - paused)
+
+            var normalizedPauses: [DateInterval] = []
+            for pause in clippedPauses {
+                guard let last = normalizedPauses.last else {
+                    normalizedPauses.append(pause)
+                    continue
+                }
+                if pause.start <= last.end {
+                    normalizedPauses[normalizedPauses.count - 1] = DateInterval(
+                        start: last.start,
+                        end: max(last.end, pause.end)
+                    )
+                } else {
+                    normalizedPauses.append(pause)
+                }
+            }
+
+            return (effectiveRange: effectiveRange, pauses: normalizedPauses)
         }
     }
 
     private struct SessionRecord {
         let source: SessionSource
         let duration: TimeInterval
+    }
+
+    private enum FocusContext: Hashable {
+        case projectID(UUID)
+        case historicalName(String)
+        case noProject(UUID)
+
+        var projectIdentity: ProjectIdentity? {
+            switch self {
+            case .projectID(let id): return .projectID(id)
+            case .historicalName(let name): return .historicalName(name)
+            case .noProject: return nil
+            }
+        }
+    }
+
+    private enum ProjectIdentity: Hashable {
+        case projectID(UUID)
+        case historicalName(String)
+    }
+
+    private struct ActiveSegment {
+        let sourceID: UUID
+        let context: FocusContext
+        let start: Date
+        let end: Date
+
+        var duration: TimeInterval { end.timeIntervalSince(start) }
+    }
+
+    private struct FocusBlock {
+        let context: FocusContext
+        var end: Date
+        var segments: [ActiveSegment]
+
+        var activeDuration: TimeInterval {
+            segments.reduce(into: 0) { total, segment in
+                total += segment.duration
+            }
+        }
     }
 
     private struct SessionMetrics {
@@ -483,6 +664,188 @@ enum InsightsCalculator {
             guard duration > 0 else { return nil }
             return SessionRecord(source: source, duration: duration)
         }
+    }
+
+    private static func focusInsights(
+        from sources: [SessionSource],
+        in interval: DateInterval,
+        referenceDate: Date,
+        calendar: Calendar
+    ) -> FocusInsights {
+        let segments = activeSegments(
+            from: sources,
+            in: interval,
+            referenceDate: referenceDate
+        )
+        guard !segments.isEmpty else { return .empty }
+
+        let blocks = focusBlocks(from: segments)
+        let totalActiveDuration = segments.reduce(into: 0) { total, segment in
+            total += segment.duration
+        }
+        let sustainedBlocks = blocks.filter {
+            $0.activeDuration >= FocusDefinition.sustainedThreshold
+        }
+        var hourlyTotals = Array(repeating: 0.0, count: 24)
+        var dailyTotals: [Date: TimeInterval] = [:]
+
+        for block in sustainedBlocks {
+            for segment in block.segments {
+                bucketSustainedSegment(
+                    segment,
+                    calendar: calendar,
+                    hourlyTotals: &hourlyTotals,
+                    dailyTotals: &dailyTotals
+                )
+            }
+        }
+
+        let hourly = hourlyTotals.enumerated().map { hour, duration in
+            HourlyFocusActivity(hour: hour, duration: duration)
+        }
+        let bestDay = dailyTotals
+            .map { DailyActivity(date: $0.key, duration: $0.value) }
+            .filter { $0.duration > 0 }
+            .sorted { lhs, rhs in
+                if lhs.duration == rhs.duration { return lhs.date < rhs.date }
+                return lhs.duration > rhs.duration
+            }
+            .first
+
+        return FocusInsights(
+            totalActiveDuration: totalActiveDuration,
+            focusBlockCount: blocks.count,
+            longestFocusBlockDuration: blocks.map(\.activeDuration).max() ?? 0,
+            averageFocusBlockDuration: blocks.isEmpty
+                ? 0
+                : blocks.reduce(0) { $0 + $1.activeDuration } / Double(blocks.count),
+            sustainedFocusBlockCount: sustainedBlocks.count,
+            sustainedFocusDuration: sustainedBlocks.reduce(0) { $0 + $1.activeDuration },
+            projectSwitchCount: projectSwitchCount(
+                from: segments,
+                grace: FocusDefinition.interruptionGrace
+            ),
+            hourlySustainedFocus: hourly,
+            bestFocusDay: bestDay
+        )
+    }
+
+    private static func activeSegments(
+        from sources: [SessionSource],
+        in interval: DateInterval,
+        referenceDate: Date
+    ) -> [ActiveSegment] {
+        sources.flatMap { source in
+            source.activeSegments(in: interval, referenceDate: referenceDate).map { range in
+                ActiveSegment(
+                    sourceID: source.id,
+                    context: source.focusContext,
+                    start: range.start,
+                    end: range.end
+                )
+            }
+        }.sorted { lhs, rhs in
+            if lhs.start != rhs.start { return lhs.start < rhs.start }
+            if lhs.end != rhs.end { return lhs.end < rhs.end }
+            return lhs.sourceID.uuidString < rhs.sourceID.uuidString
+        }
+    }
+
+    private static func focusBlocks(from segments: [ActiveSegment]) -> [FocusBlock] {
+        var blocks: [FocusBlock] = []
+        for segment in segments {
+            guard var last = blocks.last else {
+                blocks.append(FocusBlock(context: segment.context, end: segment.end, segments: [segment]))
+                continue
+            }
+
+            let gap = segment.start.timeIntervalSince(last.end)
+            if last.context == segment.context, gap <= FocusDefinition.interruptionGrace {
+                last.segments.append(segment)
+                last.end = max(last.end, segment.end)
+                blocks[blocks.count - 1] = last
+            } else {
+                blocks.append(FocusBlock(context: segment.context, end: segment.end, segments: [segment]))
+            }
+        }
+        return blocks
+    }
+
+    private static func projectSwitchCount(
+        from segments: [ActiveSegment],
+        grace: TimeInterval
+    ) -> Int {
+        struct SourceActivity {
+            let firstStart: Date
+            let lastEnd: Date
+            let identity: ProjectIdentity?
+            let id: UUID
+        }
+
+        var bySource: [UUID: SourceActivity] = [:]
+        for segment in segments {
+            if let existing = bySource[segment.sourceID] {
+                bySource[segment.sourceID] = SourceActivity(
+                    firstStart: min(existing.firstStart, segment.start),
+                    lastEnd: max(existing.lastEnd, segment.end),
+                    identity: existing.identity,
+                    id: existing.id
+                )
+            } else {
+                bySource[segment.sourceID] = SourceActivity(
+                    firstStart: segment.start,
+                    lastEnd: segment.end,
+                    identity: segment.context.projectIdentity,
+                    id: segment.sourceID
+                )
+            }
+        }
+
+        let activities = bySource.values.sorted { lhs, rhs in
+            if lhs.firstStart != rhs.firstStart { return lhs.firstStart < rhs.firstStart }
+            if lhs.lastEnd != rhs.lastEnd { return lhs.lastEnd < rhs.lastEnd }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+        return zip(activities, activities.dropFirst()).reduce(into: 0) { count, pair in
+            let (previous, next) = pair
+            guard let previousIdentity = previous.identity,
+                  let nextIdentity = next.identity,
+                  previousIdentity != nextIdentity,
+                  next.firstStart.timeIntervalSince(previous.lastEnd) <= grace else {
+                return
+            }
+            count += 1
+        }
+    }
+
+    private static func bucketSustainedSegment(
+        _ segment: ActiveSegment,
+        calendar: Calendar,
+        hourlyTotals: inout [TimeInterval],
+        dailyTotals: inout [Date: TimeInterval]
+    ) {
+        var cursor = segment.start
+        while cursor < segment.end {
+            let hour = calendar.component(.hour, from: cursor)
+            let nextHour = nextLocalHourBoundary(after: cursor, calendar: calendar)
+            let sliceEnd = min(segment.end, nextHour)
+            guard sliceEnd > cursor else { break }
+            let duration = sliceEnd.timeIntervalSince(cursor)
+            hourlyTotals[hour] += duration
+
+            let day = calendar.startOfDay(for: cursor)
+            dailyTotals[day, default: 0] += duration
+            cursor = sliceEnd
+        }
+    }
+
+    private static func nextLocalHourBoundary(after date: Date, calendar: Calendar) -> Date {
+        let components = calendar.dateComponents([.year, .month, .day, .hour], from: date)
+        var next = components
+        next.hour = (components.hour ?? 0) + 1
+        next.minute = 0
+        next.second = 0
+        return calendar.date(from: next) ?? date.addingTimeInterval(3_600)
     }
 
     private static func sessionMetrics(_ records: [SessionRecord]) -> SessionMetrics {

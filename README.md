@@ -33,7 +33,7 @@ UI framework for explicitly managed windows.
 
 ### Insights
 
-<img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, activity, work types, and project totals" width="760">
+<img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, Goal vs Actual, Focus Patterns, activity, work types, and project totals" width="760">
 
 ## What it does
 
@@ -56,7 +56,10 @@ UI framework for explicitly managed windows.
   start, pause, resume, and finish control while CodePulse is running.
 - Provides richer local Insights for active time, sessions, projects, work types,
   developer-tool participation, Git activity, and GitHub context with native
-  Swift Charts.
+  Swift Charts. Focus Patterns report deterministic focus blocks, sustained-focus
+  time and share, rapid identified project switches, and local time-of-day
+  patterns from existing session timing and pause data; they do not measure human
+  productivity, cognition, or efficiency.
 - Exports the currently filtered History as standard UTF-8 CSV.
 - Exports the currently selected Insights timeframe and project as a deterministic
   local Markdown report.
@@ -93,7 +96,10 @@ update check.
 4. Finish the session, record an optional outcome, and save it to History.
 5. Open History to search, filter, or edit saved sessions, or open Insights to
    review local activity and context-derived summaries.
-6. If desired, create a **Settings → Session Presets** entry for a reusable
+6. Open Insights to review Focus Patterns such as longest and sustained focus
+   blocks, project switches, and local time-of-day distribution. These are
+   observable timing summaries, not a productivity score.
+7. If desired, create a **Settings → Session Presets** entry for a reusable
    Quick Start, then open **Settings → Integrations** to enable Codex or OpenCode
    context enrichment. Integrations are optional and separate from **Settings →
    Session Automation**, which is also optional and disabled by default.
@@ -159,7 +165,8 @@ user-selected local destination; an active session is not included.
 
 Use **Insights → Export Report…** to save the currently selected timeframe and
 project as a deterministic Markdown report. The report uses the existing local
-Insights summary and contains no AI-generated commentary or cloud data.
+Insights summary, including Focus Patterns, and contains no AI-generated
+commentary or cloud data.
 
 Both exports are created locally at the destination you choose. CodePulse does
 not upload CSV or Markdown exports.

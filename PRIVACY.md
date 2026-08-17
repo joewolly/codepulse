@@ -161,12 +161,19 @@ signature before installation.
 
 Insights are derived in memory from the local session records already described
 above. Timeframe totals, counts, project/work-type
-breakdowns, developer-tool participation, Git totals, and GitHub repository/PR
-aggregates are not stored in a separate analytics database or uploaded. GitHub
-context shown for a historical session is the snapshot saved with that session;
-CodePulse does not poll GitHub to rewrite historical analytics. Git Activity is
-descriptive metadata only and is not converted into a productivity or efficiency
-score.
+breakdowns, developer-tool participation, Git totals, GitHub repository/PR
+aggregates, and Focus Patterns are not stored in a separate analytics database
+or uploaded. Focus Patterns use only existing session timestamps, pause
+intervals, project identity, session type, selected timeframe, and Calendar to
+derive active segments, focus blocks, sustained-focus time/share, project
+switches, and local hour/day buckets. They do not inspect application or window
+content, keyboard or mouse input, documents, screens, prompts, messages, source
+code, terminals, or clipboard data, and create no new telemetry or collection.
+Focus metrics are observable timing summaries, not a productivity, cognition,
+concentration, distraction, or efficiency score. GitHub context shown for a
+historical session is the snapshot saved with that session; CodePulse does not
+poll GitHub to rewrite historical analytics. Git Activity is descriptive
+metadata only and is not converted into a productivity or efficiency score.
 
 ## Backups
 

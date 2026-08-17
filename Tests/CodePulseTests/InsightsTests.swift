@@ -862,6 +862,36 @@ final class InsightsTests: XCTestCase {
         })?.duration), 3_600, accuracy: 0.001)
     }
 
+    func testOverlappingPausesNormalizeAcrossSummaryFocusAndDailyActivity() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 12)
+        let session = makeSession(
+            projectID: UUID(),
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 10),
+            pauses: [
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 20),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 40)
+                ),
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 30),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 50)
+                )
+            ]
+        )
+
+        let summary = summary(for: [session], referenceDate: reference)
+
+        XCTAssertEqual(summary.totalDuration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(
+            summary.dailyActivity.reduce(0.0) { $0 + $1.duration },
+            1_800,
+            accuracy: 0.001
+        )
+    }
+
     func testNonDefaultFirstWeekdayChangesWeekBoundary() {
         var sundayCalendar = calendar
         sundayCalendar.firstWeekday = 1
@@ -876,8 +906,436 @@ final class InsightsTests: XCTestCase {
         XCTAssertEqual(summary.interval.end, date(year: 2023, month: 1, day: 8))
     }
 
-    private func date(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0) -> Date {
-        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    func testFocusBlocksMergeShortGapsAndUseActiveDurationOnly() throws {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 12)
+        let projectID = UUID()
+        let first = makeSession(
+            projectID: projectID,
+            projectName: "CodePulse",
+            type: .planning,
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 20)
+        )
+        let second = makeSession(
+            projectID: projectID,
+            projectName: "CodePulse",
+            type: .coding,
+            start: date(year: 2023, month: 1, day: 4, hour: 9, minute: 25),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 45)
+        )
+        let insights = summary(for: [first, second], referenceDate: reference).focusInsights
+
+        XCTAssertEqual(insights.focusBlockCount, 1)
+        XCTAssertEqual(insights.totalActiveDuration, 2_400, accuracy: 0.001)
+        XCTAssertEqual(insights.longestFocusBlockDuration, 2_400, accuracy: 0.001)
+        XCTAssertEqual(insights.averageFocusBlockDuration, 2_400, accuracy: 0.001)
+        XCTAssertEqual(insights.sustainedFocusBlockCount, 1)
+        XCTAssertEqual(insights.sustainedFocusDuration, 2_400, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(insights.sustainedFocusShare), 1, accuracy: 0.000_001)
+    }
+
+    func testFocusBlockGapBoundaryAndProjectIdentityRules() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        let projectID = UUID()
+        let atFifteen = makeSession(
+            projectID: projectID,
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 10)
+        )
+        let continuation = makeSession(
+            projectID: projectID,
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9, minute: 25),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 35)
+        )
+        let afterGrace = makeSession(
+            projectID: projectID,
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9, minute: 25, second: 1),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 35)
+        )
+        let differentProject = makeSession(
+            projectID: UUID(),
+            projectName: "Other",
+            start: date(year: 2023, month: 1, day: 4, hour: 9, minute: 35),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 45)
+        )
+
+        XCTAssertEqual(summary(for: [atFifteen, continuation], referenceDate: reference).focusInsights.focusBlockCount, 1)
+        XCTAssertEqual(summary(for: [atFifteen, differentProject], referenceDate: reference).focusInsights.focusBlockCount, 2)
+
+        XCTAssertEqual(summary(for: [atFifteen, afterGrace], referenceDate: reference).focusInsights.focusBlockCount, 2)
+
+        let noProjectA = makeSession(
+            start: date(year: 2023, month: 1, day: 4, hour: 10),
+            end: date(year: 2023, month: 1, day: 4, hour: 10, minute: 10)
+        )
+        let noProjectB = makeSession(
+            start: date(year: 2023, month: 1, day: 4, hour: 10, minute: 15),
+            end: date(year: 2023, month: 1, day: 4, hour: 10, minute: 25)
+        )
+        XCTAssertEqual(summary(for: [noProjectA, noProjectB], referenceDate: reference).focusInsights.focusBlockCount, 2)
+    }
+
+    func testFocusPauseSegmentsExcludePausedTimeAndNormalizeOverlaps() throws {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 12)
+        let session = makeSession(
+            projectID: UUID(),
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 10),
+            pauses: [
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 20),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 40)
+                ),
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 30),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 50)
+                )
+            ]
+        )
+        let insights = summary(for: [session], referenceDate: reference).focusInsights
+
+        XCTAssertEqual(insights.totalActiveDuration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(insights.focusBlockCount, 2)
+        XCTAssertEqual(insights.longestFocusBlockDuration, 1_200, accuracy: 0.001)
+        XCTAssertEqual(insights.hourlySustainedFocus.reduce(0) { $0 + $1.duration }, 0, accuracy: 0.001)
+        XCTAssertTrue(insights.hourlySustainedFocus.allSatisfy { $0.duration >= 0 })
+    }
+
+    func testFocusPauseGraceAndLongPauseSplitBlocks() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        let shortPause = makeSession(
+            projectID: UUID(),
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 50),
+            pauses: [PauseInterval(
+                startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 20),
+                endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 30)
+            )]
+        )
+        let longPause = makeSession(
+            projectID: UUID(),
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 10),
+            end: date(year: 2023, month: 1, day: 4, hour: 10, minute: 56),
+            pauses: [PauseInterval(
+                startedAt: date(year: 2023, month: 1, day: 4, hour: 10, minute: 20),
+                endedAt: date(year: 2023, month: 1, day: 4, hour: 10, minute: 36)
+            )]
+        )
+
+        let shortInsights = summary(for: [shortPause], referenceDate: reference).focusInsights
+        XCTAssertEqual(shortInsights.focusBlockCount, 1)
+        XCTAssertEqual(shortInsights.longestFocusBlockDuration, 2_400, accuracy: 0.001)
+
+        let longInsights = summary(for: [longPause], referenceDate: reference).focusInsights
+        XCTAssertEqual(longInsights.focusBlockCount, 2)
+        XCTAssertEqual(longInsights.longestFocusBlockDuration, 1_200, accuracy: 0.001)
+        XCTAssertEqual(longInsights.sustainedFocusBlockCount, 0)
+    }
+
+    func testFocusSegmentsClipSelectedIntervalAndActiveSessionAtReferenceDate() throws {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 10)
+        let interval = DateInterval(
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 11)
+        )
+        let completed = makeSession(
+            projectID: UUID(),
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 8),
+            end: date(year: 2023, month: 1, day: 4, hour: 12),
+            pauses: [
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 8, minute: 30),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 30)
+                ),
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 10, minute: 30),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 11, minute: 30)
+                )
+            ]
+        )
+        let active = ActiveSession(
+            projectID: UUID(),
+            projectName: "Active",
+            startedAt: date(year: 2023, month: 1, day: 4, hour: 9)
+        )
+        var state = AppState()
+        state.completedSessions = [completed]
+        state.activeSession = active
+        let summary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            interval: interval,
+            comparisonInterval: nil,
+            timeframe: .allTime
+        )
+
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, 5_400, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, summary.totalDuration, accuracy: 0.001)
+
+        let fullyPaused = makeSession(
+            projectID: UUID(),
+            projectName: "Paused",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 10),
+            pauses: [PauseInterval(
+                startedAt: date(year: 2023, month: 1, day: 4, hour: 8),
+                endedAt: date(year: 2023, month: 1, day: 4, hour: 11)
+            )]
+        )
+        let empty = InsightsCalculator.summary(
+            state: AppState(completedSessions: [fullyPaused]),
+            calendar: calendar,
+            referenceDate: reference,
+            interval: interval,
+            comparisonInterval: nil,
+            timeframe: .allTime
+        )
+        XCTAssertEqual(empty.focusInsights.totalActiveDuration, 0, accuracy: 0.001)
+        XCTAssertTrue(empty.focusInsights.hourlySustainedFocus.allSatisfy { $0.duration == 0 })
+        XCTAssertNil(empty.focusInsights.sustainedFocusShare)
+    }
+
+    func testSustainedFocusThresholdIsInclusive() throws {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 13)
+        let justUnder = makeSession(
+            projectID: UUID(),
+            projectName: "Under",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 9, minute: 29, second: 59)
+        )
+        let exact = makeSession(
+            projectID: UUID(),
+            projectName: "Exact",
+            start: date(year: 2023, month: 1, day: 4, hour: 10),
+            end: date(year: 2023, month: 1, day: 4, hour: 10, minute: 30)
+        )
+
+        let underInsights = summary(for: [justUnder], referenceDate: reference).focusInsights
+        XCTAssertEqual(underInsights.sustainedFocusBlockCount, 0)
+        XCTAssertEqual(underInsights.sustainedFocusDuration, 0, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(underInsights.sustainedFocusShare), 0, accuracy: 0.000_001)
+
+        let exactInsights = summary(for: [exact], referenceDate: reference).focusInsights
+        XCTAssertEqual(exactInsights.sustainedFocusBlockCount, 1)
+        XCTAssertEqual(exactInsights.sustainedFocusDuration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(exactInsights.sustainedFocusShare), 1, accuracy: 0.000_001)
+    }
+
+    func testFocusProjectSwitchesOnlyCountRapidIdentifiedTransitions() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 16)
+        let codePulseID = UUID()
+        let otherID = UUID()
+        let codePulse = makeSession(
+            projectID: codePulseID,
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 10)
+        )
+        let other = makeSession(
+            projectID: otherID,
+            projectName: "Other",
+            start: date(year: 2023, month: 1, day: 4, hour: 10, minute: 5),
+            end: date(year: 2023, month: 1, day: 4, hour: 11)
+        )
+        let same = makeSession(
+            projectID: codePulseID,
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 11),
+            end: date(year: 2023, month: 1, day: 4, hour: 11, minute: 30)
+        )
+        let noProject = makeSession(
+            start: date(year: 2023, month: 1, day: 4, hour: 11, minute: 35),
+            end: date(year: 2023, month: 1, day: 4, hour: 12)
+        )
+        let slow = makeSession(
+            projectID: otherID,
+            projectName: "Other",
+            start: date(year: 2023, month: 1, day: 4, hour: 12, minute: 16),
+            end: date(year: 2023, month: 1, day: 4, hour: 13)
+        )
+
+        let insights = summary(for: [codePulse, other, same, noProject, slow], referenceDate: reference).focusInsights
+        XCTAssertEqual(insights.projectSwitchCount, 2)
+    }
+
+    func testFocusHourAndDayBucketingUsesInjectedCalendarAndTieBreaksEarlier() throws {
+        let reference = date(year: 2023, month: 1, day: 5, hour: 13)
+        let first = makeSession(
+            projectID: UUID(),
+            projectName: "First",
+            start: date(year: 2023, month: 1, day: 3, hour: 9),
+            end: date(year: 2023, month: 1, day: 3, hour: 9, minute: 30)
+        )
+        let second = makeSession(
+            projectID: UUID(),
+            projectName: "Second",
+            start: date(year: 2023, month: 1, day: 4, hour: 10),
+            end: date(year: 2023, month: 1, day: 4, hour: 10, minute: 30)
+        )
+        let insights = summary(for: [first, second], referenceDate: reference).focusInsights
+
+        XCTAssertEqual(insights.peakFocusHour, 9)
+        XCTAssertEqual(try XCTUnwrap(insights.bestFocusDay?.date), date(year: 2023, month: 1, day: 3))
+        XCTAssertEqual(insights.hourlySustainedFocus[9].duration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(insights.hourlySustainedFocus[10].duration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(insights.sustainedFocusDuration, 3_600, accuracy: 0.001)
+    }
+
+    func testFocusCrossesMidnightAndDSTWithLocalBuckets() throws {
+        let reference = date(year: 2023, month: 1, day: 6, hour: 13)
+        let overnight = makeSession(
+            projectID: UUID(),
+            projectName: "Overnight",
+            start: date(year: 2023, month: 1, day: 5, hour: 23, minute: 30),
+            end: date(year: 2023, month: 1, day: 6, hour: 1, minute: 30)
+        )
+        let overnightInsights = summary(for: [overnight], referenceDate: reference).focusInsights
+        XCTAssertEqual(overnightInsights.hourlySustainedFocus[23].duration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(overnightInsights.hourlySustainedFocus[0].duration, 3_600, accuracy: 0.001)
+        XCTAssertEqual(overnightInsights.hourlySustainedFocus[1].duration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(overnightInsights.bestFocusDay?.duration), 5_400, accuracy: 0.001)
+        XCTAssertEqual(overnightInsights.hourlySustainedFocus.reduce(0) { $0 + $1.duration }, overnightInsights.sustainedFocusDuration, accuracy: 0.001)
+
+        var dstCalendar = calendar
+        dstCalendar.timeZone = TimeZone(identifier: "America/Denver")!
+        let dstStart = dstCalendar.date(from: DateComponents(year: 2023, month: 3, day: 12, hour: 1))!
+        let dstEnd = dstCalendar.date(from: DateComponents(year: 2023, month: 3, day: 12, hour: 4))!
+        let dstReference = dstCalendar.date(from: DateComponents(year: 2023, month: 3, day: 13, hour: 12))!
+        let dstSession = CompletedSession(
+            id: UUID(),
+            projectID: UUID(),
+            projectName: "DST",
+            type: .coding,
+            goal: nil,
+            outcome: nil,
+            startedAt: dstStart,
+            endedAt: dstEnd,
+            pauseIntervals: []
+        )
+        var state = AppState()
+        state.completedSessions = [dstSession]
+        let dstInsights = InsightsCalculator.summary(
+            state: state,
+            calendar: dstCalendar,
+            referenceDate: dstReference,
+            timeframe: .thisMonth
+        ).focusInsights
+        XCTAssertEqual(dstInsights.totalActiveDuration, 7_200, accuracy: 0.001)
+        XCTAssertEqual(dstInsights.hourlySustainedFocus[1].duration, 3_600, accuracy: 0.001)
+        XCTAssertEqual(dstInsights.hourlySustainedFocus[3].duration, 3_600, accuracy: 0.001)
+    }
+
+    func testFocusFiltersComparisonAndActiveSessionUseExistingPopulation() throws {
+        let reference = date(year: 2023, month: 1, day: 11, hour: 12)
+        let projectID = UUID()
+        let current = makeSession(
+            projectID: projectID,
+            projectName: "Tracked",
+            start: date(year: 2023, month: 1, day: 11, hour: 9),
+            end: date(year: 2023, month: 1, day: 11, hour: 10)
+        )
+        let previous = makeSession(
+            projectID: projectID,
+            projectName: "Tracked",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 10)
+        )
+        let excluded = makeSession(
+            projectID: UUID(),
+            projectName: "Excluded",
+            start: date(year: 2023, month: 1, day: 11, hour: 10),
+            end: date(year: 2023, month: 1, day: 11, hour: 11)
+        )
+        let active = ActiveSession(
+            projectID: projectID,
+            projectName: "Tracked",
+            startedAt: date(year: 2023, month: 1, day: 11, hour: 11)
+        )
+        var state = AppState()
+        state.completedSessions = [current, previous, excluded]
+        state.activeSession = active
+
+        let summary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisWeek,
+            project: .projectID(projectID)
+        )
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, 7_200, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.focusBlockCount, 2)
+        XCTAssertEqual(try XCTUnwrap(summary.comparisonFocusInsights?.totalActiveDuration), 3_600, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, summary.totalDuration, accuracy: 0.001)
+        XCTAssertNil(InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .allTime
+        ).comparisonFocusInsights)
+    }
+
+    func testFocusZeroActivityUsesNilShare() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 12)
+        let insights = InsightsCalculator.summary(
+            state: AppState(),
+            calendar: calendar,
+            referenceDate: reference
+        ).focusInsights
+        XCTAssertNil(insights.sustainedFocusShare)
+        XCTAssertNil(insights.peakFocusHour)
+        XCTAssertNil(insights.bestFocusDay)
+        XCTAssertEqual(insights.hourlySustainedFocus.count, 24)
+    }
+
+    private func summary(
+        for sessions: [CompletedSession],
+        referenceDate: Date,
+        activeSession: ActiveSession? = nil,
+        project: InsightsProjectFilter = .allProjects
+    ) -> InsightsSummary {
+        var state = AppState()
+        state.completedSessions = sessions
+        state.activeSession = activeSession
+        return InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: referenceDate,
+            timeframe: .thisWeek,
+            project: project
+        )
+    }
+
+    private func makeSession(
+        projectID: UUID? = nil,
+        projectName: String? = nil,
+        type: SessionType = .coding,
+        start: Date,
+        end: Date,
+        pauses: [PauseInterval] = []
+    ) -> CompletedSession {
+        CompletedSession(
+            id: UUID(),
+            projectID: projectID,
+            projectName: projectName,
+            type: type,
+            goal: nil,
+            outcome: nil,
+            startedAt: start,
+            endedAt: end,
+            pauseIntervals: pauses
+        )
+    }
+
+    private func date(year: Int, month: Int, day: Int, hour: Int = 0, minute: Int = 0, second: Int = 0) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute, second: second))!
     }
 }
 
