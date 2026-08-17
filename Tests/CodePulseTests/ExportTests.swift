@@ -40,6 +40,8 @@ final class ExportTests: XCTestCase {
             ("Codex", HistoryQuery(developerTool: .codex), [id(1), id(4)]),
             ("OpenCode", HistoryQuery(developerTool: .openCode), [id(2), id(4)]),
             ("no tool", HistoryQuery(developerTool: .noDeveloperTool), [id(3), id(5), id(6)]),
+            ("needs follow-up", HistoryQuery(goalOutcome: .needsFollowUp), [id(3), id(5), id(6), id(2), id(4)]),
+            ("closed loop", HistoryQuery(goalOutcome: .closedLoop), [id(1)]),
             ("search", HistoryQuery(searchText: "  QUOTED "), [id(1)]),
             (
                 "combined",
@@ -354,6 +356,16 @@ final class ExportTests: XCTestCase {
             "- Average Session: 36m",
             "- Longest Session: 2h 08m",
             "",
+            "## Goal vs Actual",
+            "- Completed sessions: 31",
+            "- Goals set: 12",
+            "- Outcomes recorded: 10",
+            "- Closed loop: 8",
+            "- Closed-loop rate: 67%",
+            "- Needs follow-up: 4",
+            "- Outcome only: 2",
+            "- Untracked: 17",
+            "",
             "## Daily Activity",
             "| Date | Active Time |",
             "| --- | ---: |",
@@ -464,7 +476,7 @@ final class ExportTests: XCTestCase {
         XCTAssertTrue(report.contains("## Developer Tools"))
     }
 
-    func testMarkdownReportZeroActivityIsUsefulAndHasNoZeroSections() {
+    func testMarkdownReportZeroActivityIncludesCalmGoalOutcomeState() {
         let summary = InsightsSummary(
             timeframe: .thisWeek,
             interval: DateInterval(start: date(year: 2024, month: 8, day: 12), duration: 86_400),
@@ -514,9 +526,69 @@ final class ExportTests: XCTestCase {
             "**Period:** This Week",
             "**Project:** CodePulse",
             "",
-            "No CodePulse activity was recorded for this selection."
+            "No CodePulse activity was recorded for this selection.",
+            "",
+            "## Goal vs Actual",
+            "No completed sessions in this period yet."
         ].joined(separator: "\n") + "\n")
         XCTAssertFalse(report.contains("## Summary"))
+    }
+
+    func testMarkdownGoalOutcomeSectionIsAggregateOnlyAndHandlesNoCompletedSessions() {
+        let reference = date(year: 2024, month: 8, day: 13, hour: 16)
+        let completed = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            goal: "SENTINEL GOAL SHOULD NOT EXPORT",
+            outcome: "SENTINEL OUTCOME SHOULD NOT EXPORT",
+            startedAt: reference.addingTimeInterval(-3_600),
+            endedAt: reference.addingTimeInterval(-1_800),
+            pauseIntervals: []
+        )
+        var state = AppState()
+        state.completedSessions = [completed]
+
+        let summary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisMonth
+        )
+        let report = InsightsMarkdownExporter.markdown(
+            summary: summary,
+            projectTitle: "CodePulse",
+            calendar: calendar
+        )
+
+        XCTAssertTrue(report.contains("## Goal vs Actual"))
+        XCTAssertTrue(report.contains("- Completed sessions: 1"))
+        XCTAssertTrue(report.contains("- Goals set: 1"))
+        XCTAssertTrue(report.contains("- Outcomes recorded: 1"))
+        XCTAssertTrue(report.contains("- Closed loop: 1"))
+        XCTAssertTrue(report.contains("- Closed-loop rate: 100%"))
+        XCTAssertFalse(report.contains("SENTINEL GOAL"))
+        XCTAssertFalse(report.contains("SENTINEL OUTCOME"))
+
+        var activeState = AppState()
+        activeState.activeSession = ActiveSession(
+            goal: "Active goal",
+            startedAt: reference.addingTimeInterval(-1_800)
+        )
+        let activeSummary = InsightsCalculator.summary(
+            state: activeState,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisMonth
+        )
+        let activeReport = InsightsMarkdownExporter.markdown(
+            summary: activeSummary,
+            projectTitle: "CodePulse",
+            calendar: calendar
+        )
+        XCTAssertTrue(activeReport.contains("## Goal vs Actual"))
+        XCTAssertTrue(activeReport.contains("No completed sessions in this period yet."))
+        XCTAssertFalse(activeReport.contains("Closed-loop rate:"))
     }
 
     func testMarkdownReportSupportsEveryTimeframeAndSelectedProjectLabel() {
@@ -809,6 +881,15 @@ final class ExportTests: XCTestCase {
                     InsightsBreakdown(id: "github:owner/repository", label: "owner/repository", duration: 5 * 3_600),
                     InsightsBreakdown(id: "github:owner/other", label: "owner/other", duration: 2 * 3_600)
                 ]
+            ),
+            goalOutcomeInsights: GoalOutcomeInsights(
+                completedSessionCount: 31,
+                sessionsWithGoal: 12,
+                sessionsWithOutcome: 10,
+                closedLoopCount: 8,
+                needsFollowUpCount: 4,
+                outcomeOnlyCount: 2,
+                untrackedCount: 17
             )
         )
     }
