@@ -31,6 +31,49 @@ final class AppWindowCoordinatorTests: XCTestCase {
             XCTFail("CodePulse did not install an application menu")
             return
         }
+        guard let editMenu = application.mainMenu?.item(withTitle: "Edit")?.submenu else {
+            XCTFail("CodePulse did not install an Edit menu")
+            return
+        }
+        guard editMenu.items.count == 8 else {
+            XCTFail("CodePulse Edit menu has unexpected item count")
+            return
+        }
+
+        let editItems = editMenu.items
+        XCTAssertEqual(editItems[0].title, "Undo")
+        XCTAssertEqual(editItems[0].action, NSSelectorFromString("undo:"))
+        XCTAssertEqual(editItems[0].keyEquivalent, "z")
+        XCTAssertEqual(editItems[0].keyEquivalentModifierMask, [.command])
+        XCTAssertNil(editItems[0].target)
+        XCTAssertEqual(editItems[1].title, "Redo")
+        XCTAssertEqual(editItems[1].action, NSSelectorFromString("redo:"))
+        XCTAssertEqual(editItems[1].keyEquivalent, "z")
+        XCTAssertEqual(editItems[1].keyEquivalentModifierMask, [.command, .shift])
+        XCTAssertNil(editItems[1].target)
+        XCTAssertTrue(editItems[2].isSeparatorItem)
+        XCTAssertEqual(editItems[3].title, "Cut")
+        XCTAssertEqual(editItems[3].action, NSSelectorFromString("cut:"))
+        XCTAssertEqual(editItems[3].keyEquivalent, "x")
+        XCTAssertEqual(editItems[3].keyEquivalentModifierMask, [.command])
+        XCTAssertNil(editItems[3].target)
+        XCTAssertEqual(editItems[4].title, "Copy")
+        XCTAssertEqual(editItems[4].action, NSSelectorFromString("copy:"))
+        XCTAssertEqual(editItems[4].keyEquivalent, "c")
+        XCTAssertEqual(editItems[4].keyEquivalentModifierMask, [.command])
+        XCTAssertNil(editItems[4].target)
+        XCTAssertEqual(editItems[5].title, "Paste")
+        XCTAssertEqual(editItems[5].action, NSSelectorFromString("paste:"))
+        XCTAssertEqual(editItems[5].keyEquivalent, "v")
+        XCTAssertEqual(editItems[5].keyEquivalentModifierMask, [.command])
+        XCTAssertNil(editItems[5].target)
+        XCTAssertTrue(editItems[6].isSeparatorItem)
+        XCTAssertEqual(editItems[7].title, "Select All")
+        XCTAssertEqual(editItems[7].action, NSSelectorFromString("selectAll:"))
+        XCTAssertEqual(editItems[7].keyEquivalent, "a")
+        XCTAssertEqual(editItems[7].keyEquivalentModifierMask, [.command])
+        XCTAssertNil(editItems[7].target)
+
         let settingsItem = appMenu.item(withTitle: "Settings…")
         let quitItem = appMenu.item(withTitle: "Quit CodePulse")
 

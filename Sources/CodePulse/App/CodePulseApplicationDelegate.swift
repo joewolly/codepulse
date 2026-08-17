@@ -38,6 +38,68 @@ final class CodePulseApplicationDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         NSApp.mainMenu = mainMenu
 
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.title = "Edit"
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        let undoItem = NSMenuItem(
+            title: "Undo",
+            action: NSSelectorFromString("undo:"),
+            keyEquivalent: "z"
+        )
+        undoItem.target = nil
+        undoItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(undoItem)
+
+        let redoItem = NSMenuItem(
+            title: "Redo",
+            action: NSSelectorFromString("redo:"),
+            keyEquivalent: "z"
+        )
+        redoItem.target = nil
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(.separator())
+
+        let cutItem = NSMenuItem(
+            title: "Cut",
+            action: NSSelectorFromString("cut:"),
+            keyEquivalent: "x"
+        )
+        cutItem.target = nil
+        cutItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(cutItem)
+
+        let copyItem = NSMenuItem(
+            title: "Copy",
+            action: NSSelectorFromString("copy:"),
+            keyEquivalent: "c"
+        )
+        copyItem.target = nil
+        copyItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(copyItem)
+
+        let pasteItem = NSMenuItem(
+            title: "Paste",
+            action: NSSelectorFromString("paste:"),
+            keyEquivalent: "v"
+        )
+        pasteItem.target = nil
+        pasteItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(pasteItem)
+        editMenu.addItem(.separator())
+
+        let selectAllItem = NSMenuItem(
+            title: "Select All",
+            action: NSSelectorFromString("selectAll:"),
+            keyEquivalent: "a"
+        )
+        selectAllItem.target = nil
+        selectAllItem.keyEquivalentModifierMask = [.command]
+        editMenu.addItem(selectAllItem)
+
         let aboutItem = NSMenuItem(
             title: "About CodePulse",
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
