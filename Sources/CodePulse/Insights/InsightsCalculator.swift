@@ -492,13 +492,45 @@ enum InsightsCalculator {
             in range: DateInterval,
             referenceDate: Date
         ) -> [DateInterval] {
+            guard let normalized = normalizedPauseIntervals(in: range, referenceDate: referenceDate) else {
+                return []
+            }
+
+            var segments: [DateInterval] = []
+            var cursor = normalized.effectiveRange.start
+            for pause in normalized.pauses {
+                if pause.start > cursor {
+                    segments.append(DateInterval(start: cursor, end: pause.start))
+                }
+                cursor = max(cursor, pause.end)
+            }
+            if cursor < normalized.effectiveRange.end {
+                segments.append(DateInterval(start: cursor, end: normalized.effectiveRange.end))
+            }
+            return segments.filter { $0.duration > 0 }
+        }
+
+        func activeDuration(in range: DateInterval, referenceDate: Date) -> TimeInterval {
+            guard let normalized = normalizedPauseIntervals(in: range, referenceDate: referenceDate) else {
+                return 0
+            }
+            let paused = normalized.pauses.reduce(into: 0) { total, pause in
+                total += pause.duration
+            }
+            return max(0, normalized.effectiveRange.duration - paused)
+        }
+
+        private func normalizedPauseIntervals(
+            in range: DateInterval,
+            referenceDate: Date
+        ) -> (effectiveRange: DateInterval, pauses: [DateInterval])? {
             let sessionEnd = endedAt ?? referenceDate
             let end = min(sessionEnd, referenceDate, range.end)
             let start = max(startedAt, range.start)
-            guard end > start else { return [] }
+            guard end > start else { return nil }
 
             let effectiveRange = DateInterval(start: start, end: end)
-            let pauses = pauseIntervals.compactMap { pause -> DateInterval? in
+            let clippedPauses = pauseIntervals.compactMap { pause -> DateInterval? in
                 let pauseStart = max(pause.startedAt, effectiveRange.start)
                 let pauseEnd = min(pause.endedAt ?? effectiveRange.end, effectiveRange.end)
                 guard pauseEnd > pauseStart else { return nil }
@@ -508,47 +540,23 @@ enum InsightsCalculator {
                 return lhs.end < rhs.end
             }
 
-            var mergedPauses: [DateInterval] = []
-            for pause in pauses {
-                guard let last = mergedPauses.last else {
-                    mergedPauses.append(pause)
+            var normalizedPauses: [DateInterval] = []
+            for pause in clippedPauses {
+                guard let last = normalizedPauses.last else {
+                    normalizedPauses.append(pause)
                     continue
                 }
                 if pause.start <= last.end {
-                    mergedPauses[mergedPauses.count - 1] = DateInterval(
+                    normalizedPauses[normalizedPauses.count - 1] = DateInterval(
                         start: last.start,
                         end: max(last.end, pause.end)
                     )
                 } else {
-                    mergedPauses.append(pause)
+                    normalizedPauses.append(pause)
                 }
             }
 
-            var segments: [DateInterval] = []
-            var cursor = effectiveRange.start
-            for pause in mergedPauses {
-                if pause.start > cursor {
-                    segments.append(DateInterval(start: cursor, end: pause.start))
-                }
-                cursor = max(cursor, pause.end)
-            }
-            if cursor < effectiveRange.end {
-                segments.append(DateInterval(start: cursor, end: effectiveRange.end))
-            }
-            return segments.filter { $0.duration > 0 }
-        }
-
-        func activeDuration(in range: DateInterval, referenceDate: Date) -> TimeInterval {
-            let sessionEnd = endedAt ?? referenceDate
-            let end = min(sessionEnd, referenceDate, range.end)
-            let start = max(startedAt, range.start)
-            guard end > start else { return 0 }
-
-            let effectiveRange = DateInterval(start: start, end: end)
-            let paused = pauseIntervals.reduce(into: 0) { total, interval in
-                total += interval.overlap(with: effectiveRange, referenceDate: referenceDate)
-            }
-            return max(0, effectiveRange.duration - paused)
+            return (effectiveRange: effectiveRange, pauses: normalizedPauses)
         }
     }
 

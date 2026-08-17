@@ -575,7 +575,9 @@ private struct FocusHourChart: View {
                     AxisMarks(values: Array(stride(from: 0, through: 20, by: 4))) { value in
                         AxisGridLine()
                         AxisTick()
-                        AxisValueLabel()
+                        if let hour = value.as(Int.self) {
+                            AxisValueLabel(hourLabel(hour))
+                        }
                     }
                 }
                 .frame(height: 150)

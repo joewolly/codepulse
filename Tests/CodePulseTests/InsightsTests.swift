@@ -862,6 +862,36 @@ final class InsightsTests: XCTestCase {
         })?.duration), 3_600, accuracy: 0.001)
     }
 
+    func testOverlappingPausesNormalizeAcrossSummaryFocusAndDailyActivity() {
+        let reference = date(year: 2023, month: 1, day: 4, hour: 12)
+        let session = makeSession(
+            projectID: UUID(),
+            projectName: "CodePulse",
+            start: date(year: 2023, month: 1, day: 4, hour: 9),
+            end: date(year: 2023, month: 1, day: 4, hour: 10),
+            pauses: [
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 20),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 40)
+                ),
+                PauseInterval(
+                    startedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 30),
+                    endedAt: date(year: 2023, month: 1, day: 4, hour: 9, minute: 50)
+                )
+            ]
+        )
+
+        let summary = summary(for: [session], referenceDate: reference)
+
+        XCTAssertEqual(summary.totalDuration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, 1_800, accuracy: 0.001)
+        XCTAssertEqual(
+            summary.dailyActivity.reduce(0.0) { $0 + $1.duration },
+            1_800,
+            accuracy: 0.001
+        )
+    }
+
     func testNonDefaultFirstWeekdayChangesWeekBoundary() {
         var sundayCalendar = calendar
         sundayCalendar.firstWeekday = 1
