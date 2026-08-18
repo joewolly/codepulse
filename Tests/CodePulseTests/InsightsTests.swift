@@ -630,6 +630,38 @@ final class InsightsTests: XCTestCase {
         }
     }
 
+    func testProjectOutcomeNarrativeFormatterUsesSingularAndPluralAllFollowUpGrammar() {
+        let cases: [(followUpCount: Int, expected: String)] = [
+            (
+                followUpCount: 1,
+                expected: "1 completed session accounts for 1m of active time. 1 goal was set. No outcomes were recorded. 1 goal session needs follow-up."
+            ),
+            (
+                followUpCount: 2,
+                expected: "2 completed sessions account for 2m of active time. 2 goals were set. No outcomes were recorded. 2 goal sessions need follow-up."
+            )
+        ]
+
+        for testCase in cases {
+            let insights = ProjectOutcomeInsights(
+                id: "id:all-follow-up-\(testCase.followUpCount)",
+                label: "Fixture",
+                completedSessionCount: testCase.followUpCount,
+                completedActiveDuration: TimeInterval(testCase.followUpCount * 60),
+                sessionsWithGoal: testCase.followUpCount,
+                sessionsWithOutcome: 0,
+                closedLoopCount: 0,
+                needsFollowUpCount: testCase.followUpCount,
+                outcomeOnlyCount: 0,
+                untrackedCount: 0,
+                recentOutcomes: [],
+                followUps: []
+            )
+
+            XCTAssertEqual(ProjectOutcomeNarrativeFormatter.narrative(for: insights), testCase.expected)
+        }
+    }
+
     func testGoalOutcomeInsightsUseTimeframeOverlap() {
         let reference = date(year: 2023, month: 1, day: 11, hour: 13)
         let crossing = CompletedSession(

@@ -70,7 +70,8 @@ enum ProjectOutcomeNarrativeFormatter {
     private static func goalStatePhrase(closedLoopCount: Int, needsFollowUpCount: Int) -> String {
         switch (closedLoopCount, needsFollowUpCount) {
         case (0, let followUp) where followUp > 0:
-            return "\(countLabel(followUp, singular: "goal session", plural: "goal sessions")) need follow-up"
+            let followUpVerb = followUp == 1 ? "needs" : "need"
+            return "\(countLabel(followUp, singular: "goal session", plural: "goal sessions")) \(followUpVerb) follow-up"
         case (let closed, 0) where closed > 0:
             return "\(countLabel(closed, singular: "goal session", plural: "goal sessions")) \(closed == 1 ? "is" : "are") closed loop"
         default:
