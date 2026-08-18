@@ -222,7 +222,7 @@ final class SessionStore: ObservableObject {
             case .paused:
                 phaseDescription = "paused"
             case .finishing:
-                phaseDescription = "session complete"
+                phaseDescription = "finishing"
             case .idle:
                 phaseDescription = "ready to start a session"
             }
