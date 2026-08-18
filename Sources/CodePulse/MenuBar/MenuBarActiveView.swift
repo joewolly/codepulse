@@ -91,8 +91,29 @@ struct MenuBarActiveView: View {
 }
 
 struct MenuBarMetadataViews: View {
+    static let maximumVisibleDeveloperToolContexts = 1
+
     let gitContext: GitSessionContext?
     let developerToolContexts: [DeveloperToolSessionContext]
+
+    var visibleDeveloperToolContexts: [DeveloperToolSessionContext] {
+        Array(developerToolContexts.prefix(Self.maximumVisibleDeveloperToolContexts))
+    }
+
+    var additionalDeveloperToolContextCount: Int {
+        max(0, developerToolContexts.count - visibleDeveloperToolContexts.count)
+    }
+
+    var additionalDeveloperToolContextTitle: String? {
+        guard additionalDeveloperToolContextCount > 0 else { return nil }
+        return "+\(additionalDeveloperToolContextCount) more"
+    }
+
+    var additionalDeveloperToolContextAccessibilityText: String? {
+        guard additionalDeveloperToolContextCount > 0 else { return nil }
+        let sessionLabel = additionalDeveloperToolContextCount == 1 ? "session" : "sessions"
+        return "\(additionalDeveloperToolContextCount) additional developer tool \(sessionLabel)"
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
@@ -100,9 +121,20 @@ struct MenuBarMetadataViews: View {
                 MenuBarGitMetadataCapsule(context: gitContext)
             }
 
-            ForEach(developerToolContexts) { context in
+            ForEach(visibleDeveloperToolContexts) { context in
                 MenuBarDeveloperToolMetadataCapsule(context: context)
             }
+
+            if let title = additionalDeveloperToolContextTitle,
+               let accessibilityText = additionalDeveloperToolContextAccessibilityText {
+                MenuBarMetadataCapsule(
+                    title: title,
+                    systemImage: "ellipsis",
+                    accessibilityText: accessibilityText
+                )
+                .fixedSize(horizontal: true, vertical: false)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

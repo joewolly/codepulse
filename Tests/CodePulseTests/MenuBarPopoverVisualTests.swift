@@ -66,6 +66,46 @@ final class MenuBarPopoverVisualTests: XCTestCase {
         XCTAssertFalse(store.menuBarAccessibilityText.contains("session complete"))
     }
 
+    func testMetadataBoundsMultipleDeveloperToolContextsAtPopoverWidth() throws {
+        let contexts = developerToolContexts(start: referenceDate.addingTimeInterval(-5_040), count: 5)
+        let metadata = MenuBarMetadataViews(
+            gitContext: gitContext(),
+            developerToolContexts: contexts
+        )
+
+        XCTAssertEqual(
+            metadata.visibleDeveloperToolContexts.map(\.displayName),
+            [contexts[0].displayName]
+        )
+        XCTAssertEqual(metadata.additionalDeveloperToolContextCount, 4)
+        XCTAssertEqual(metadata.additionalDeveloperToolContextTitle, "+4 more")
+        XCTAssertEqual(
+            metadata.additionalDeveloperToolContextAccessibilityText,
+            "4 additional developer tool sessions"
+        )
+
+        let outputDirectory = try outputDirectory()
+        let store = makeStore(
+            state: activeState(phase: .running, includeMetadata: true),
+            now: referenceDate
+        )
+        let coordinator = AppWindowCoordinator(store: store)
+        try render(
+            MenuBarPopoverView(onDismiss: {}, onOpenInsights: {})
+                .environmentObject(store)
+                .environmentObject(coordinator),
+            name: "bounded-metadata-light",
+            colorScheme: .light,
+            outputDirectory: outputDirectory
+        )
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: outputDirectory.appendingPathComponent("bounded-metadata-light.png").path
+            )
+        )
+    }
+
     private let referenceDate = Date(timeIntervalSince1970: 1_770_000_000)
 
     private func makeStore(state: AppState, now: Date) -> SessionStore {
@@ -98,30 +138,38 @@ final class MenuBarPopoverVisualTests: XCTestCase {
         }
 
         if includeMetadata {
-            session.gitContext = GitSessionContext(
-                repositoryRoot: "/Users/demo/Projects/CodePulse",
-                branchAtStart: "codex/ui-modernization-phase1",
-                startHeadSHA: "0123456789abcdef",
-                startWasDetached: false,
-                preExistingWorkingTreePaths: []
-            )
-            session.developerToolContexts = [
-                DeveloperToolSessionContext(
-                    tool: .codex,
-                    externalSessionID: "visual-codex",
-                    workingDirectory: "/Users/demo/Projects/CodePulse",
-                    firstActivityAt: start.addingTimeInterval(120),
-                    lastActivityAt: start.addingTimeInterval(2_400),
-                    model: "GPT-5.6 Sol",
-                    profile: "Builder",
-                    eventCount: 8
-                )
-            ]
+            session.gitContext = gitContext()
+            session.developerToolContexts = developerToolContexts(start: start, count: 5)
         }
 
         var state = AppState()
         state.activeSession = session
         return state
+    }
+
+    private func gitContext() -> GitSessionContext {
+        GitSessionContext(
+            repositoryRoot: "/Users/demo/Projects/CodePulse",
+            branchAtStart: "codex/ui-modernization-phase1",
+            startHeadSHA: "0123456789abcdef",
+            startWasDetached: false,
+            preExistingWorkingTreePaths: []
+        )
+    }
+
+    private func developerToolContexts(start: Date, count: Int) -> [DeveloperToolSessionContext] {
+        (0..<count).map { index in
+            DeveloperToolSessionContext(
+                tool: index.isMultiple(of: 2) ? .codex : .opencode,
+                externalSessionID: "visual-tool-\(index)",
+                workingDirectory: "/Users/demo/Projects/CodePulse",
+                firstActivityAt: start.addingTimeInterval(TimeInterval(index * 120)),
+                lastActivityAt: start.addingTimeInterval(TimeInterval(index * 600 + 2_400)),
+                model: index == 0 ? "GPT-5.6 Sol" : "Model \(index + 1)",
+                profile: index == 0 ? "Builder" : "Profile \(index + 1)",
+                eventCount: index + 2
+            )
+        }
     }
 
     private func longContentState() -> AppState {
