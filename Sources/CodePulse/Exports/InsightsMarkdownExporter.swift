@@ -23,6 +23,7 @@ struct InsightsMarkdownExporter {
         guard summary.hasActivity else {
             lines += ["", "No CodePulse activity was recorded for this selection."]
             appendGoalOutcomeInsights(&lines, summary.goalOutcomeInsights)
+            appendProjectOutcomeInsights(&lines, summary.projectOutcomeInsights, calendar: calendar)
             appendFocusInsights(
                 &lines,
                 summary.focusInsights,
@@ -40,6 +41,7 @@ struct InsightsMarkdownExporter {
         lines.append("- Longest Session: \(summary.sessionCount == 0 ? "—" : CodePulseFormatting.duration(summary.longestSessionDuration))")
 
         appendGoalOutcomeInsights(&lines, summary.goalOutcomeInsights)
+        appendProjectOutcomeInsights(&lines, summary.projectOutcomeInsights, calendar: calendar)
         appendFocusInsights(
             &lines,
             summary.focusInsights,
@@ -104,6 +106,54 @@ struct InsightsMarkdownExporter {
         ]
         for value in activity {
             lines.append("| \(date(value.date, calendar: calendar)) | \(CodePulseFormatting.duration(value.duration)) |")
+        }
+    }
+
+    private static func appendProjectOutcomeInsights(
+        _ lines: inout [String],
+        _ projects: [ProjectOutcomeInsights],
+        calendar: Calendar
+    ) {
+        lines += ["", "## Project Outcomes", ProjectOutcomeNarrativeFormatter.sectionCaption]
+        guard !projects.isEmpty else {
+            lines.append("No completed project outcomes in this period yet.")
+            return
+        }
+
+        for project in projects {
+            lines += ["", "### \(escape(project.label))", ProjectOutcomeNarrativeFormatter.narrative(for: project)]
+
+            if !project.recentOutcomes.isEmpty {
+                lines += ["", "#### Recent Outcomes"]
+                for entry in project.recentOutcomes {
+                    lines.append("- \(date(entry.endedAt, calendar: calendar))")
+                    if let goal = entry.goal {
+                        lines.append("  - Goal: \(escape(goal))")
+                    }
+                    if let outcome = entry.outcome {
+                        lines.append("  - Actual: \(escape(outcome))")
+                    }
+                }
+            }
+            if project.outcomeOverflowCount > 0 {
+                let label = project.outcomeOverflowCount == 1 ? "outcome is" : "outcomes are"
+                lines.append("- \(project.outcomeOverflowCount) additional recorded \(label) not shown.")
+            }
+
+            if !project.followUps.isEmpty {
+                lines += ["", "#### Needs Follow-Up"]
+                for entry in project.followUps {
+                    lines.append("- \(date(entry.endedAt, calendar: calendar))")
+                    if let goal = entry.goal {
+                        lines.append("  - Goal: \(escape(goal))")
+                    }
+                    lines.append("  - Actual: not recorded")
+                }
+            }
+            if project.followUpOverflowCount > 0 {
+                let label = project.followUpOverflowCount == 1 ? "goal is" : "goals are"
+                lines.append("- \(project.followUpOverflowCount) additional \(label) not shown as needing follow-up.")
+            }
         }
     }
 
@@ -297,6 +347,8 @@ struct InsightsMarkdownExporter {
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
         for character in ["\\", "|", "*", "_", "`", "[", "]"] {
             result = result.replacingOccurrences(of: character, with: "\\\(character)")
         }

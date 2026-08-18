@@ -17,15 +17,17 @@ notarization.
 
 ## Actionable insights
 
-Insights today is a read-only summary of the past. The goal of this thread is
-to turn recorded data into guidance without any cloud involvement.
+Insights is a read-only, local view of recorded work. The currently planned
+Actionable Insights set is implemented: deterministic summaries and reminders
+make the existing timing, Goal/Actual, and focus signals easier to inspect
+without cloud involvement or AI interpretation.
 
 | Feature | Status | Notes |
 | --- | --- | --- |
 | Weekly / daily local digest | Implemented | Summarize active time, sessions, projects, work types, developer-tool participation, and aggregate missing-outcome follow-up reminders for the period. Local notification; no account needed. |
-| Goal vs. actual tracking | Implemented | Insights aggregates, the History follow-up/closed-loop workflow, Markdown aggregate export, and a digest follow-up signal compare recorded goals with outcomes without judging achievement. |
+| Goal vs Actual tracking | Implemented | Insights aggregates, the History follow-up/closed-loop workflow, Markdown aggregate export, and a digest follow-up signal compare recorded goals with outcomes without judging achievement. |
 | Focus trends and streaks | Implemented | Deterministic Focus Patterns provide focus blocks, sustained-focus share, rapid identified project switches, a best focus day, and local time-of-day distribution. This version has no productivity score and does not claim to measure deep-work quality or cognitive cost. |
-| Per-project outcome narrative | Considering | What got finished vs. abandoned per project, per period. Draws on existing goal/outcome text; formatting needs care to stay useful, not fluffy. |
+| Per-project outcome narrative | Implemented | Project Outcomes provides deterministic per-project summaries combining completed-session duration, Goal-vs-Actual state, recent recorded Goal/Actual pairs, and missing-outcome follow-up without AI or success/failure inference. |
 
 All computation stays local and deterministic, consistent with the existing
 Markdown report export.

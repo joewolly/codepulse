@@ -114,9 +114,12 @@ and pull-request snapshots, and user-authored goals/outcomes are included when
 they are part of the selected session context.
 
 Insights Markdown reports contain the currently selected local timeframe and
-project summary and reuse the existing in-memory Insights calculations. Reports
-are deterministic local files; CodePulse does not use AI or upload CSV or
-Markdown exports to a cloud service.
+project summary and reuse the existing in-memory Insights calculations. The
+Project Outcomes section may include a bounded set of user-authored Goal/Actual
+text shown by Insights when the user explicitly chooses **Export Report…**.
+This is local and user-initiated; CodePulse does not use AI or upload CSV or
+Markdown exports to a cloud service. Goal vs Actual and Focus Patterns remain
+aggregate-only.
 
 ## Local daily and weekly digests
 
@@ -160,10 +163,15 @@ perform GitHub mutations. Downloaded updates are authenticated with an Ed25519
 signature before installation.
 
 Insights are derived in memory from the local session records already described
-above. Timeframe totals, counts, project/work-type
-breakdowns, developer-tool participation, Git totals, GitHub repository/PR
-aggregates, and Focus Patterns are not stored in a separate analytics database
-or uploaded. Focus Patterns use only existing session timestamps, pause
+above. Timeframe totals, counts, project/work-type breakdowns,
+developer-tool participation, Git totals, GitHub repository/PR aggregates,
+Focus Patterns, and Project Outcomes are not stored in a separate analytics
+database or uploaded. Project Outcomes uses only completed-session timestamps,
+project identity, clipped active duration, and the Goal/Outcome text already
+recorded by the user. It performs no semantic interpretation: CodePulse does
+not decide whether work succeeded, failed, finished, or was abandoned, and it
+creates no new telemetry or database. Focus Patterns use only existing session
+timestamps, pause
 intervals, project identity, session type, selected timeframe, and Calendar to
 derive active segments, focus blocks, sustained-focus time/share, project
 switches, and local hour/day buckets. They do not inspect application or window

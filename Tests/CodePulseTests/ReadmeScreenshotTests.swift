@@ -83,7 +83,7 @@ final class ReadmeScreenshotTests: XCTestCase {
         try render(
             InsightsView()
                 .environmentObject(fixture.makeStore()),
-            size: CGSize(width: 760, height: 760),
+            size: CGSize(width: 760, height: 1400),
             name: "insights",
             outputDirectory: outputDirectory
         )
@@ -324,7 +324,7 @@ private struct ScreenshotFixture {
                 projectName: "Nova Editor",
                 type: .review,
                 goal: "Review keyboard navigation",
-                outcome: "Closed the remaining accessibility gaps.",
+                outcome: nil,
                 day: 10,
                 startHour: 13,
                 endHour: 14,
@@ -436,7 +436,7 @@ private struct ScreenshotFixture {
         projectName: String,
         type: SessionType,
         goal: String,
-        outcome: String,
+        outcome: String?,
         day: Int,
         startHour: Int,
         startMinute: Int = 0,

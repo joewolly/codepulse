@@ -29,6 +29,11 @@ struct InsightsView: View {
                     if summary.hasActivity {
                         InsightSummarySection(summary: summary)
                         GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
+                        ProjectOutcomeInsightSection(
+                            insights: summary.projectOutcomeInsights,
+                            isAllProjects: project == .allProjects,
+                            calendar: store.calendar
+                        )
                         FocusPatternsSection(
                             insights: summary.focusInsights,
                             comparison: summary.comparisonFocusInsights,
@@ -60,6 +65,11 @@ struct InsightsView: View {
                         }
                     } else {
                         GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
+                        ProjectOutcomeInsightSection(
+                            insights: summary.projectOutcomeInsights,
+                            isAllProjects: project == .allProjects,
+                            calendar: store.calendar
+                        )
                         InsightsEmptyState(
                             timeframe: timeframe,
                             projectTitle: project.title(options: calculatedProjectOptions),
@@ -353,6 +363,202 @@ private struct GoalOutcomeInsightSection: View {
 
     private func percentage(_ value: Double) -> String {
         "\(Int((value * 100).rounded()))%"
+    }
+}
+
+private struct ProjectOutcomeInsightSection: View {
+    let insights: [ProjectOutcomeInsights]
+    let isAllProjects: Bool
+    let calendar: Calendar
+
+    private let overviewProjectLimit = 6
+
+    private var visibleInsights: [ProjectOutcomeInsights] {
+        isAllProjects ? Array(insights.prefix(overviewProjectLimit)) : insights
+    }
+
+    var body: some View {
+        InsightSection(title: "Project Outcomes", systemImage: "list.bullet.clipboard") {
+            Text(ProjectOutcomeNarrativeFormatter.sectionCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if visibleInsights.isEmpty {
+                Text("No completed project outcomes in this period yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("No completed project outcomes in this period yet")
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(visibleInsights) { project in
+                        ProjectOutcomeCard(
+                            insights: project,
+                            calendar: calendar,
+                            entryLimit: isAllProjects ? 1 : 3
+                        )
+                    }
+                }
+                if isAllProjects, insights.count > overviewProjectLimit {
+                    Text("Showing \(overviewProjectLimit) of \(insights.count) project summaries. Choose a project above to inspect it individually.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Showing \(overviewProjectLimit) of \(insights.count) project summaries. Choose a project above to inspect it individually.")
+                }
+            }
+        }
+    }
+}
+
+private struct ProjectOutcomeCard: View {
+    let insights: ProjectOutcomeInsights
+    let calendar: Calendar
+    let entryLimit: Int
+
+    private var outcomeEntries: ArraySlice<ProjectOutcomeEntry> {
+        insights.recentOutcomes.prefix(entryLimit)
+    }
+
+    private var followUpEntries: ArraySlice<ProjectOutcomeEntry> {
+        insights.followUps.prefix(entryLimit)
+    }
+
+    private var outcomeOverflow: Int {
+        max(0, insights.recordedOutcomeCount - outcomeEntries.count)
+    }
+
+    private var followUpOverflow: Int {
+        max(0, insights.needsFollowUpCount - followUpEntries.count)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(insights.label)
+                .font(.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Text(ProjectOutcomeNarrativeFormatter.narrative(for: insights))
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !outcomeEntries.isEmpty {
+                Text("Recent Outcomes")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(outcomeEntries) { entry in
+                    ProjectOutcomeEntryView(entry: entry, calendar: calendar)
+                }
+                if outcomeOverflow > 0 {
+                    Text("+\(outcomeOverflow) more recorded \(outcomeOverflow == 1 ? "outcome" : "outcomes") in this period")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !followUpEntries.isEmpty {
+                Text("Needs Follow-Up")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(followUpEntries) { entry in
+                    FollowUpEntryView(entry: entry, calendar: calendar)
+                }
+                if followUpOverflow > 0 {
+                    Text("+\(followUpOverflow) more \(followUpOverflow == 1 ? "goal" : "goals") need follow-up in this period")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Record missing outcomes from History.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(insights.label)
+    }
+}
+
+private struct ProjectOutcomeEntryView: View {
+    let entry: ProjectOutcomeEntry
+    let calendar: Calendar
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(shortDate(entry.endedAt))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let goal = entry.goal {
+                Text("Goal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(goal)
+                    .font(.subheadline)
+                    .lineLimit(3)
+            }
+            if let outcome = entry.outcome {
+                Text("Actual")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(outcome)
+                    .font(.subheadline)
+                    .lineLimit(3)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        var parts = [shortDate(entry.endedAt)]
+        if let goal = entry.goal { parts.append("Goal: \(goal)") }
+        if let outcome = entry.outcome { parts.append("Actual: \(outcome)") }
+        return parts.joined(separator: ", ")
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
+    }
+}
+
+private struct FollowUpEntryView: View {
+    let entry: ProjectOutcomeEntry
+    let calendar: Calendar
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(shortDate(entry.endedAt))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Goal")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(entry.goal ?? "")
+                .font(.subheadline)
+                .lineLimit(3)
+            Text("Needs outcome")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(shortDate(entry.endedAt)), Goal: \(entry.goal ?? ""), Needs outcome")
+    }
+
+    private func shortDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
     }
 }
 

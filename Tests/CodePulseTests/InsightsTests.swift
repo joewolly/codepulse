@@ -457,6 +457,211 @@ final class InsightsTests: XCTestCase {
         XCTAssertNil(noGoalInsights.closedLoopRate)
     }
 
+    func testProjectOutcomeInsightsReuseProjectIdentityAndAggregatePartition() throws {
+        let reference = date(year: 2023, month: 1, day: 11, hour: 18)
+        let trackedID = UUID(uuidString: "00000000-0000-0000-0000-00000000aa01")!
+
+        func completed(
+            id: Int,
+            projectID: UUID?,
+            projectName: String?,
+            goal: String?,
+            outcome: String?,
+            startHour: Int
+        ) -> CompletedSession {
+            let start = date(year: 2023, month: 1, day: 10, hour: startHour)
+            return CompletedSession(
+                id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", id))!,
+                projectID: projectID,
+                projectName: projectName,
+                goal: goal,
+                outcome: outcome,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(3_600),
+                pauseIntervals: []
+            )
+        }
+
+        var state = AppState()
+        state.completedSessions = [
+            completed(id: 1, projectID: trackedID, projectName: "Old Name", goal: "  Ship feature  ", outcome: "  Recorded result  ", startHour: 9),
+            completed(id: 2, projectID: trackedID, projectName: "New Name", goal: "Follow up", outcome: nil, startHour: 10),
+            completed(id: 3, projectID: nil, projectName: "Legacy", goal: nil, outcome: "Outcome only", startHour: 11),
+            completed(id: 4, projectID: nil, projectName: "Legacy", goal: nil, outcome: nil, startHour: 12),
+            completed(id: 5, projectID: nil, projectName: "New Name", goal: "Separate identity", outcome: nil, startHour: 13),
+            completed(id: 6, projectID: nil, projectName: nil, goal: nil, outcome: nil, startHour: 14)
+        ]
+        state.activeSession = ActiveSession(
+            projectID: trackedID,
+            projectName: "New Name",
+            goal: "Active goal",
+            startedAt: date(year: 2023, month: 1, day: 11, hour: 16)
+        )
+
+        let summary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference
+        )
+        let projects = summary.projectOutcomeInsights
+
+        XCTAssertEqual(projects.count, 4)
+        XCTAssertEqual(summary.goalOutcomeInsights.completedSessionCount, projects.reduce(0) { $0 + $1.completedSessionCount })
+        XCTAssertEqual(summary.goalOutcomeInsights.sessionsWithGoal, projects.reduce(0) { $0 + $1.sessionsWithGoal })
+        XCTAssertEqual(summary.goalOutcomeInsights.sessionsWithOutcome, projects.reduce(0) { $0 + $1.sessionsWithOutcome })
+        XCTAssertEqual(summary.goalOutcomeInsights.closedLoopCount, projects.reduce(0) { $0 + $1.closedLoopCount })
+        XCTAssertEqual(summary.goalOutcomeInsights.needsFollowUpCount, projects.reduce(0) { $0 + $1.needsFollowUpCount })
+        XCTAssertEqual(summary.goalOutcomeInsights.outcomeOnlyCount, projects.reduce(0) { $0 + $1.outcomeOnlyCount })
+        XCTAssertEqual(summary.goalOutcomeInsights.untrackedCount, projects.reduce(0) { $0 + $1.untrackedCount })
+
+        XCTAssertEqual(summary.goalOutcomeInsights.completedSessionCount, 6)
+        XCTAssertEqual(summary.goalOutcomeInsights.sessionsWithGoal, 3)
+        XCTAssertEqual(summary.goalOutcomeInsights.sessionsWithOutcome, 2)
+        XCTAssertEqual(summary.goalOutcomeInsights.closedLoopCount, 1)
+        XCTAssertEqual(summary.goalOutcomeInsights.needsFollowUpCount, 2)
+        XCTAssertEqual(summary.goalOutcomeInsights.outcomeOnlyCount, 1)
+        XCTAssertEqual(summary.goalOutcomeInsights.untrackedCount, 2)
+
+        let tracked = try XCTUnwrap(projects.first(where: { $0.id == "id:\(trackedID.uuidString)" }))
+        XCTAssertEqual(tracked.label, "Old Name")
+        XCTAssertEqual(tracked.completedSessionCount, 2)
+        XCTAssertEqual(tracked.recentOutcomes.count, 1)
+        XCTAssertEqual(tracked.recentOutcomes.first?.goal, "Ship feature")
+        XCTAssertEqual(tracked.recentOutcomes.first?.outcome, "Recorded result")
+        XCTAssertEqual(tracked.followUps.first?.goal, "Follow up")
+
+        let historical = try XCTUnwrap(projects.first(where: { $0.id == "name:Legacy" }))
+        XCTAssertEqual(historical.completedSessionCount, 2)
+        XCTAssertEqual(historical.outcomeOnlyCount, 1)
+        XCTAssertEqual(historical.recentOutcomes.first?.goal, nil)
+        XCTAssertEqual(historical.recentOutcomes.first?.outcome, "Outcome only")
+        XCTAssertNotEqual(tracked.id, "name:New Name")
+
+        let filtered = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            project: .projectID(trackedID)
+        )
+        XCTAssertEqual(filtered.projectOutcomeInsights.map(\.id), ["id:\(trackedID.uuidString)"])
+        XCTAssertEqual(filtered.projectOutcomeInsights.first?.completedSessionCount, 2)
+
+        let noProject = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            project: .noProject
+        )
+        XCTAssertEqual(noProject.projectOutcomeInsights.map(\.id), ["no-project"])
+        XCTAssertEqual(noProject.projectOutcomeInsights.first?.untrackedCount, 1)
+    }
+
+    func testProjectOutcomeEntriesAreBoundedNewestFirstAndExposeOverflow() {
+        let reference = date(year: 2023, month: 1, day: 15, hour: 18)
+        let projectID = UUID(uuidString: "00000000-0000-0000-0000-00000000bb01")!
+        let outcomeSessions = (0..<5).map { index in
+            let start = date(year: 2023, month: 1, day: 10 + index, hour: 9)
+            return CompletedSession(
+                id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 100 + index))!,
+                projectID: projectID,
+                projectName: "Bounded",
+                goal: "Goal \(index)",
+                outcome: "Actual \(index)",
+                startedAt: start,
+                endedAt: start.addingTimeInterval(1_800),
+                pauseIntervals: []
+            )
+        }
+        let followUps = (0..<4).map { index in
+            let start = date(year: 2023, month: 1, day: 10 + index, hour: 15)
+            return CompletedSession(
+                id: UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 200 + index))!,
+                projectID: projectID,
+                projectName: "Bounded",
+                goal: "Follow-up \(index)",
+                outcome: nil,
+                startedAt: start,
+                endedAt: start.addingTimeInterval(1_800),
+                pauseIntervals: []
+            )
+        }
+        var state = AppState()
+        state.completedSessions = outcomeSessions + followUps
+
+        let project = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            project: .projectID(projectID)
+        ).projectOutcomeInsights[0]
+
+        XCTAssertEqual(project.completedSessionCount, 9)
+        XCTAssertEqual(project.recentOutcomes.count, 3)
+        XCTAssertEqual(project.recentOutcomes.map(\.outcome), ["Actual 4", "Actual 3", "Actual 2"])
+        XCTAssertEqual(project.followUps.count, 3)
+        XCTAssertEqual(project.followUps.map(\.goal), ["Follow-up 3", "Follow-up 2", "Follow-up 1"])
+        XCTAssertEqual(project.outcomeOverflowCount, 2)
+        XCTAssertEqual(project.followUpOverflowCount, 1)
+    }
+
+    func testProjectOutcomeNarrativeFormatterUsesDeterministicNonSubjectiveGrammar() {
+        let insights = ProjectOutcomeInsights(
+            id: "id:fixture",
+            label: "Fixture",
+            completedSessionCount: 4,
+            completedActiveDuration: 3_120,
+            sessionsWithGoal: 3,
+            sessionsWithOutcome: 3,
+            closedLoopCount: 2,
+            needsFollowUpCount: 1,
+            outcomeOnlyCount: 1,
+            untrackedCount: 1,
+            recentOutcomes: [],
+            followUps: []
+        )
+
+        let narrative = ProjectOutcomeNarrativeFormatter.narrative(for: insights)
+        XCTAssertEqual(
+            narrative,
+            "4 completed sessions account for 52m of active time. 3 goals were set and 3 outcomes were recorded. 2 goal sessions are closed loop; 1 goal session needs follow-up. 1 outcome was recorded without a goal. 1 completed session had neither a goal nor outcome."
+        )
+        for word in ["successful", "failed", "abandoned", "productive", "efficient"] {
+            XCTAssertFalse(narrative.localizedCaseInsensitiveContains(word))
+        }
+    }
+
+    func testProjectOutcomeNarrativeFormatterUsesSingularAndPluralAllFollowUpGrammar() {
+        let cases: [(followUpCount: Int, expected: String)] = [
+            (
+                followUpCount: 1,
+                expected: "1 completed session accounts for 1m of active time. 1 goal was set. No outcomes were recorded. 1 goal session needs follow-up."
+            ),
+            (
+                followUpCount: 2,
+                expected: "2 completed sessions account for 2m of active time. 2 goals were set. No outcomes were recorded. 2 goal sessions need follow-up."
+            )
+        ]
+
+        for testCase in cases {
+            let insights = ProjectOutcomeInsights(
+                id: "id:all-follow-up-\(testCase.followUpCount)",
+                label: "Fixture",
+                completedSessionCount: testCase.followUpCount,
+                completedActiveDuration: TimeInterval(testCase.followUpCount * 60),
+                sessionsWithGoal: testCase.followUpCount,
+                sessionsWithOutcome: 0,
+                closedLoopCount: 0,
+                needsFollowUpCount: testCase.followUpCount,
+                outcomeOnlyCount: 0,
+                untrackedCount: 0,
+                recentOutcomes: [],
+                followUps: []
+            )
+
+            XCTAssertEqual(ProjectOutcomeNarrativeFormatter.narrative(for: insights), testCase.expected)
+        }
+    }
+
     func testGoalOutcomeInsightsUseTimeframeOverlap() {
         let reference = date(year: 2023, month: 1, day: 11, hour: 13)
         let crossing = CompletedSession(
@@ -490,6 +695,13 @@ final class InsightsTests: XCTestCase {
         ).goalOutcomeInsights
         XCTAssertEqual(thisWeek.completedSessionCount, 1)
         XCTAssertEqual(thisWeek.closedLoopCount, 1)
+        let thisWeekSummary = InsightsCalculator.summary(
+            state: state,
+            calendar: calendar,
+            referenceDate: reference,
+            timeframe: .thisWeek
+        )
+        XCTAssertEqual(try! XCTUnwrap(thisWeekSummary.projectOutcomeInsights.first?.completedActiveDuration), 3_600, accuracy: 0.001)
 
         let lastWeek = InsightsCalculator.summary(
             state: state,

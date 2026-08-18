@@ -33,7 +33,7 @@ UI framework for explicitly managed windows.
 
 ### Insights
 
-<img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, Goal vs Actual, Focus Patterns, activity, work types, and project totals" width="760">
+<img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, Goal vs Actual, Project Outcomes, Focus Patterns, activity, work types, and project totals" width="760">
 
 ## What it does
 
@@ -60,6 +60,10 @@ UI framework for explicitly managed windows.
   time and share, rapid identified project switches, and local time-of-day
   patterns from existing session timing and pause data; they do not measure human
   productivity, cognition, or efficiency.
+- Project Outcomes adds deterministic per-project summaries for completed
+  sessions, including Goal-vs-Actual states, recent recorded Goal/Actual pairs,
+  and goals needing a recorded outcome. It uses no AI and never decides whether
+  work succeeded, failed, finished, or was abandoned.
 - Exports the currently filtered History as standard UTF-8 CSV.
 - Exports the currently selected Insights timeframe and project as a deterministic
   local Markdown report.
@@ -96,14 +100,18 @@ update check.
 4. Finish the session, record an optional outcome, and save it to History.
 5. Open History to search, filter, or edit saved sessions, or open Insights to
    review local activity and context-derived summaries.
-6. Open Insights to review Focus Patterns such as longest and sustained focus
-   blocks, project switches, and local time-of-day distribution. These are
-   observable timing summaries, not a productivity score.
-7. If desired, create a **Settings → Session Presets** entry for a reusable
+6. Open Insights to review Goal vs Actual and Project Outcomes. Project Outcomes
+   shows the goals and outcomes you recorded for completed sessions, with missing
+   outcomes called **Needs Follow-Up**. These states describe recorded text; they
+   do not classify success, failure, completion, or abandonment.
+7. Review Focus Patterns such as longest and sustained focus blocks, project
+   switches, and local time-of-day distribution. These are observable timing
+   summaries, not a productivity score.
+8. If desired, create a **Settings → Session Presets** entry for a reusable
    Quick Start, then open **Settings → Integrations** to enable Codex or OpenCode
    context enrichment. Integrations are optional and separate from **Settings →
    Session Automation**, which is also optional and disabled by default.
-7. For a shell, Shortcuts **Run Shell Script**, Raycast, Alfred, Stream Deck, or
+9. For a shell, Shortcuts **Run Shell Script**, Raycast, Alfred, Stream Deck, or
    IDE task, use the bundled `codepulsectl` command described below.
 
 Projects are optional. Adding a project grants CodePulse access only to the
@@ -165,8 +173,10 @@ user-selected local destination; an active session is not included.
 
 Use **Insights → Export Report…** to save the currently selected timeframe and
 project as a deterministic Markdown report. The report uses the existing local
-Insights summary, including Focus Patterns, and contains no AI-generated
-commentary or cloud data.
+Insights summary, including Project Outcomes and Focus Patterns. Project
+Outcomes may include the bounded user-authored Goal/Actual text shown in the
+current view because you explicitly chose the export; this text is not added to
+notifications or uploaded, and the report contains no AI-generated commentary.
 
 Both exports are created locally at the destination you choose. CodePulse does
 not upload CSV or Markdown exports.
