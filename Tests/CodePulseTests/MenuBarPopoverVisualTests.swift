@@ -118,7 +118,9 @@ final class MenuBarPopoverVisualTests: XCTestCase {
     }
 
     private func idleState() -> AppState {
-        AppState()
+        AppState(sessionPresets: [
+            SessionPreset(name: "Focused coding", goal: "Implement the Phase 1 menu-bar popover")
+        ])
     }
 
     private func activeState(phase: SessionPhase, includeMetadata: Bool) -> AppState {
@@ -221,7 +223,7 @@ final class MenuBarPopoverVisualTests: XCTestCase {
         colorScheme: ColorScheme,
         outputDirectory: URL
     ) throws {
-        let size = CGSize(width: 350, height: 520)
+        let size = CGSize(width: MenuBarPopoverView.standardWidth, height: 480)
         let root = content
             .frame(width: size.width, height: size.height)
             .background(Color(nsColor: .windowBackgroundColor))

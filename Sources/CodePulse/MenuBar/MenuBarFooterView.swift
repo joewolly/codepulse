@@ -10,16 +10,13 @@ struct MenuBarFooterView: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Today")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(CodePulseFormatting.menuBarDuration(store.todayTotal()))
-                    .font(.body.weight(.medium).monospacedDigit())
-                    .accessibilityLabel("Today's focus time")
-                    .accessibilityValue(CodePulseFormatting.menuBarDuration(store.todayTotal()))
-            }
+            let todayDuration = CodePulseFormatting.menuBarDuration(store.todayTotal())
+            Text("Today: \(todayDuration)")
+                .font(.caption.weight(.medium).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityLabel("Today's focus time")
+                .accessibilityValue(todayDuration)
 
             Spacer(minLength: 4)
 

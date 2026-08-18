@@ -24,16 +24,10 @@ struct MenuBarActiveView: View {
             MenuBarGoalBlock(goal: store.activeSession?.goal)
 
             if hasMetadata {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Context")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    MenuBarMetadataViews(
-                        gitContext: store.activeSession?.gitContext,
-                        developerToolContexts: store.activeSession?.developerToolContexts ?? []
-                    )
-                }
+                MenuBarMetadataViews(
+                    gitContext: store.activeSession?.gitContext,
+                    developerToolContexts: store.activeSession?.developerToolContexts ?? []
+                )
             }
 
             HStack(spacing: 10) {
@@ -76,12 +70,6 @@ struct MenuBarActiveView: View {
                 .accessibilityIdentifier("finish-session-button")
             }
 
-            Label(
-                "Started \(CodePulseFormatting.time(store.activeSession?.startedAt ?? store.now))",
-                systemImage: "clock"
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -115,14 +103,18 @@ struct MenuBarMetadataViews: View {
         return "\(additionalDeveloperToolContextCount) additional developer tool \(sessionLabel)"
     }
 
+    private var metadataTextWidth: CGFloat {
+        additionalDeveloperToolContextCount > 0 ? 100 : (gitContext == nil ? 180 : 150)
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
             if let gitContext {
-                MenuBarGitMetadataCapsule(context: gitContext)
+                MenuBarGitMetadataCapsule(context: gitContext, maximumTextWidth: metadataTextWidth)
             }
 
             ForEach(visibleDeveloperToolContexts) { context in
-                MenuBarDeveloperToolMetadataCapsule(context: context)
+                MenuBarDeveloperToolMetadataCapsule(context: context, maximumTextWidth: metadataTextWidth)
             }
 
             if let title = additionalDeveloperToolContextTitle,
@@ -130,7 +122,8 @@ struct MenuBarMetadataViews: View {
                 MenuBarMetadataCapsule(
                     title: title,
                     systemImage: "ellipsis",
-                    accessibilityText: accessibilityText
+                    accessibilityText: accessibilityText,
+                    maximumTextWidth: metadataTextWidth
                 )
                 .fixedSize(horizontal: true, vertical: false)
             }

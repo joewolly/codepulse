@@ -2,6 +2,10 @@ import AppKit
 import SwiftUI
 
 struct MenuBarPopoverView: View {
+    static let standardWidth: CGFloat = 390
+    private static let contentWidth: CGFloat = standardWidth - 32
+    private static let exceptionalMaxHeight: CGFloat = 440
+
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -17,43 +21,54 @@ struct MenuBarPopoverView: View {
     var body: some View {
         let dismissPopover = onDismiss ?? { dismiss() }
 
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 0) {
-                if let lifecycleErrorMessage = store.lifecycleErrorMessage,
-                   !store.isInRecoveryMode {
-                    MenuBarLifecycleErrorView(
-                        message: lifecycleErrorMessage,
-                        dismiss: store.dismissLifecycleError
-                    )
-                    .padding(.bottom, 12)
+        Group {
+            if store.isInRecoveryMode || store.phase == .finishing || store.lifecycleErrorMessage != nil {
+                ScrollView(.vertical) {
+                    popoverContent(dismissPopover: dismissPopover)
                 }
-
-                if store.isInRecoveryMode {
-                    RecoveryUnavailablePopoverView {
-                        windowCoordinator.showRecovery()
-                    }
-                } else {
-                    switch store.phase {
-                    case .idle:
-                        MenuBarIdleView()
-                    case .running, .paused:
-                        MenuBarActiveView()
-                    case .finishing:
-                        MenuBarFinishingView()
-                    }
-
-                    Divider()
-                        .padding(.vertical, 14)
-
-                    MenuBarFooterView(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
-                }
+                .frame(maxHeight: Self.exceptionalMaxHeight)
+            } else {
+                popoverContent(dismissPopover: dismissPopover)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxHeight: 484)
-        .padding(.horizontal, 18)
+        .frame(width: Self.standardWidth, alignment: .leading)
         .padding(.vertical, 16)
-        .frame(width: 350)
+    }
+
+    @ViewBuilder
+    private func popoverContent(dismissPopover: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let lifecycleErrorMessage = store.lifecycleErrorMessage,
+               !store.isInRecoveryMode {
+                MenuBarLifecycleErrorView(
+                    message: lifecycleErrorMessage,
+                    dismiss: store.dismissLifecycleError
+                )
+                .padding(.bottom, 10)
+            }
+
+            if store.isInRecoveryMode {
+                RecoveryUnavailablePopoverView {
+                    windowCoordinator.showRecovery()
+                }
+            } else {
+                switch store.phase {
+                case .idle:
+                    MenuBarIdleView()
+                case .running, .paused:
+                    MenuBarActiveView()
+                case .finishing:
+                    MenuBarFinishingView()
+                }
+
+                Divider()
+                    .padding(.vertical, 14)
+
+                MenuBarFooterView(onDismiss: dismissPopover, onOpenInsights: onOpenInsights)
+            }
+        }
+        .frame(width: Self.contentWidth, alignment: .leading)
+        .padding(.horizontal, 16)
     }
 }
 

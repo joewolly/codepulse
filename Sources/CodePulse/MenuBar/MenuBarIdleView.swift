@@ -10,24 +10,17 @@ struct MenuBarIdleView: View {
     @State private var goal = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Label("CodePulse", systemImage: "chevron.left.forwardslash.chevron.right")
-                    .font(.title3.weight(.semibold))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 10) {
+                MenuBarAppIcon()
+
+                Text("CodePulse")
+                    .font(.headline.weight(.semibold))
 
                 Spacer(minLength: 8)
 
                 Text("Idle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Ready to code?")
-                    .font(.headline)
-
-                Text("Choose a project and focus for this session.")
-                    .font(.caption)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
             }
 
@@ -40,13 +33,13 @@ struct MenuBarIdleView: View {
             MenuBarProjectPicker(selectedProjectID: $selectedProjectID)
             MenuBarSessionTypePicker(selectedType: $selectedType)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Goal")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
                 TextField("What are you working on?", text: $goal, axis: .vertical)
-                    .lineLimit(1...3)
+                    .lineLimit(1...2)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Goal")
                     .accessibilityIdentifier("goal-field")
@@ -85,7 +78,7 @@ private struct MenuBarQuickStartView: View {
     @Binding var selectedPresetID: UUID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Label("Quick Start", systemImage: "bolt.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -109,6 +102,7 @@ private struct MenuBarQuickStartView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
                 .accessibilityLabel("Session preset")
 
                 Button {
@@ -121,6 +115,7 @@ private struct MenuBarQuickStartView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Color.accentColor)
                 .foregroundStyle(.white)
+                .controlSize(.regular)
                 .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .disabled(selectedPresetID.flatMap { store.sessionPreset(id: $0) }
                     .map { !store.isSessionPresetAvailableForManualStart($0) } ?? true)
