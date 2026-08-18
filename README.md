@@ -16,10 +16,10 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.1.3 (build 1103)**. This patch
-fixes the immediate launch crash affecting the public v1.1.2 application by
-moving application lifecycle ownership to AppKit while keeping SwiftUI as the
-UI framework for explicitly managed windows.
+The current release candidate is CodePulse **1.2.0 (build 1200)**. This release
+expands Actionable Insights with Goal vs Actual tracking, deterministic Focus
+Patterns, Project Outcomes, and local follow-up signals while keeping all
+analysis local and deterministic.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -80,7 +80,7 @@ for Apple silicon and Intel Macs.
 
 Download the latest DMG from
 [GitHub Releases](https://github.com/joewolly/codepulse/releases/latest), open
-it, and drag CodePulse to Applications. The current build is intentionally not
+it, and drag CodePulse to Applications. The 1.2.0 build is intentionally not
 Developer ID signed or notarized; it is ad-hoc signed locally for macOS runtime
 compatibility. Ad-hoc signing does not establish publisher identity or
 notarization trust, so macOS may still require an explicit first-launch
@@ -129,8 +129,9 @@ the introduction later from **Settings → General → Show Introduction…**.
 Use **Settings → Data → Export Backup…** to save a portable, pretty-printed JSON
 backup of local CodePulse projects, settings, presets, automation rules, saved
 sessions, captured Git/GitHub context, developer-tool session context, and any
-active-session timeline. The backup format remains `codepulse-backup` version 1,
-so backups exported by CodePulse 0.8 and 0.9 can be restored by 1.0.0 and 1.1.0.
+active-session timeline. The backup format remains `codepulse-backup` version 1.
+CodePulse 1.2.0 continues to read and restore version-1 backups; future format
+changes will be called out in the release documentation.
 
 Use **Settings → Data → Restore Backup…** to inspect the selected backup before
 confirming. Restore replaces the current local CodePulse data; it does not merge
