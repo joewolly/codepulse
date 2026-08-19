@@ -121,12 +121,6 @@ struct SessionEditView: View {
             .padding(16)
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 560, idealHeight: 640)
-        .onAppear {
-            if let projectID = session.projectID,
-               store.state.projects.contains(where: { $0.id == projectID }) {
-                projectChoice = .project(projectID)
-            }
-        }
     }
 
     private func save() {

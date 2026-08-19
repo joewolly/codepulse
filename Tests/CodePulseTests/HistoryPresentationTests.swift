@@ -17,6 +17,22 @@ final class HistoryPresentationTests: XCTestCase {
             second
         )
         XCTAssertEqual(
+            HistorySelectionResolver.resolve(
+                currentID: first,
+                preferredID: second,
+                visibleIDs: [first, second]
+            ),
+            second
+        )
+        XCTAssertEqual(
+            HistorySelectionResolver.resolve(
+                currentID: first,
+                preferredID: third,
+                visibleIDs: [first, second]
+            ),
+            first
+        )
+        XCTAssertEqual(
             HistorySelectionResolver.resolve(currentID: third, visibleIDs: [first, second]),
             first
         )
@@ -45,6 +61,15 @@ final class HistoryPresentationTests: XCTestCase {
                 visibleIDsAfterDeletion: [first, second]
             ),
             second
+        )
+        XCTAssertEqual(
+            HistorySelectionResolver.afterDeletion(
+                deletedID: first,
+                currentID: third,
+                visibleIDsBeforeDeletion: [first, second, third],
+                visibleIDsAfterDeletion: [second, third]
+            ),
+            third
         )
         XCTAssertNil(
             HistorySelectionResolver.afterDeletion(

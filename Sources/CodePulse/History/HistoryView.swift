@@ -110,7 +110,7 @@ struct HistoryView: View {
                 sessionPendingDeletion = nil
             }
         } message: {
-            Text("This saved session will be removed from CodePulse.")
+            Text(deletionConfirmationMessage)
         }
         .alert("History Export Failed", isPresented: $exportError) {
             Button("OK", role: .cancel) { exportError = false }
@@ -132,6 +132,16 @@ struct HistoryView: View {
             preferredID: preferredSelectionID,
             visibleIDs: groups.flatMap { $0.sessions.map(\.id) }
         )
+    }
+
+    private var deletionConfirmationMessage: String {
+        guard let session = sessionPendingDeletion else {
+            return "This saved session will be removed from CodePulse."
+        }
+        let project = session.projectName ?? "No Project"
+        let day = CodePulseFormatting.day(session.startedAt, calendar: store.calendar)
+        let time = CodePulseFormatting.time(session.startedAt)
+        return "“\(project)” on \(day) at \(time) will be removed from CodePulse."
     }
 
     private func clearFilters() {
