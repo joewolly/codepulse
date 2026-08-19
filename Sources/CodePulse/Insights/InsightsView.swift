@@ -81,55 +81,56 @@ struct InsightsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Insights")
         .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                HStack(spacing: 14) {
-                    HStack(spacing: 6) {
-                        Text("Timeframe:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Picker(selection: $timeframe) {
-                            ForEach(InsightsTimeframe.allCases) { option in
-                                Text(option.title).tag(option)
-                            }
-                        } label: {
-                            Text(timeframe.title)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 6) {
+                    Text("Timeframe:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Picker(selection: $timeframe) {
+                        ForEach(InsightsTimeframe.allCases) { option in
+                            Text(option.title).tag(option)
                         }
-                        .pickerStyle(.menu)
-                        .controlSize(.small)
-                        .frame(width: 128, alignment: .leading)
-                        .accessibilityLabel("Insights timeframe")
-                        .accessibilityValue(timeframe.title)
+                    } label: {
+                        Text(timeframe.title)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
-
-                    HStack(spacing: 6) {
-                        Text("Project:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Picker(selection: $project) {
-                            Text("All Projects").tag(InsightsProjectFilter.allProjects)
-                            Text("No Project").tag(InsightsProjectFilter.noProject)
-                            if !calculatedProjectOptions.isEmpty {
-                                Divider()
-                                ForEach(calculatedProjectOptions) { option in
-                                    Text(option.title).tag(option.filter)
-                                }
-                            }
-                        } label: {
-                            Text(project.title(options: calculatedProjectOptions))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        .pickerStyle(.menu)
-                        .controlSize(.small)
-                        .frame(width: 170, alignment: .leading)
-                        .accessibilityLabel("Insights project")
-                        .accessibilityValue(project.title(options: calculatedProjectOptions))
-                    }
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 128, alignment: .leading)
+                    .accessibilityLabel("Insights timeframe")
+                    .accessibilityValue(timeframe.title)
                 }
+            }
+
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 6) {
+                    Text("Project:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Picker(selection: $project) {
+                        Text("All Projects").tag(InsightsProjectFilter.allProjects)
+                        Text("No Project").tag(InsightsProjectFilter.noProject)
+                        if !calculatedProjectOptions.isEmpty {
+                            Divider()
+                            ForEach(calculatedProjectOptions) { option in
+                                Text(option.title).tag(option.filter)
+                            }
+                        }
+                    } label: {
+                        Text(project.title(options: calculatedProjectOptions))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 170, alignment: .leading)
+                    .accessibilityLabel("Insights project")
+                    .accessibilityValue(project.title(options: calculatedProjectOptions))
+                }
+                .padding(.leading, 12)
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -341,12 +342,18 @@ private struct InsightSummaryCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                Group {
+                    if let detail {
+                        Text(detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Color.clear
+                            .accessibilityHidden(true)
+                    }
                 }
+                .frame(maxWidth: .infinity, minHeight: 16, maxHeight: 16, alignment: .leading)
             }
             .frame(maxWidth: .infinity, minHeight: 76, maxHeight: 76, alignment: .leading)
         }
