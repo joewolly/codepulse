@@ -93,6 +93,7 @@ final class AppWindowCoordinator: ObservableObject {
             let newWindow = NSWindow(contentViewController: settingsContentFactory())
             newWindow.title = "Settings"
             newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            newWindow.toolbarStyle = .unified
             newWindow.setContentSize(Self.settingsDefaultContentSize)
             newWindow.contentMinSize = Self.settingsMinimumContentSize
             newWindow.isReleasedWhenClosed = false
@@ -102,6 +103,9 @@ final class AppWindowCoordinator: ObservableObject {
             window = newWindow
         }
 
+        // Keep the Settings selector in the same native chrome layer when a
+        // previously created or externally supplied Settings window is reused.
+        window.toolbarStyle = .unified
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }

@@ -23,25 +23,24 @@ struct SettingsView: View {
     @State private var selectedTab: SettingsTab = .general
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            generalSettingsTab
-                .tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.systemImage) }
-                .tag(SettingsTab.general)
-
-            projectsSettingsTab
-                .tabItem { Label(SettingsTab.projects.title, systemImage: SettingsTab.projects.systemImage) }
-                .tag(SettingsTab.projects)
-
-            automationSettingsTab
-                .tabItem { Label(SettingsTab.automation.title, systemImage: SettingsTab.automation.systemImage) }
-                .tag(SettingsTab.automation)
-
-            dataSettingsTab
-                .tabItem { Label(SettingsTab.data.title, systemImage: SettingsTab.data.systemImage) }
-                .tag(SettingsTab.data)
-        }
+        selectedSettingsContent
         .navigationTitle("Settings")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Settings category", selection: $selectedTab) {
+                    ForEach(SettingsTab.allCases) { tab in
+                        Text(tab.title)
+                            .tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 260)
+                .accessibilityLabel("Settings category")
+            }
+        }
         .onAppear {
             integrationManager.refresh()
         }
@@ -157,6 +156,20 @@ struct SettingsView: View {
             }
         } message: {
             Text(restoreError ?? "CodePulse could not restore the selected backup.")
+        }
+    }
+
+    @ViewBuilder
+    private var selectedSettingsContent: some View {
+        switch selectedTab {
+        case .general:
+            generalSettingsTab
+        case .projects:
+            projectsSettingsTab
+        case .automation:
+            automationSettingsTab
+        case .data:
+            dataSettingsTab
         }
     }
 
