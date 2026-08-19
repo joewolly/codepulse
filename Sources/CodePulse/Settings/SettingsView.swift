@@ -20,196 +20,28 @@ struct SettingsView: View {
     @State private var restoreCandidate: BackupRestoreCandidate?
     @State private var restoreResult: BackupRestoreResult?
     @State private var restoreError: String?
+    @State private var selectedTab: SettingsTab = .general
 
     var body: some View {
-        Form {
-            Section("General") {
-                Toggle("Launch CodePulse at login", isOn: Binding(
-                    get: { store.state.settings.launchAtLogin },
-                    set: setLaunchAtLogin
-                ))
-                if let loginItemError {
-                    Text(loginItemError)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+        TabView(selection: $selectedTab) {
+            generalSettingsTab
+                .tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.systemImage) }
+                .tag(SettingsTab.general)
 
-                Button {
-                    windowCoordinator.showOnboarding()
-                } label: {
-                    Label("Show Introduction…", systemImage: "sparkles")
-                }
-                .accessibilityHint("Reopens the CodePulse introduction without resetting settings or session data")
-            }
+            projectsSettingsTab
+                .tabItem { Label(SettingsTab.projects.title, systemImage: SettingsTab.projects.systemImage) }
+                .tag(SettingsTab.projects)
 
-            Section("Updates") {
-                Button {
-                    updateController.checkForUpdates()
-                } label: {
-                    Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .accessibilityHint("Checks GitHub Releases for a newer CodePulse version")
+            automationSettingsTab
+                .tabItem { Label(SettingsTab.automation.title, systemImage: SettingsTab.automation.systemImage) }
+                .tag(SettingsTab.automation)
 
-                Text("CodePulse checks for updates automatically and verifies downloaded updates with Sparkle before installation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Data") {
-                Button {
-                    exportBackup()
-                } label: {
-                    Label("Export Backup…", systemImage: "arrow.down.doc")
-                }
-                .accessibilityLabel("Export CodePulse Backup")
-                .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
-
-                Button {
-                    chooseBackupForRestore()
-                } label: {
-                    Label("Restore Backup…", systemImage: "arrow.up.doc")
-                }
-                .accessibilityLabel("Restore CodePulse Backup")
-                .accessibilityHint("Reviews and replaces local CodePulse data with a selected JSON backup")
-
-                Text("Backups contain your local CodePulse projects, sessions, settings, presets, and automation configuration. Restore replaces current local data after creating a recovery backup. Automation stays disabled after restore, and moved project folders may need relinking. No cloud service is involved.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("Integrations") {
-                Text("Optional local context enrichment for Codex and OpenCode. CodePulse records only lifecycle/context metadata, timestamps, project directory, and optional model/profile details. It does not collect prompts, messages, transcripts, command output, or source code.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                ForEach(DeveloperTool.allCases) { tool in
-                    DeveloperToolIntegrationRow(
-                        tool: tool,
-                        status: integrationManager.status(for: tool),
-                        enable: { _ = integrationManager.enable(tool) },
-                        disable: { _ = integrationManager.disable(tool) }
-                    )
-                }
-            }
-
-            SessionPresetSettingsView()
-            AutomationSettingsView()
-
-            Section("Actionable Insights") {
-                DigestSettingsView()
-                    .environmentObject(store)
-                    .environmentObject(digestCoordinator)
-            }
-
-            Section("Workflow") {
-                Toggle("Open History with ⌥⌘T", isOn: Binding(
-                    get: { store.state.settings.globalShortcutEnabled },
-                    set: { value in store.updateSettings { $0.globalShortcutEnabled = value } }
-                ))
-                .accessibilityLabel("Global History shortcut")
-                .accessibilityHint("Opens the CodePulse History window without starting or stopping a session")
-            }
-
-            Section("Menu Bar") {
-                Picker("Display", selection: Binding(
-                    get: { store.state.settings.menuBarDisplay },
-                    set: { value in store.updateSettings { $0.menuBarDisplay = value } }
-                )) {
-                    ForEach(MenuBarDisplay.allCases) { display in
-                        Text(display.title).tag(display)
-                    }
-                }
-
-                Picker("Idle appearance", selection: Binding(
-                    get: { store.state.settings.idleAppearance },
-                    set: { value in store.updateSettings { $0.idleAppearance = value } }
-                )) {
-                    Text("Code").tag(IdleAppearance.code)
-                    Text("Icon Only").tag(IdleAppearance.iconOnly)
-                }
-            }
-
-            Section("Sessions") {
-                Picker("Default project", selection: Binding(
-                    get: { store.state.settings.defaultProjectBehavior },
-                    set: setDefaultProjectBehavior
-                )) {
-                    Text("Last used").tag(DefaultProjectBehavior.lastUsed)
-                    Text("No project").tag(DefaultProjectBehavior.noProject)
-                    Text("Specific project").tag(DefaultProjectBehavior.specificProject)
-                }
-
-                if store.state.settings.defaultProjectBehavior == .specificProject {
-                    Picker("Project", selection: Binding(
-                        get: { store.state.settings.specificProjectID },
-                        set: { value in store.updateSettings { $0.specificProjectID = value } }
-                    )) {
-                        Text("No project").tag(UUID?.none)
-                        ForEach(store.selectableProjectsSortedByRecentUse) { project in
-                            Text(project.name).tag(Optional(project.id))
-                        }
-                    }
-                }
-            }
-
-            Section("Projects") {
-                if store.state.projects.isEmpty {
-                    EmptyStateView(content: EmptyStateCopy.projects)
-                } else {
-                    if !store.activeProjectsSortedByRecentUse.isEmpty {
-                        Text("Active")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        ForEach(store.activeProjectsSortedByRecentUse) { project in
-                            ProjectSettingsRow(
-                                project: project,
-                                archive: { projectToArchive = project },
-                                restore: nil,
-                                relink: { relinkProject(project) },
-                                rename: {
-                                    projectToRename = project
-                                    renameText = project.name
-                                },
-                                delete: { projectToDelete = project }
-                            )
-                        }
-                    }
-
-                    if !store.archivedProjectsSortedByRecentUse.isEmpty {
-                        Text("Archived")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 6)
-                        ForEach(store.archivedProjectsSortedByRecentUse) { project in
-                            ProjectSettingsRow(
-                                project: project,
-                                archive: nil,
-                                restore: { restoreProject(project) },
-                                relink: { relinkProject(project) },
-                                rename: {
-                                    projectToRename = project
-                                    renameText = project.name
-                                },
-                                delete: { projectToDelete = project }
-                            )
-                        }
-                    }
-                }
-
-                Button {
-                    addProject()
-                } label: {
-                    Label("Add Project…", systemImage: "plus")
-                }
-            }
+            dataSettingsTab
+                .tabItem { Label(SettingsTab.data.title, systemImage: SettingsTab.data.systemImage) }
+                .tag(SettingsTab.data)
         }
-        .formStyle(.grouped)
-        .frame(width: 480)
-        .padding(20)
         .navigationTitle("Settings")
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             integrationManager.refresh()
         }
@@ -326,6 +158,210 @@ struct SettingsView: View {
         } message: {
             Text(restoreError ?? "CodePulse could not restore the selected backup.")
         }
+    }
+
+    private var generalSettingsTab: some View {
+        Form {
+            Section("General") {
+                Toggle("Launch CodePulse at login", isOn: Binding(
+                    get: { store.state.settings.launchAtLogin },
+                    set: setLaunchAtLogin
+                ))
+                if let loginItemError {
+                    Text(loginItemError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    windowCoordinator.showOnboarding()
+                } label: {
+                    Label("Show Introduction…", systemImage: "sparkles")
+                }
+                .accessibilityHint("Reopens the CodePulse introduction without resetting settings or session data")
+            }
+
+            Section("Workflow") {
+                Toggle("Open History with ⌥⌘T", isOn: Binding(
+                    get: { store.state.settings.globalShortcutEnabled },
+                    set: { value in store.updateSettings { $0.globalShortcutEnabled = value } }
+                ))
+                .accessibilityLabel("Global History shortcut")
+                .accessibilityHint("Opens the CodePulse History window without starting or stopping a session")
+            }
+
+            Section("Menu Bar") {
+                Picker("Display", selection: Binding(
+                    get: { store.state.settings.menuBarDisplay },
+                    set: { value in store.updateSettings { $0.menuBarDisplay = value } }
+                )) {
+                    ForEach(MenuBarDisplay.allCases) { display in
+                        Text(display.title).tag(display)
+                    }
+                }
+
+                Picker("Idle appearance", selection: Binding(
+                    get: { store.state.settings.idleAppearance },
+                    set: { value in store.updateSettings { $0.idleAppearance = value } }
+                )) {
+                    Text("Code").tag(IdleAppearance.code)
+                    Text("Icon Only").tag(IdleAppearance.iconOnly)
+                }
+            }
+
+            Section("Sessions") {
+                Picker("Default project", selection: Binding(
+                    get: { store.state.settings.defaultProjectBehavior },
+                    set: setDefaultProjectBehavior
+                )) {
+                    Text("Last used").tag(DefaultProjectBehavior.lastUsed)
+                    Text("No project").tag(DefaultProjectBehavior.noProject)
+                    Text("Specific project").tag(DefaultProjectBehavior.specificProject)
+                }
+
+                if store.state.settings.defaultProjectBehavior == .specificProject {
+                    Picker("Project", selection: Binding(
+                        get: { store.state.settings.specificProjectID },
+                        set: { value in store.updateSettings { $0.specificProjectID = value } }
+                    )) {
+                        Text("No project").tag(UUID?.none)
+                        ForEach(store.selectableProjectsSortedByRecentUse) { project in
+                            Text(project.name).tag(Optional(project.id))
+                        }
+                    }
+                }
+            }
+
+            Section("Updates") {
+                Button {
+                    updateController.checkForUpdates()
+                } label: {
+                    Label("Check for Updates…", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .accessibilityHint("Checks GitHub Releases for a newer CodePulse version")
+
+                Text("CodePulse checks for updates automatically and verifies downloaded updates with Sparkle before installation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var projectsSettingsTab: some View {
+        Form {
+            Section("Projects") {
+                if store.state.projects.isEmpty {
+                    EmptyStateView(content: EmptyStateCopy.projects)
+                } else {
+                    if !store.activeProjectsSortedByRecentUse.isEmpty {
+                        Text("Active")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(store.activeProjectsSortedByRecentUse) { project in
+                            ProjectSettingsRow(
+                                project: project,
+                                archive: { projectToArchive = project },
+                                restore: nil,
+                                relink: { relinkProject(project) },
+                                rename: {
+                                    projectToRename = project
+                                    renameText = project.name
+                                },
+                                delete: { projectToDelete = project }
+                            )
+                        }
+                    }
+
+                    if !store.archivedProjectsSortedByRecentUse.isEmpty {
+                        Text("Archived")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 6)
+                        ForEach(store.archivedProjectsSortedByRecentUse) { project in
+                            ProjectSettingsRow(
+                                project: project,
+                                archive: nil,
+                                restore: { restoreProject(project) },
+                                relink: { relinkProject(project) },
+                                rename: {
+                                    projectToRename = project
+                                    renameText = project.name
+                                },
+                                delete: { projectToDelete = project }
+                            )
+                        }
+                    }
+                }
+
+                Button {
+                    addProject()
+                } label: {
+                    Label("Add Project…", systemImage: "plus")
+                }
+            }
+
+            SessionPresetSettingsView()
+        }
+        .formStyle(.grouped)
+    }
+
+    private var automationSettingsTab: some View {
+        Form {
+            Section("Developer Integrations") {
+                Text("Optional local context enrichment for Codex and OpenCode. CodePulse records only lifecycle/context metadata, timestamps, project directory, and optional model/profile details. It does not collect prompts, messages, transcripts, command output, or source code.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(DeveloperTool.allCases) { tool in
+                    DeveloperToolIntegrationRow(
+                        tool: tool,
+                        status: integrationManager.status(for: tool),
+                        enable: { _ = integrationManager.enable(tool) },
+                        disable: { _ = integrationManager.disable(tool) }
+                    )
+                }
+            }
+
+            AutomationSettingsView()
+        }
+        .formStyle(.grouped)
+    }
+
+    private var dataSettingsTab: some View {
+        Form {
+            Section("Backup & Restore") {
+                Button {
+                    exportBackup()
+                } label: {
+                    Label("Export Backup…", systemImage: "arrow.down.doc")
+                }
+                .accessibilityLabel("Export CodePulse Backup")
+                .accessibilityHint("Saves a portable JSON backup of local CodePulse data")
+
+                Button {
+                    chooseBackupForRestore()
+                } label: {
+                    Label("Restore Backup…", systemImage: "arrow.up.doc")
+                }
+                .accessibilityLabel("Restore CodePulse Backup")
+                .accessibilityHint("Reviews and replaces local CodePulse data with a selected JSON backup")
+
+                Text("Backups contain your local CodePulse projects, sessions, settings, presets, and automation configuration. Restore replaces current local data after creating a recovery backup. Automation stays disabled after restore, and moved project folders may need relinking. No cloud service is involved.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Actionable Insights") {
+                DigestSettingsView()
+                    .environmentObject(store)
+                    .environmentObject(digestCoordinator)
+            }
+        }
+        .formStyle(.grouped)
     }
 
     private func addProject() {
@@ -466,20 +502,23 @@ private struct ProjectSettingsRow: View {
     let delete: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: project.isArchived ? "archivebox" : "folder")
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading) {
+
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(project.name)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(project.name)
                     if project.isArchived {
-                        Label("Archived", systemImage: "archivebox")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        SettingsStatusBadge("Archived", style: .neutral, systemImage: "archivebox")
                             .accessibilityLabel("\(project.name) is archived")
+                    }
+                    if project.requiresRelink {
+                        SettingsStatusBadge("Needs Relink", style: .warning, systemImage: "exclamationmark.triangle")
+                            .accessibilityLabel("\(project.name) needs relinking")
                     }
                 }
                 if let path = project.folderPath {
@@ -491,48 +530,59 @@ private struct ProjectSettingsRow: View {
                         .help(path)
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
-            Spacer()
-            if let path = project.folderPath, !project.requiresRelink {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                } label: {
-                    Image(systemName: "arrow.up.forward.app")
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 6) {
+                if project.requiresRelink {
+                    Button("Relink…", action: relink)
+                        .buttonStyle(.bordered)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .accessibilityLabel("Relink \(project.name) folder")
+                } else if let path = project.folderPath {
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    } label: {
+                        Image(systemName: "arrow.up.forward.app")
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .accessibilityLabel("Reveal \(project.name) in Finder")
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Reveal \(project.name) in Finder")
+
+                Menu {
+                    if !project.requiresRelink {
+                        Button("Relink…", action: relink)
+                    }
+                    Button("Rename…", action: rename)
+                    if let archive {
+                        Button("Archive", action: archive)
+                    } else if let restore {
+                        Button("Restore", action: restore)
+                    }
+                    Divider()
+                    Button("Delete…", role: .destructive, action: delete)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Actions for \(project.name)")
+                .accessibilityLabel("Actions for \(project.name)")
             }
-            if project.requiresRelink {
-                Label("Needs Relink", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("\(project.name) needs relinking")
-            }
-            Button("Relink", action: relink)
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Relink \(project.name) folder")
-            Button("Rename", action: rename)
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Rename \(project.name)")
-            if let archive {
-                Button("Archive", action: archive)
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Archive \(project.name)")
-                    .accessibilityHint("Removes this project from future session and automation workflows while keeping its history")
-            } else if let restore {
-                Button("Restore", action: restore)
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Restore \(project.name)")
-                    .accessibilityHint("Makes this project available for future sessions and automation again")
-            }
-            Button {
-                delete()
-            } label: {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Delete \(project.name)")
         }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(projectAccessibilityLabel)
+    }
+
+    private var projectAccessibilityLabel: String {
+        var parts = [project.name]
+        if project.isArchived { parts.append("Archived") }
+        if project.requiresRelink { parts.append("Needs Relink") }
+        return parts.joined(separator: ", ")
     }
 }
 
@@ -548,9 +598,11 @@ private struct DeveloperToolIntegrationRow: View {
                 Label(tool.title, systemImage: tool.systemImage)
                     .font(.subheadline.weight(.medium))
                 Spacer()
-                Text(statusLabel)
-                    .font(.caption)
-                    .foregroundStyle(status.isEnabled ? .green : .secondary)
+                SettingsStatusBadge(
+                    statusLabel,
+                    style: statusStyle,
+                    systemImage: statusSystemImage
+                )
             }
 
             Text(status.detail)
@@ -561,8 +613,9 @@ private struct DeveloperToolIntegrationRow: View {
             Text("Managed at \(status.installationDescription)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(1)
                 .truncationMode(.middle)
+                .help(status.installationDescription)
 
             Button(status.isEnabled ? "Disable integration" : "Enable integration") {
                 if status.isEnabled {
@@ -581,5 +634,15 @@ private struct DeveloperToolIntegrationRow: View {
     private var statusLabel: String {
         if !status.isDetected { return "Not detected" }
         return status.isEnabled ? "Enabled" : "Disabled"
+    }
+
+    private var statusStyle: SettingsStatusStyle {
+        if !status.isDetected { return .warning }
+        return status.isEnabled ? .success : .neutral
+    }
+
+    private var statusSystemImage: String {
+        if !status.isDetected { return "exclamationmark.triangle" }
+        return status.isEnabled ? "checkmark.circle" : "minus.circle"
     }
 }

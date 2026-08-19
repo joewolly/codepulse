@@ -114,6 +114,8 @@ final class AppWindowCoordinatorTests: XCTestCase {
         let firstWindow = NSApp.windows.first(where: { $0.title == "Settings" })
         XCTAssertNotNil(firstWindow)
         XCTAssertTrue(firstWindow?.isVisible == true)
+        XCTAssertEqual(firstWindow?.contentView?.bounds.size, NSSize(width: 560, height: 520))
+        XCTAssertEqual(firstWindow?.contentMinSize, NSSize(width: 540, height: 480))
 
         coordinator.showSettings()
         let settingsWindows = NSApp.windows.filter { $0.title == "Settings" }
@@ -126,6 +128,29 @@ final class AppWindowCoordinatorTests: XCTestCase {
         coordinator.showSettings()
         XCTAssertTrue(firstWindow?.isVisible == true)
         firstWindow?.close()
+    }
+
+    func testOnboardingWindowUsesUnclippedContentSize() {
+        _ = NSApplication.shared
+        for window in NSApp.windows where window.title == "Getting Started with CodePulse" {
+            window.close()
+            window.title = "Closed test window"
+        }
+
+        let store = SessionStore(
+            persistence: CoordinatorTestPersistence(),
+            clock: CoordinatorTestClock(),
+            automaticallyRefresh: false
+        )
+        let coordinator = AppWindowCoordinator(store: store)
+
+        coordinator.showOnboarding()
+        let onboardingWindow = NSApp.windows.first(where: { $0.title == "Getting Started with CodePulse" })
+        XCTAssertNotNil(onboardingWindow)
+        XCTAssertTrue(onboardingWindow?.isVisible == true)
+        XCTAssertEqual(onboardingWindow?.contentView?.bounds.size, NSSize(width: 540, height: 490))
+        XCTAssertEqual(onboardingWindow?.contentMinSize, NSSize(width: 540, height: 490))
+        onboardingWindow?.close()
     }
 
     func testInsightsAndHistoryWindowsAreExplicitAndReusable() {

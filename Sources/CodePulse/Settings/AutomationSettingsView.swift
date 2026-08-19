@@ -101,11 +101,11 @@ private struct AutomationRuleRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(rule.name)
-                    Text(statusLabel)
-                        .font(.caption2)
-                        .foregroundStyle(statusLabel == "Enabled" ? .green : .orange)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    SettingsStatusBadge(
+                        statusLabel,
+                        style: statusStyle,
+                        systemImage: statusSystemImage
+                    )
                 }
                 Text("\(triggerSummary) → \(preset?.name ?? "Missing preset")")
                     .font(.caption)
@@ -151,6 +151,25 @@ private struct AutomationRuleRow: View {
         case .applications(let trigger):
             return trigger.applications.map(\.displayName).joined(separator: " + ")
         }
+    }
+
+    private var statusStyle: SettingsStatusStyle {
+        if statusLabel == "Enabled" { return .success }
+        if statusLabel == "Project Archived" || statusLabel == "Disabled" { return .neutral }
+        if statusLabel == "Needs Relink" || statusLabel == "Enabled · Automation Off" || statusLabel.hasPrefix("Needs attention") {
+            return .warning
+        }
+        return .error
+    }
+
+    private var statusSystemImage: String {
+        if statusLabel == "Enabled" { return "checkmark.circle" }
+        if statusLabel == "Project Archived" { return "archivebox" }
+        if statusLabel == "Disabled" { return "minus.circle" }
+        if statusLabel == "Needs Relink" || statusLabel == "Enabled · Automation Off" || statusLabel.hasPrefix("Needs attention") {
+            return "exclamationmark.triangle"
+        }
+        return "xmark.octagon"
     }
 
 }

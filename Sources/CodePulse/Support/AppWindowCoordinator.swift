@@ -4,6 +4,9 @@ import SwiftUI
 @MainActor
 final class AppWindowCoordinator: ObservableObject {
     private static let insightsMinimumContentSize = NSSize(width: 740, height: 540)
+    static let settingsDefaultContentSize = NSSize(width: 560, height: 520)
+    static let settingsMinimumContentSize = NSSize(width: 540, height: 480)
+    static let onboardingContentSize = NSSize(width: 540, height: 490)
 
     private let store: SessionStore
     private var historyWindow: NSWindow?
@@ -90,8 +93,8 @@ final class AppWindowCoordinator: ObservableObject {
             let newWindow = NSWindow(contentViewController: settingsContentFactory())
             newWindow.title = "Settings"
             newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            newWindow.setContentSize(NSSize(width: 520, height: 700))
-            newWindow.minSize = NSSize(width: 520, height: 560)
+            newWindow.setContentSize(Self.settingsDefaultContentSize)
+            newWindow.contentMinSize = Self.settingsMinimumContentSize
             newWindow.isReleasedWhenClosed = false
             newWindow.isRestorable = false
             newWindow.center()
@@ -121,8 +124,8 @@ final class AppWindowCoordinator: ObservableObject {
             let newWindow = NSWindow(contentViewController: hostingController)
             newWindow.title = "Getting Started with CodePulse"
             newWindow.styleMask = [.titled, .closable]
-            newWindow.setContentSize(NSSize(width: 540, height: 470))
-            newWindow.minSize = NSSize(width: 540, height: 470)
+            newWindow.setContentSize(Self.onboardingContentSize)
+            newWindow.contentMinSize = Self.onboardingContentSize
             newWindow.isReleasedWhenClosed = false
             newWindow.isRestorable = false
             newWindow.center()

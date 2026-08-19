@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 private enum CompletedSessionProjectChoice: Hashable {
@@ -75,7 +76,10 @@ struct SessionEditView: View {
                             .foregroundStyle(.secondary)
                         TextEditor(text: $goal)
                             .frame(minHeight: 60, idealHeight: 80)
-                            .border(Color.secondary.opacity(0.2))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                            }
                             .accessibilityLabel("Goal")
                     }
 
@@ -85,7 +89,10 @@ struct SessionEditView: View {
                             .foregroundStyle(.secondary)
                         TextEditor(text: $outcome)
                             .frame(minHeight: 80, idealHeight: 110)
-                            .border(Color.secondary.opacity(0.2))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                            }
                             .accessibilityLabel("Outcome")
                     }
                 }

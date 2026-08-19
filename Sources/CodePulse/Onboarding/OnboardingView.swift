@@ -94,8 +94,8 @@ struct OnboardingView: View {
             }
             .padding(.top, 14)
         }
-        .padding(28)
-        .frame(width: 540, height: 470)
+        .padding(24)
+        .frame(width: 540, height: 490)
         .onExitCommand {
             completeAndDismiss()
         }
