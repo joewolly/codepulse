@@ -52,7 +52,7 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: MenuBarPopoverView(
                 onDismiss: { [weak self] in self?.closePopover() },
                 onOpenInsights: { [weak self] in self?.openInsights() }
@@ -60,6 +60,18 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
             .environmentObject(store)
             .environmentObject(windowCoordinator)
         )
+
+        if store.phase == .idle || store.phase == .running || store.phase == .paused {
+            if #available(macOS 13.0, *) {
+                hostingController.sizingOptions = [.preferredContentSize]
+            }
+            hostingController.preferredContentSize = NSSize(
+                width: MenuBarPopoverView.standardWidth,
+                height: store.phase == .idle ? 395 : 385
+            )
+        }
+
+        popover.contentViewController = hostingController
         self.popover = popover
 
         guard let button = statusItem?.button else { return }
