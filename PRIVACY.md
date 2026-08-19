@@ -43,8 +43,9 @@ the local `/usr/bin/git` executable and does not modify repositories.
 ## Optional Developer Integrations
 
 Codex and OpenCode integrations are disabled unless the user enables them in
-**Settings → Integrations**. Session Automation is a separate setting in
-**Settings → Session Automation** and is disabled by default. When an
+**Settings → Automation → Developer Integrations**. Session Automation is a
+separate setting in **Settings → Automation → Session Automation** and is
+disabled by default. When an
 integration is enabled, CodePulse records only the minimum
 metadata needed to answer which supported developer tool participated in an
 active session:
