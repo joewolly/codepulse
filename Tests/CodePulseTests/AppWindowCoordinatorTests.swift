@@ -161,6 +161,8 @@ final class AppWindowCoordinatorTests: XCTestCase {
         let historyWindow = application.windows.first(where: { $0.title == "History" })
         XCTAssertNotNil(historyWindow)
         XCTAssertTrue(historyWindow?.isVisible == true)
+        XCTAssertEqual(historyWindow?.contentMinSize, NSSize(width: 740, height: 520))
+        XCTAssertEqual(historyWindow?.contentView?.bounds.size, NSSize(width: 880, height: 600))
 
         coordinator.showHistory()
         let historyWindows = application.windows.filter { $0.title == "History" }

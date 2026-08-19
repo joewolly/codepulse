@@ -4,6 +4,7 @@ import SwiftUI
 
 struct HistoryView: View {
     @EnvironmentObject private var store: SessionStore
+
     @State private var selectedSessionID: UUID?
     @State private var sessionPendingDeletion: CompletedSession?
     @State private var sessionPendingEdit: CompletedSession?
@@ -17,102 +18,156 @@ struct HistoryView: View {
         store.calendar.startOfDay(for: store.now)
     }
 
+    private var selectedSession: CompletedSession? {
+        guard let selectedSessionID else { return nil }
+        return store.completedSession(id: selectedSessionID)
+    }
+
+    private var visibleSessionIDs: [UUID] {
+        filteredGroups.flatMap { $0.sessions.map(\.id) }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            HistoryFilterBar(
-                query: $query,
-                projectOptions: projectOptions,
-                isExportingCSV: exportActivity.isActive,
-                onExport: exportCSV
+        NavigationSplitView {
+            HistorySidebar(
+                groups: filteredGroups,
+                selectedSessionID: $selectedSessionID,
+                calendar: store.calendar,
+                hasAnySessions: !store.state.completedSessions.isEmpty,
+                canClearFilters: query.hasRestrictions,
+                clearFilters: clearFilters,
+                onEdit: { sessionPendingEdit = $0 },
+                onDelete: { sessionPendingDeletion = $0 }
             )
+            .navigationSplitViewColumnWidth(min: 260, ideal: 290, max: 360)
+        } detail: {
+            HistoryDetailPane(
+                session: selectedSession,
+                calendar: store.calendar,
+                hasAnySessions: !store.state.completedSessions.isEmpty,
+                canClearFilters: query.hasRestrictions,
+                clearFilters: clearFilters
+            )
+            .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .navigationTitle("History")
+        .searchable(
+            text: $query.searchText,
+            placement: .toolbar,
+            prompt: "Search sessions, goals, branches, tools…"
+        )
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                HistoryFilterMenu(query: $query, projectOptions: projectOptions)
 
-            Divider()
-
-            if filteredGroups.isEmpty {
-                HistoryEmptyState(
-                    hasAnySessions: !store.state.completedSessions.isEmpty,
-                    canClearFilters: query.hasRestrictions,
-                    clearFilters: { query = HistoryQuery() }
-                )
-            } else {
-                List {
-                    ForEach(filteredGroups) { group in
-                        Section {
-                            ForEach(group.sessions) { session in
-                                Button {
-                                    selectedSessionID = session.id
-                                } label: {
-                                    HistoryRow(session: session)
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button("View Details") {
-                                        selectedSessionID = session.id
-                                    }
-                                    Button("Edit Session") {
-                                        sessionPendingEdit = session
-                                    }
-                                    Divider()
-                                    Button("Delete Session", role: .destructive) {
-                                        sessionPendingDeletion = session
-                                    }
-                                }
-                            }
-                        } header: {
-                            HistoryDayHeader(group: group, calendar: store.calendar)
-                        }
+                Button(action: exportCSV) {
+                    if exportActivity.isActive {
+                        Label("Exporting…", systemImage: "arrow.down.circle")
+                    } else {
+                        Label("Export CSV…", systemImage: "square.and.arrow.down")
                     }
                 }
-                .listStyle(.inset)
+                .disabled(exportActivity.isActive)
+                .accessibilityLabel("Export History as CSV")
+                .accessibilityHint("Saves the currently filtered History sessions as a UTF-8 CSV file")
+
+                Button {
+                    if let selectedSession {
+                        sessionPendingEdit = selectedSession
+                    }
+                } label: {
+                    Label("Edit Session", systemImage: "pencil")
+                }
+                .disabled(selectedSession == nil)
+                .accessibilityLabel("Edit selected session")
+                .accessibilityHint("Edits the selected session's type, project, timeline, goal, and outcome")
+
+                Button(role: .destructive, action: requestDeleteSelectedSession) {
+                    Label("Delete Session", systemImage: "trash")
+                }
+                .disabled(selectedSession == nil)
+                .accessibilityLabel("Delete selected session")
+                .accessibilityHint("Asks for confirmation before deleting the selected saved session")
             }
         }
-        .navigationTitle("History")
-        .searchable(text: $query.searchText, prompt: "Search sessions")
-        .sheet(isPresented: Binding(
-            get: { selectedSessionID != nil },
-            set: { if !$0 { selectedSessionID = nil } }
-        )) {
-            if let sessionID = selectedSessionID {
-                SessionDetailView(sessionID: sessionID)
-                    .environmentObject(store)
-            }
+        .onAppear { refreshDerivedData() }
+        .onChange(of: query) { _ in refreshDerivedData() }
+        .onChange(of: store.stateRevision) { _ in refreshDerivedData() }
+        .onChange(of: historyReferenceDay) { _ in refreshDerivedData() }
+        .sheet(item: $sessionPendingEdit) { session in
+            SessionEditView(session: session)
+                .environmentObject(store)
         }
         .alert("Delete Session?", isPresented: Binding(
             get: { sessionPendingDeletion != nil },
             set: { if !$0 { sessionPendingDeletion = nil } }
         )) {
             Button("Delete", role: .destructive) {
-                if let id = sessionPendingDeletion?.id {
-                    store.deleteCompletedSession(id: id)
-                }
-                sessionPendingDeletion = nil
+                deletePendingSession()
             }
             Button("Cancel", role: .cancel) {
                 sessionPendingDeletion = nil
             }
         } message: {
-            Text("This saved session will be removed from CodePulse.")
-        }
-        .sheet(item: $sessionPendingEdit) { session in
-            SessionEditView(session: session)
-                .environmentObject(store)
+            Text(deletionConfirmationMessage)
         }
         .alert("History Export Failed", isPresented: $exportError) {
             Button("OK", role: .cancel) { exportError = false }
         } message: {
             Text("CodePulse couldn't export this History file. Choose another destination or check its permissions.")
         }
-        .onAppear(perform: refreshDerivedData)
-        .onChange(of: query) { _ in refreshDerivedData() }
-        .onChange(of: store.stateRevision) { _ in refreshDerivedData() }
-        .onChange(of: historyReferenceDay) { _ in refreshDerivedData() }
-        .frame(minWidth: 680, minHeight: 500)
+        .frame(minWidth: 740, minHeight: 520)
     }
 
-    private func refreshDerivedData() {
+    private func refreshDerivedData(preferredSelectionID: UUID? = nil) {
+        let currentSelectionID = selectedSessionID
         let referenceDate = store.now
+        let groups = store.historyGroups(for: query, referenceDate: referenceDate)
+
         projectOptions = store.historyProjectOptions
-        filteredGroups = store.historyGroups(for: query, referenceDate: referenceDate)
+        filteredGroups = groups
+        selectedSessionID = HistorySelectionResolver.resolve(
+            currentID: currentSelectionID,
+            preferredID: preferredSelectionID,
+            visibleIDs: groups.flatMap { $0.sessions.map(\.id) }
+        )
+    }
+
+    private var deletionConfirmationMessage: String {
+        guard let session = sessionPendingDeletion else {
+            return "This saved session will be removed from CodePulse."
+        }
+        let project = session.projectName ?? "No Project"
+        let day = CodePulseFormatting.day(session.startedAt, calendar: store.calendar)
+        let time = CodePulseFormatting.time(session.startedAt)
+        return "“\(project)” on \(day) at \(time) will be removed from CodePulse."
+    }
+
+    private func clearFilters() {
+        query = HistoryQuery()
+    }
+
+    private func requestDeleteSelectedSession() {
+        guard let selectedSession else { return }
+        sessionPendingDeletion = selectedSession
+    }
+
+    private func deletePendingSession() {
+        guard let session = sessionPendingDeletion else { return }
+
+        let visibleBeforeDeletion = visibleSessionIDs
+        store.deleteCompletedSession(id: session.id)
+        let visibleAfterDeletion = store.historySessions(for: query, referenceDate: store.now).map(\.id)
+        let preferredSelectionID = HistorySelectionResolver.afterDeletion(
+            deletedID: session.id,
+            currentID: selectedSessionID,
+            visibleIDsBeforeDeletion: visibleBeforeDeletion,
+            visibleIDsAfterDeletion: visibleAfterDeletion
+        )
+
+        sessionPendingDeletion = nil
+        refreshDerivedData(preferredSelectionID: preferredSelectionID)
     }
 
     @MainActor
@@ -148,176 +203,158 @@ struct HistoryView: View {
     }
 }
 
-private struct HistoryFilterBar: View {
+private struct HistoryFilterMenu: View {
     @Binding var query: HistoryQuery
     let projectOptions: [HistoryProjectOption]
-    let isExportingCSV: Bool
-    let onExport: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Button {
+        Menu {
+            Menu("Project") {
+                filterButton("All Projects", selected: query.project == .allProjects) {
                     query.project = .allProjects
-                } label: {
-                    filterLabel("All Projects", selected: query.project == .allProjects)
                 }
-                Button {
+                filterButton("No Project", selected: query.project == .noProject) {
                     query.project = .noProject
-                } label: {
-                    filterLabel("No Project", selected: query.project == .noProject)
                 }
                 if !projectOptions.isEmpty {
                     Divider()
                     ForEach(projectOptions) { option in
-                        Button {
+                        filterButton(option.title, selected: query.project == option.filter) {
                             query.project = option.filter
-                        } label: {
-                            filterLabel(option.title, selected: query.project == option.filter)
                         }
                     }
                 }
-            } label: {
-                Label(projectTitle, systemImage: "folder")
             }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("Project filter")
-            .accessibilityValue(projectTitle)
 
-            Menu {
-                Picker("Date", selection: $query.date) {
-                    ForEach(HistoryDateFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
+            Menu("Date") {
+                ForEach(HistoryDateFilter.allCases) { filter in
+                    filterButton(filter.title, selected: query.date == filter) {
+                        query.date = filter
                     }
                 }
-            } label: {
-                Label(query.date.title, systemImage: "calendar")
             }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("Date filter")
-            .accessibilityValue(query.date.title)
 
-            Menu {
-                Picker("Type", selection: $query.type) {
-                    ForEach(HistoryTypeFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
+            Menu("Session Type") {
+                ForEach(HistoryTypeFilter.allCases) { filter in
+                    filterButton(filter.title, selected: query.type == filter) {
+                        query.type = filter
                     }
                 }
-            } label: {
-                Label(query.type.title, systemImage: "square.grid.2x2")
             }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("Session type filter")
-            .accessibilityValue(query.type.title)
 
-            Menu {
-                Picker("Git", selection: $query.git) {
-                    ForEach(HistoryGitFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
+            Menu("Git") {
+                ForEach(HistoryGitFilter.allCases) { filter in
+                    filterButton(filter.title, selected: query.git == filter) {
+                        query.git = filter
                     }
                 }
-            } label: {
-                Label(query.git.title, systemImage: "arrow.triangle.branch")
             }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("Git filter")
-            .accessibilityValue(query.git.title)
 
-            Menu {
-                Picker("Developer Tool", selection: $query.developerTool) {
-                    ForEach(HistoryDeveloperToolFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
+            Menu("Developer Tool") {
+                ForEach(HistoryDeveloperToolFilter.allCases) { filter in
+                    filterButton(filter.title, selected: query.developerTool == filter) {
+                        query.developerTool = filter
                     }
                 }
-            } label: {
-                Label(query.developerTool.title, systemImage: "wrench.and.screwdriver")
             }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("Developer tool filter")
-            .accessibilityValue(query.developerTool.title)
 
-            Menu {
-                Picker("Goal / Outcome", selection: $query.goalOutcome) {
-                    ForEach(HistoryGoalOutcomeFilter.allCases) { filter in
-                        Text(filter.title).tag(filter)
+            Menu("Goal / Outcome") {
+                ForEach(HistoryGoalOutcomeFilter.allCases) { filter in
+                    filterButton(filter.title, selected: query.goalOutcome == filter) {
+                        query.goalOutcome = filter
                     }
                 }
-            } label: {
-                Label(goalOutcomeTitle, systemImage: "target")
-            }
-            .menuStyle(.borderlessButton)
-            .accessibilityLabel("Goal and outcome filter")
-            .accessibilityValue(query.goalOutcome.title)
-
-            Spacer()
-
-            Button {
-                onExport()
-            } label: {
-                Label("Export CSV…", systemImage: "square.and.arrow.down")
-            }
-            .buttonStyle(.link)
-            .disabled(isExportingCSV)
-            .accessibilityLabel("Export History as CSV")
-            .accessibilityHint("Saves the currently filtered History sessions as a UTF-8 CSV file")
-
-            if isExportingCSV {
-                HStack(spacing: 5) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Exporting…")
-                        .font(.caption)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("History export in progress")
             }
 
             if query.hasRestrictions {
-                Button("Clear Filters") {
-                    query = HistoryQuery()
-                }
-                .buttonStyle(.link)
-                .accessibilityLabel("Clear History Filters")
-                .accessibilityHint("Removes search text and all History filters")
+                Divider()
+                Button("Clear All Filters", action: clearFilters)
+            }
+        } label: {
+            Label("Filter", systemImage: query.hasRestrictions
+                ? "line.3.horizontal.decrease.circle.fill"
+                : "line.3.horizontal.decrease.circle")
+        }
+        .accessibilityLabel("History filters")
+        .accessibilityValue(filterSummary)
+        .help("Filter History sessions")
+    }
+
+    private var filterSummary: String {
+        guard query.hasRestrictions else { return "No filters" }
+        var values: [String] = []
+        if !query.normalizedSearchText.isEmpty { values.append("Search") }
+        if query.project != .allProjects { values.append("Project") }
+        if query.date != .allTime { values.append(query.date.title) }
+        if query.type != .allTypes { values.append(query.type.title) }
+        if query.git != .allSessions { values.append(query.git.title) }
+        if query.developerTool != .anyTool { values.append(query.developerTool.title) }
+        if query.goalOutcome != .allSessions { values.append(query.goalOutcome.title) }
+        return values.joined(separator: ", ")
+    }
+
+    private func clearFilters() {
+        query = HistoryQuery()
+    }
+
+    @ViewBuilder
+    private func filterButton(
+        _ title: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            if selected {
+                Label(title, systemImage: "checkmark")
+            } else {
+                Text(title)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
-    }
-
-    private var projectTitle: String {
-        switch query.project {
-        case .allProjects:
-            return "All Projects"
-        case .noProject:
-            return "No Project"
-        case .projectID(let id):
-            return projectOptions.first(where: {
-                if case .projectID(let optionID) = $0.filter { return optionID == id }
-                return false
-            })?.title ?? "Project"
-        case .historicalName(let name):
-            return name
-        }
-    }
-
-    private var goalOutcomeTitle: String {
-        switch query.goalOutcome {
-        case .allSessions:
-            return "Goal / Outcome"
-        case .needsFollowUp:
-            return "Needs Follow-Up"
-        case .closedLoop:
-            return "Closed Loop"
-        }
-    }
-
-    private func filterLabel(_ title: String, selected: Bool) -> some View {
-        Label(title, systemImage: selected ? "checkmark" : "circle")
     }
 }
 
-private struct HistoryEmptyState: View {
+struct HistorySidebar: View {
+    let groups: [DaySessionGroup]
+    @Binding var selectedSessionID: UUID?
+    let calendar: Calendar
+    let hasAnySessions: Bool
+    let canClearFilters: Bool
+    let clearFilters: () -> Void
+    let onEdit: (CompletedSession) -> Void
+    let onDelete: (CompletedSession) -> Void
+
+    var body: some View {
+        if groups.isEmpty {
+            HistoryEmptyState(
+                hasAnySessions: hasAnySessions,
+                canClearFilters: canClearFilters,
+                clearFilters: clearFilters
+            )
+            .padding(12)
+        } else {
+            List(selection: $selectedSessionID) {
+                ForEach(groups) { group in
+                    Section {
+                        ForEach(group.sessions) { session in
+                            HistorySidebarRow(session: session)
+                                .tag(session.id)
+                                .contextMenu {
+                                    Button("Edit Session…") { onEdit(session) }
+                                    Divider()
+                                    Button("Delete Session…", role: .destructive) { onDelete(session) }
+                                }
+                        }
+                    } header: {
+                        HistoryDayHeader(group: group, calendar: calendar)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+        }
+    }
+}
+
+struct HistoryEmptyState: View {
     let hasAnySessions: Bool
     let canClearFilters: Bool
     let clearFilters: () -> Void
@@ -339,16 +376,18 @@ private struct HistoryDayHeader: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(CodePulseFormatting.fullDay(group.id, calendar: calendar))
-                    .font(.headline)
+                Text(CodePulseFormatting.day(group.id, calendar: calendar))
+                    .font(.subheadline.weight(.semibold))
                 Text(summary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 4)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(CodePulseFormatting.fullDay(group.id, calendar: calendar)), \(summary)")
+        .accessibilityLabel(
+            "\(CodePulseFormatting.day(group.id, calendar: calendar)), \(summary)"
+        )
     }
 
     private var summary: String {
@@ -363,68 +402,72 @@ private struct HistoryDayHeader: View {
     }
 }
 
-private struct HistoryRow: View {
+private struct HistorySidebarRow: View {
     let session: CompletedSession
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(session.projectName ?? "No Project")
                     .font(.headline)
                     .lineLimit(1)
-                Spacer()
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
                 Text(CodePulseFormatting.duration(session.activeDuration))
                     .font(.subheadline.weight(.medium))
                     .monospacedDigit()
+                    .lineLimit(1)
             }
 
-            HStack(spacing: 7) {
+            HStack(spacing: 5) {
                 Label(session.type.title, systemImage: session.type.systemImage)
+                Text("·")
                 Text("\(CodePulseFormatting.time(session.startedAt)) – \(CodePulseFormatting.time(session.endedAt))")
+                metadataIndicators
             }
             .font(.caption)
             .foregroundStyle(.secondary)
             .lineLimit(1)
+            .minimumScaleFactor(0.82)
 
-            if let goal = session.goal, MeaningfulText.exists(goal) {
-                Text(goal)
-                    .font(.body)
-                    .lineLimit(2)
-            }
-            if let outcome = session.outcome, MeaningfulText.exists(outcome) {
-                Text(outcome)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            if needsFollowUp {
-                Label("Needs Outcome", systemImage: "exclamationmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("Needs Outcome")
-                    .accessibilityHint("This completed session has a goal but no recorded outcome")
-            }
-            if let branch = session.gitContext?.branchDisplay {
-                Label(branch, systemImage: "arrow.triangle.branch")
-                    .font(.caption)
+            if let preview = previewText {
+                Text(preview)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if !session.developerToolContexts.isEmpty {
-                Label(
-                    developerToolSummary,
-                    systemImage: "wrench.and.screwdriver"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
-        .accessibilityHint("Opens session details")
+        .accessibilityHint("Selects this session for detail inspection")
+    }
+
+    @ViewBuilder
+    private var metadataIndicators: some View {
+        if HistoryDetailAvailability.needsFollowUp(session) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .accessibilityLabel("Needs Outcome")
+        }
+        if session.gitContext != nil {
+            Image(systemName: "arrow.triangle.branch")
+                .accessibilityLabel("Git")
+        }
+        if !session.developerToolContexts.isEmpty {
+            Image(systemName: "sparkles")
+                .accessibilityLabel("Developer tool metadata")
+        }
+        if session.githubContext != nil {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .accessibilityLabel("GitHub")
+        }
+    }
+
+    private var previewText: String? {
+        if let goal = session.goal, MeaningfulText.exists(goal) { return goal }
+        if let outcome = session.outcome, MeaningfulText.exists(outcome) { return outcome }
+        return nil
     }
 
     private var accessibilitySummary: String {
@@ -435,312 +478,15 @@ private struct HistoryRow: View {
             "Started \(CodePulseFormatting.time(session.startedAt))",
             "Finished \(CodePulseFormatting.time(session.endedAt))"
         ]
-        if let goal = session.goal, MeaningfulText.exists(goal) { values.append(goal) }
-        if let outcome = session.outcome, MeaningfulText.exists(outcome) { values.append(outcome) }
-        if needsFollowUp { values.append("Needs Outcome: this completed session has a goal but no recorded outcome") }
-        if let branch = session.gitContext?.branchDisplay { values.append(branch) }
-        if let githubContext = session.githubContext {
-            values.append("GitHub \(githubContext.repositoryNameWithOwner)")
-            if let pullRequest = githubContext.pullRequest {
-                values.append("Pull request \(pullRequest.number), \(pullRequest.title), \(pullRequest.statusDisplay)")
-            }
+        if let goal = session.goal, MeaningfulText.exists(goal) {
+            values.append("Goal: \(goal)")
+        } else if let outcome = session.outcome, MeaningfulText.exists(outcome) {
+            values.append("Outcome: \(outcome)")
         }
-        if !session.developerToolContexts.isEmpty { values.append(developerToolSummary) }
+        if HistoryDetailAvailability.needsFollowUp(session) { values.append("Needs Outcome") }
+        if session.gitContext != nil { values.append("Git") }
+        if !session.developerToolContexts.isEmpty { values.append("Developer tool metadata") }
+        if session.githubContext != nil { values.append("GitHub") }
         return values.joined(separator: ", ")
-    }
-
-    private var developerToolSummary: String {
-        let names = Set(session.developerToolContexts.map(\.tool.title)).sorted()
-        return names.joined(separator: ", ")
-    }
-
-    private var needsFollowUp: Bool {
-        MeaningfulText.exists(session.goal) && !MeaningfulText.exists(session.outcome)
-    }
-}
-
-private struct SessionDetailView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: SessionStore
-    let sessionID: UUID
-    @State private var showDeleteConfirmation = false
-    @State private var showEditSheet = false
-
-    private var session: CompletedSession? {
-        store.completedSession(id: sessionID)
-    }
-
-    var body: some View {
-        Group {
-            if let session {
-                detailContent(session)
-            } else {
-                Text("This session is no longer available.")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .sheet(isPresented: $showEditSheet) {
-            if let session {
-                SessionEditView(session: session)
-                    .environmentObject(store)
-            }
-        }
-        .alert("Delete Session?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
-                store.deleteCompletedSession(id: sessionID)
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This saved session will be removed from CodePulse.")
-        }
-    }
-
-    @ViewBuilder
-    private func detailContent(_ session: CompletedSession) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(session.projectName ?? "No Project")
-                        .font(.title2.weight(.semibold))
-                        .lineLimit(2)
-                    Text(session.type.title)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done") { dismiss() }
-                    .accessibilityLabel("Done")
-            }
-
-            HStack(spacing: 10) {
-                LabeledContent("Active Duration", value: CodePulseFormatting.duration(session.activeDuration, includeSeconds: true))
-                Spacer()
-                Button("Edit Session") {
-                    showEditSheet = true
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Edit Session")
-                .accessibilityHint("Edits the journal fields and shifts the session timeline")
-            }
-            LabeledContent("Started", value: CodePulseFormatting.time(session.startedAt))
-            LabeledContent("Finished", value: CodePulseFormatting.time(session.endedAt))
-
-            if let goal = session.goal {
-                DetailTextBlock(title: "Goal", text: goal)
-            }
-            if let outcome = session.outcome {
-                DetailTextBlock(title: "Outcome", text: outcome)
-            }
-
-            if !session.developerToolContexts.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Developer Tools")
-                        .font(.headline)
-                    DeveloperToolContextList(
-                        contexts: session.developerToolContexts,
-                        showsEventCounts: true
-                    )
-                }
-            }
-
-            if let gitContext = session.gitContext {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Git")
-                        .font(.headline)
-
-                    LabeledContent("Repository", value: gitContext.repositoryRoot)
-                        .lineLimit(2)
-
-                    if let branch = gitContext.branchDisplay {
-                        LabeledContent("Branch", value: branch)
-                    }
-                    if let commitCount = gitContext.commitCount, commitCount > 0 {
-                        LabeledContent("Commits", value: "\(commitCount)")
-                    }
-                    if let changes = gitContext.changesDisplay {
-                        LabeledContent("Changes", value: changes)
-                    }
-                    if let head = gitContext.headDisplay {
-                        LabeledContent("HEAD", value: head)
-                    }
-                }
-            }
-
-            if let githubContext = session.githubContext {
-                GitHubContextView(context: githubContext)
-            }
-
-            Button("Delete Session", role: .destructive) {
-                showDeleteConfirmation = true
-            }
-            .accessibilityLabel("Delete Session")
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(minWidth: 520, idealWidth: 540, maxWidth: 620, minHeight: 380, maxHeight: 620)
-    }
-}
-
-private struct DetailTextBlock: View {
-    let title: String
-    let text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(text)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        }
-    }
-}
-
-private enum CompletedSessionProjectChoice: Hashable {
-    case keepSnapshot
-    case noProject
-    case project(UUID)
-
-    var assignment: CompletedSessionProjectAssignment {
-        switch self {
-        case .keepSnapshot: return .keepSnapshot
-        case .noProject: return .noProject
-        case .project(let id): return .project(id)
-        }
-    }
-}
-
-private struct SessionEditView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: SessionStore
-    let session: CompletedSession
-
-    @State private var type: SessionType
-    @State private var goal: String
-    @State private var outcome: String
-    @State private var startedAt: Date
-    @State private var projectChoice: CompletedSessionProjectChoice
-    @State private var errorMessage: String?
-
-    init(session: CompletedSession) {
-        self.session = session
-        _type = State(initialValue: session.type)
-        _goal = State(initialValue: session.goal ?? "")
-        _outcome = State(initialValue: session.outcome ?? "")
-        _startedAt = State(initialValue: session.startedAt)
-        if session.projectName != nil {
-            _projectChoice = State(initialValue: .keepSnapshot)
-        } else {
-            _projectChoice = State(initialValue: .noProject)
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                Section("Session") {
-                    Picker("Type", selection: $type) {
-                        ForEach(SessionType.allCases) { sessionType in
-                            Label(sessionType.title, systemImage: sessionType.systemImage)
-                                .tag(sessionType)
-                        }
-                    }
-
-                    Picker("Project", selection: $projectChoice) {
-                        if session.projectName != nil {
-                            Text("Keep “\(session.projectName!)”").tag(CompletedSessionProjectChoice.keepSnapshot)
-                        }
-                        Text("No Project").tag(CompletedSessionProjectChoice.noProject)
-                        ForEach(store.projectsSortedByRecentUse) { project in
-                            Text(project.name).tag(CompletedSessionProjectChoice.project(project.id))
-                        }
-                    }
-
-                    DatePicker("Started", selection: $startedAt)
-                    Text("Changing the start shifts the end and pause intervals by the same amount, preserving active duration.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Section("Journal") {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Goal")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextEditor(text: $goal)
-                            .frame(minHeight: 60, idealHeight: 80)
-                            .border(Color.secondary.opacity(0.2))
-                            .accessibilityLabel("Goal")
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Outcome")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TextEditor(text: $outcome)
-                            .frame(minHeight: 80, idealHeight: 110)
-                            .border(Color.secondary.opacity(0.2))
-                            .accessibilityLabel("Outcome")
-                    }
-                }
-
-                if session.gitContext != nil {
-                    Section("Git Snapshot") {
-                        Text("Git metadata is historical and cannot be changed from an edited session.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                }
-            }
-            .formStyle(.grouped)
-
-            Divider()
-
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityLabel("Save Session Changes")
-            }
-            .padding(16)
-        }
-        .frame(minWidth: 520, idealWidth: 560, minHeight: 560, idealHeight: 640)
-        .onAppear {
-            if let projectID = session.projectID,
-               store.state.projects.contains(where: { $0.id == projectID }) {
-                projectChoice = .project(projectID)
-            }
-        }
-    }
-
-    private func save() {
-        let saved = store.updateCompletedSession(
-            id: session.id,
-            type: type,
-            goal: goal,
-            outcome: outcome,
-            project: projectChoice.assignment,
-            startedAt: startedAt
-        )
-        if saved {
-            dismiss()
-        } else {
-            errorMessage = "The session could not be updated. Check the date and project selection."
-        }
     }
 }

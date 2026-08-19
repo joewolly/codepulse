@@ -35,8 +35,8 @@ final class AppWindowCoordinator: ObservableObject {
             let newWindow = NSWindow(contentViewController: hostingController)
             newWindow.title = "History"
             newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            newWindow.setContentSize(NSSize(width: 680, height: 540))
-            newWindow.minSize = NSSize(width: 620, height: 460)
+            newWindow.contentMinSize = NSSize(width: 740, height: 520)
+            newWindow.setContentSize(NSSize(width: 880, height: 600))
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             historyWindow = newWindow

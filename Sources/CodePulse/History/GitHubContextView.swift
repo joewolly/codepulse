@@ -3,11 +3,14 @@ import SwiftUI
 struct GitHubContextView: View {
     let context: GitHubSessionContext
     var compact = false
+    var showsTitle = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 10) {
-            Text("GitHub")
-                .font(compact ? .subheadline.weight(.semibold) : .headline)
+            if showsTitle {
+                Text("GitHub")
+                    .font(compact ? .subheadline.weight(.semibold) : .headline)
+            }
 
             repositoryLink
 
