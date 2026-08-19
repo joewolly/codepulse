@@ -15,6 +15,9 @@ struct InsightsActivityBucket: Identifiable, Equatable {
 }
 
 enum InsightsPresentation {
+    /// The readable canvas is intentionally capped so a wide window does not
+    /// turn the charts into a full-width document. The two-column threshold is
+    /// between the supported 740pt minimum and the 880pt default canvas.
     static let regularLayoutMinimumWidth: CGFloat = 780
     static let wideLayoutThreshold: CGFloat = 800
     static let projectBreakdownLimit = 8
@@ -28,6 +31,22 @@ enum InsightsPresentation {
 
     static func summaryColumnCount(for contentWidth: CGFloat) -> Int {
         contentWidth >= wideLayoutThreshold ? 4 : 2
+    }
+
+    static func mainGridColumnCount(for contentWidth: CGFloat) -> Int {
+        contentWidth >= wideLayoutThreshold ? 2 : 1
+    }
+
+    static func showsDeveloperToolParticipation(_ insights: DeveloperToolInsights) -> Bool {
+        insights.sessionsWithAnyTool > 0
+    }
+
+    static func showsGitContext(_ insights: GitInsights) -> Bool {
+        insights.sessionsWithGitContext > 0
+    }
+
+    static func showsGitHubContext(_ insights: GitHubInsights) -> Bool {
+        insights.sessionsWithGitHubContext > 0
     }
 
     static func focusColumnCount(for contentWidth: CGFloat) -> Int {

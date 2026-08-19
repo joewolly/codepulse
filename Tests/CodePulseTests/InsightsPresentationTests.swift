@@ -19,6 +19,69 @@ final class InsightsPresentationTests: XCTestCase {
         XCTAssertEqual(InsightsPresentation.summaryColumnCount(for: 880), 4)
     }
 
+    func testMainGridStaysSingleColumnAtMinimumAndUsesTwoColumnsAtDefault() {
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: 740), 1)
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: 799), 1)
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: 800), 2)
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: 880), 2)
+    }
+
+    func testOptionalContextCardsOnlyShowWhenParticipationExists() {
+        let noTools = DeveloperToolInsights(
+            sessionsWithCodex: 0,
+            sessionsWithOpenCode: 0,
+            sessionsWithBoth: 0,
+            sessionsWithAnyTool: 0,
+            sessionsWithNoTool: 2,
+            modelBreakdown: [],
+            profileBreakdown: []
+        )
+        let tools = DeveloperToolInsights(
+            sessionsWithCodex: 1,
+            sessionsWithOpenCode: 0,
+            sessionsWithBoth: 0,
+            sessionsWithAnyTool: 1,
+            sessionsWithNoTool: 1,
+            modelBreakdown: [],
+            profileBreakdown: []
+        )
+        let noGit = GitInsights(
+            sessionsWithGitContext: 0,
+            totalCommits: nil,
+            totalFilesChanged: nil,
+            totalInsertions: nil,
+            totalDeletions: nil
+        )
+        let git = GitInsights(
+            sessionsWithGitContext: 1,
+            totalCommits: 0,
+            totalFilesChanged: 0,
+            totalInsertions: 0,
+            totalDeletions: 0
+        )
+        let noGitHub = GitHubInsights(
+            sessionsWithGitHubContext: 0,
+            sessionsWithPullRequest: 0,
+            uniqueRepositories: 0,
+            uniquePullRequests: 0,
+            repositoryBreakdown: []
+        )
+        let gitHub = GitHubInsights(
+            sessionsWithGitHubContext: 1,
+            sessionsWithPullRequest: 1,
+            uniqueRepositories: 1,
+            uniquePullRequests: 1,
+            repositoryBreakdown: []
+        )
+
+        XCTAssertFalse(InsightsPresentation.showsDeveloperToolParticipation(noTools))
+        XCTAssertTrue(InsightsPresentation.showsDeveloperToolParticipation(tools))
+        XCTAssertFalse(InsightsPresentation.showsGitContext(noGit))
+        XCTAssertTrue(InsightsPresentation.showsGitContext(git))
+        XCTAssertFalse(InsightsPresentation.showsGitHubContext(noGitHub))
+        XCTAssertTrue(InsightsPresentation.showsGitHubContext(gitHub))
+    }
+
     func testActivityBucketChoiceKeepsAllTimeThresholdAtFortyFiveDays() {
         XCTAssertFalse(
             InsightsPresentation.usesWeeklyActivityBuckets(

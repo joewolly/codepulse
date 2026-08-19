@@ -20,88 +20,110 @@ struct InsightsView: View {
             Color(nsColor: .windowBackgroundColor)
                 .ignoresSafeArea()
 
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 20) {
-                    if let summary = calculatedSummary {
-                        InsightSummarySection(summary: summary)
-
-                        if summary.hasActivity {
-                            ActivityChart(
-                                activity: summary.dailyActivity,
-                                timeframe: timeframe,
-                                calendar: store.calendar
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let summary = calculatedSummary {
+                            let contentWidth = min(max(proxy.size.width - 32, 0), 880)
+                            InsightSummarySection(
+                                summary: summary,
+                                contentWidth: contentWidth
                             )
 
-                            FocusPatternsSection(
-                                insights: summary.focusInsights,
-                                calendar: store.calendar
-                            )
+                            if summary.hasActivity {
+                                InsightsAnalyticalGrid(
+                                    summary: summary,
+                                    timeframe: timeframe,
+                                    calendar: store.calendar,
+                                    contentWidth: contentWidth
+                                )
 
-                            WorkDistributionSection(
-                                projectBreakdown: summary.projectBreakdown,
-                                typeBreakdown: summary.typeBreakdown
-                            )
+                                GoalOutcomeInsightSection(
+                                    insights: summary.goalOutcomeInsights,
+                                    contentWidth: contentWidth
+                                )
+                                ProjectOutcomeInsightSection(
+                                    insights: summary.projectOutcomeInsights,
+                                    isAllProjects: project == .allProjects,
+                                    calendar: store.calendar
+                                )
 
-                            GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
-                            ProjectOutcomeInsightSection(
-                                insights: summary.projectOutcomeInsights,
-                                isAllProjects: project == .allProjects,
-                                calendar: store.calendar
-                            )
-
-                            if summary.developerToolInsights.sessionsWithAnyTool > 0 ||
-                                summary.gitInsights.sessionsWithGitContext > 0 ||
-                                summary.githubInsights.sessionsWithGitHubContext > 0 {
-                                DeveloperEcosystemSection(summary: summary)
+                                if InsightsPresentation.showsGitContext(summary.gitInsights) ||
+                                    InsightsPresentation.showsGitHubContext(summary.githubInsights) {
+                                    ContextualEcosystemSection(
+                                        summary: summary,
+                                        contentWidth: contentWidth
+                                    )
+                                }
+                            } else {
+                                InsightsEmptyState(
+                                    timeframe: timeframe,
+                                    projectTitle: project.title(options: calculatedProjectOptions),
+                                    isAllProjects: project == .allProjects,
+                                    hasSavedSessions: hasSavedSessions,
+                                    onShowAllProjects: project == .allProjects
+                                        ? nil
+                                        : { project = .allProjects }
+                                )
                             }
                         } else {
-                            InsightsEmptyState(
-                                timeframe: timeframe,
-                                projectTitle: project.title(options: calculatedProjectOptions),
-                                isAllProjects: project == .allProjects,
-                                hasSavedSessions: hasSavedSessions,
-                                onShowAllProjects: project == .allProjects
-                                    ? nil
-                                    : { project = .allProjects }
-                            )
+                            ProgressView("Calculating Insights…")
+                                .frame(maxWidth: .infinity, minHeight: 180)
+                                .accessibilityLabel("Calculating Insights")
                         }
-                    } else {
-                        ProgressView("Calculating Insights…")
-                            .frame(maxWidth: .infinity, minHeight: 180)
-                            .accessibilityLabel("Calculating Insights")
                     }
+                    .padding(16)
+                    .frame(maxWidth: 880, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
-                .padding(24)
-                .frame(maxWidth: 880, alignment: .topLeading)
-                .frame(maxWidth: .infinity, alignment: .top)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Insights")
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                Picker("Timeframe", selection: $timeframe) {
-                    ForEach(InsightsTimeframe.allCases) { option in
-                        Text(option.title).tag(option)
-                    }
-                }
-                .pickerStyle(.menu)
-                .accessibilityLabel("Insights timeframe")
-                .accessibilityValue(timeframe.title)
-
-                Picker("Project", selection: $project) {
-                    Text("All Projects").tag(InsightsProjectFilter.allProjects)
-                    Text("No Project").tag(InsightsProjectFilter.noProject)
-                    if !calculatedProjectOptions.isEmpty {
-                        Divider()
-                        ForEach(calculatedProjectOptions) { option in
-                            Text(option.title).tag(option.filter)
+                HStack(spacing: 6) {
+                    Text("Timeframe:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(selection: $timeframe) {
+                        ForEach(InsightsTimeframe.allCases) { option in
+                            Text(option.title).tag(option)
                         }
+                    } label: {
+                        Text(timeframe.title)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 128, alignment: .leading)
+                    .accessibilityLabel("Insights timeframe")
+                    .accessibilityValue(timeframe.title)
+
+                    Text("Project:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(selection: $project) {
+                        Text("All Projects").tag(InsightsProjectFilter.allProjects)
+                        Text("No Project").tag(InsightsProjectFilter.noProject)
+                        if !calculatedProjectOptions.isEmpty {
+                            Divider()
+                            ForEach(calculatedProjectOptions) { option in
+                                Text(option.title).tag(option.filter)
+                            }
+                        }
+                    } label: {
+                        Text(project.title(options: calculatedProjectOptions))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 170, alignment: .leading)
+                    .accessibilityLabel("Insights project")
+                    .accessibilityValue(project.title(options: calculatedProjectOptions))
                 }
-                .pickerStyle(.menu)
-                .accessibilityLabel("Insights project")
-                .accessibilityValue(project.title(options: calculatedProjectOptions))
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -199,7 +221,7 @@ private struct InsightCard<Content: View>: View {
 
     var body: some View {
         content()
-            .padding(16)
+            .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -212,85 +234,65 @@ private struct InsightCard<Content: View>: View {
 }
 
 private struct ResponsiveInsightGrid<Content: View>: View {
-    let narrowColumns: Int
-    let regularColumns: Int
+    let columns: Int
+    let spacing: CGFloat
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), alignment: .leading),
-                    count: regularColumns
-                ),
-                alignment: .leading,
-                spacing: 16,
-                content: content
-            )
-            .frame(
-                minWidth: InsightsPresentation.regularLayoutMinimumWidth,
-                alignment: .leading
-            )
-
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.flexible(), alignment: .leading),
-                    count: narrowColumns
-                ),
-                alignment: .leading,
-                spacing: 16,
-                content: content
-            )
-        }
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: spacing, alignment: .leading),
+                count: max(1, columns)
+            ),
+            alignment: .leading,
+            spacing: spacing,
+            content: content
+        )
     }
 }
 
 private struct InsightSummarySection: View {
     let summary: InsightsSummary
+    let contentWidth: CGFloat
 
     var body: some View {
-        InsightCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Period Summary", systemImage: "chart.bar.doc.horizontal")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-
-                Text("Local active time from saved and current sessions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                ResponsiveInsightGrid(narrowColumns: 2, regularColumns: 4) {
-                    InsightMetric(
-                        title: "Active Time",
-                        value: CodePulseFormatting.duration(summary.totalDuration),
-                        detail: summary.durationDifference.flatMap {
-                            guard let label = InsightsPresentation.comparisonLabel(for: summary.timeframe) else {
-                                return nil
-                            }
-                            return "\(CodePulseFormatting.signedDuration($0)) \(label)"
-                        }
-                    )
-                    InsightMetric(
-                        title: "Sessions",
-                        value: "\(summary.sessionCount)",
-                        detail: sessionDifference
-                    )
-                    InsightMetric(
-                        title: "Average Session",
-                        value: summary.sessionCount == 0
-                            ? "—"
-                            : CodePulseFormatting.duration(summary.averageSessionDuration),
-                        detail: nil
-                    )
-                    InsightMetric(
-                        title: "Longest Session",
-                        value: summary.sessionCount == 0
-                            ? "—"
-                            : CodePulseFormatting.duration(summary.longestSessionDuration),
-                        detail: nil
-                    )
+        ResponsiveInsightGrid(
+            columns: InsightsPresentation.summaryColumnCount(for: contentWidth),
+            spacing: 12
+        ) {
+            InsightSummaryCard(
+                systemImage: "clock",
+                title: "Active Time",
+                value: CodePulseFormatting.duration(summary.totalDuration),
+                detail: summary.durationDifference.flatMap {
+                    guard let label = InsightsPresentation.comparisonLabel(for: summary.timeframe) else {
+                        return nil
+                    }
+                    return "\(CodePulseFormatting.signedDuration($0)) \(label)"
                 }
-            }
+            )
+            InsightSummaryCard(
+                systemImage: "rectangle.stack",
+                title: "Sessions",
+                value: "\(summary.sessionCount)",
+                detail: sessionDifference
+            )
+            InsightSummaryCard(
+                systemImage: "timer",
+                title: "Average Session",
+                value: summary.sessionCount == 0
+                    ? "—"
+                    : CodePulseFormatting.duration(summary.averageSessionDuration),
+                detail: nil
+            )
+            InsightSummaryCard(
+                systemImage: "hourglass",
+                title: "Longest Session",
+                value: summary.sessionCount == 0
+                    ? "—"
+                    : CodePulseFormatting.duration(summary.longestSessionDuration),
+                detail: nil
+            )
         }
     }
 
@@ -305,12 +307,112 @@ private struct InsightSummarySection: View {
     }
 }
 
+private struct InsightSummaryCard: View {
+    let systemImage: String
+    let title: String
+    let value: String
+    let detail: String?
+
+    var body: some View {
+        InsightCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 22, height: 22)
+                        .background(Color.accentColor.opacity(0.14), in: Circle())
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(value)
+                    .font(.title2.weight(.semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityValue(detail.map { "\(value), \($0)" } ?? value)
+    }
+}
+
+private struct InsightsAnalyticalGrid: View {
+    let summary: InsightsSummary
+    let timeframe: InsightsTimeframe
+    let calendar: Calendar
+    let contentWidth: CGFloat
+
+    private let columnSpacing: CGFloat = 16
+
+    var body: some View {
+        if InsightsPresentation.mainGridColumnCount(for: contentWidth) == 2 {
+            let leftWidth = max(0, (contentWidth - columnSpacing) * 0.55)
+            let rightWidth = max(0, contentWidth - columnSpacing - leftWidth)
+
+            HStack(alignment: .top, spacing: columnSpacing) {
+                leftColumn
+                    .frame(width: leftWidth, alignment: .topLeading)
+                rightColumn
+                    .frame(width: rightWidth, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: columnSpacing) {
+                leftColumn
+                rightColumn
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var leftColumn: some View {
+        VStack(alignment: .leading, spacing: columnSpacing) {
+            ActivityChart(
+                activity: summary.dailyActivity,
+                timeframe: timeframe,
+                calendar: calendar
+            )
+            FocusPatternsSection(
+                insights: summary.focusInsights,
+                calendar: calendar
+            )
+        }
+    }
+
+    private var rightColumn: some View {
+        VStack(alignment: .leading, spacing: columnSpacing) {
+            WorkTypeSection(typeBreakdown: summary.typeBreakdown)
+            ProjectDistributionSection(projectBreakdown: summary.projectBreakdown)
+            if InsightsPresentation.showsDeveloperToolParticipation(summary.developerToolInsights) {
+                DeveloperToolInsightSection(insights: summary.developerToolInsights)
+            }
+        }
+    }
+}
+
 private struct GoalOutcomeInsightSection: View {
     let insights: GoalOutcomeInsights
+    let contentWidth: CGFloat
 
     var body: some View {
         InsightSection(title: "Goals & Outcomes", systemImage: "target") {
-            ResponsiveInsightGrid(narrowColumns: 2, regularColumns: 4) {
+            ResponsiveInsightGrid(
+                columns: InsightsPresentation.summaryColumnCount(for: contentWidth),
+                spacing: 12
+            ) {
                 InsightMetric(
                     title: "Goals Set",
                     value: "\(insights.sessionsWithGoal)",
@@ -621,7 +723,7 @@ private struct FocusPatternsSection: View {
 
     var body: some View {
         InsightSection(title: "Focus Patterns", systemImage: "scope") {
-            ResponsiveInsightGrid(narrowColumns: 2, regularColumns: 3) {
+            ResponsiveInsightGrid(columns: 2, spacing: 10) {
                 InsightMetric(
                     title: "Focus Blocks",
                     value: "\(insights.focusBlockCount)",
@@ -742,7 +844,7 @@ private struct FocusHourChart: View {
                     }
                 }
             }
-            .frame(height: 140)
+            .frame(height: 84)
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Sustained Focus by Hour")
             .accessibilityValue(accessibilitySummary)
@@ -767,73 +869,26 @@ private struct FocusHourChart: View {
     }
 }
 
-private struct WorkDistributionSection: View {
-    let projectBreakdown: [InsightsBreakdown]
+private struct WorkTypeSection: View {
     let typeBreakdown: [InsightsBreakdown]
 
     var body: some View {
-        InsightSection(title: "Work Distribution", systemImage: "square.grid.2x2") {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 16) {
-                    DistributionCard(
-                        title: "By Project",
-                        values: projectBreakdown,
-                        limit: InsightsPresentation.projectBreakdownLimit,
-                        overflowLabel: "projects"
-                    )
-                    DistributionCard(
-                        title: "By Session Type",
-                        values: typeBreakdown,
-                        limit: nil,
-                        overflowLabel: nil
-                    )
-                }
-                .frame(minWidth: InsightsPresentation.regularLayoutMinimumWidth)
-
-                VStack(alignment: .leading, spacing: 16) {
-                    DistributionCard(
-                        title: "By Project",
-                        values: projectBreakdown,
-                        limit: InsightsPresentation.projectBreakdownLimit,
-                        overflowLabel: "projects"
-                    )
-                    DistributionCard(
-                        title: "By Session Type",
-                        values: typeBreakdown,
-                        limit: nil,
-                        overflowLabel: nil
-                    )
-                }
-            }
+        InsightSection(title: "Work Type Breakdown", systemImage: "square.grid.2x2") {
+            InsightBreakdownBars(values: typeBreakdown)
         }
     }
 }
 
-private struct DistributionCard: View {
-    let title: String
-    let values: [InsightsBreakdown]
-    let limit: Int?
-    let overflowLabel: String?
+private struct ProjectDistributionSection: View {
+    let projectBreakdown: [InsightsBreakdown]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
+        InsightSection(title: "Project Distribution", systemImage: "folder") {
             InsightBreakdownBars(
-                values: values,
-                limit: limit,
-                overflowLabel: overflowLabel
+                values: projectBreakdown,
+                limit: InsightsPresentation.projectBreakdownLimit,
+                overflowLabel: "projects"
             )
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
         }
     }
 }
@@ -858,6 +913,10 @@ private struct InsightBreakdownBars: View {
         return InsightsPresentation.boundedBreakdown(values, limit: limit)
     }
 
+    private var totalDuration: TimeInterval {
+        values.reduce(0) { $0 + $1.duration }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             if boundedValues.visible.isEmpty {
@@ -869,8 +928,8 @@ private struct InsightBreakdownBars: View {
                     DistributionBar(
                         label: value.label,
                         value: value.duration,
-                        maximum: boundedValues.visible.first?.duration ?? value.duration,
-                        valueLabel: CodePulseFormatting.duration(value.duration)
+                        total: totalDuration,
+                        valueLabel: valueLabel(for: value)
                     )
                 }
 
@@ -882,12 +941,19 @@ private struct InsightBreakdownBars: View {
             }
         }
     }
+
+    private func valueLabel(for value: InsightsBreakdown) -> String {
+        let percentage = totalDuration > 0
+            ? Int((value.duration / totalDuration * 100).rounded())
+            : 0
+        return "\(percentage)% · \(CodePulseFormatting.duration(value.duration))"
+    }
 }
 
 private struct DistributionBar: View {
     let label: String
     let value: TimeInterval
-    let maximum: TimeInterval
+    let total: TimeInterval
     let valueLabel: String
 
     var body: some View {
@@ -903,12 +969,16 @@ private struct DistributionBar: View {
             }
 
             GeometryReader { geometry in
-                let fraction = maximum > 0 ? value / maximum : 0
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.78))
-                    .frame(width: max(3, geometry.size.width * fraction), height: 7)
+                let fraction = total > 0 ? value / total : 0
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(nsColor: .separatorColor).opacity(0.32))
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.82))
+                        .frame(width: max(3, geometry.size.width * fraction))
+                }
             }
-            .frame(height: 7)
+            .frame(height: 8)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
@@ -957,7 +1027,11 @@ private struct ActivityChart: View {
             }
             .chartYAxisLabel("Hours")
             .chartXAxis {
-                AxisMarks(values: .automatic) { value in
+                AxisMarks(
+                    values: .automatic(
+                        desiredCount: usesWeeklyBuckets ? 6 : min(7, max(3, buckets.count))
+                    )
+                ) { value in
                     AxisGridLine()
                     AxisTick()
                     if usesWeeklyBuckets {
@@ -967,7 +1041,7 @@ private struct ActivityChart: View {
                     }
                 }
             }
-            .frame(height: 180)
+            .frame(height: 168)
             .accessibilityElement(children: buckets.count <= 31 ? .contain : .ignore)
             .accessibilityLabel(usesWeeklyBuckets ? "Weekly active time chart" : "Daily active time chart")
             .accessibilityValue(accessibilitySummary)
@@ -986,18 +1060,19 @@ private struct ActivityChart: View {
     }
 }
 
-private struct DeveloperEcosystemSection: View {
+private struct ContextualEcosystemSection: View {
     let summary: InsightsSummary
+    let contentWidth: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if summary.developerToolInsights.sessionsWithAnyTool > 0 {
-                DeveloperToolInsightSection(insights: summary.developerToolInsights)
-            }
-            if summary.gitInsights.sessionsWithGitContext > 0 {
+        ResponsiveInsightGrid(
+            columns: InsightsPresentation.mainGridColumnCount(for: contentWidth),
+            spacing: 16
+        ) {
+            if InsightsPresentation.showsGitContext(summary.gitInsights) {
                 GitInsightSection(insights: summary.gitInsights)
             }
-            if summary.githubInsights.sessionsWithGitHubContext > 0 {
+            if InsightsPresentation.showsGitHubContext(summary.githubInsights) {
                 GitHubInsightSection(insights: summary.githubInsights)
             }
         }
@@ -1008,7 +1083,7 @@ private struct DeveloperToolInsightSection: View {
     let insights: DeveloperToolInsights
 
     var body: some View {
-        InsightSection(title: "Developer Tools", systemImage: "wrench.and.screwdriver") {
+        InsightSection(title: "Developer Tool Participation", systemImage: "terminal") {
             VStack(alignment: .leading, spacing: 8) {
                 InsightCountRow(label: "Codex", count: insights.sessionsWithCodex)
                 InsightCountRow(label: "OpenCode", count: insights.sessionsWithOpenCode)
@@ -1017,7 +1092,7 @@ private struct DeveloperToolInsightSection: View {
                 InsightCountRow(label: "No developer tool", count: insights.sessionsWithNoTool)
             }
 
-            Text("Participation counts selected sessions containing developer-tool context. It does not estimate tool time, output, effectiveness, or productivity.")
+            Text("Participation counts sessions containing tool context. It does not estimate usage time, output, effectiveness, or productivity.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
