@@ -100,17 +100,21 @@ final class SessionPresetAutomationTests: XCTestCase {
         ))
         let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
 
+        XCTAssertEqual(store.automationRuleStatus(for: rule), .automationOff)
         XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Enabled · Automation Off")
         store.updateSettings { $0.automationEnabled = true }
+        XCTAssertEqual(store.automationRuleStatus(for: rule), .enabled)
         XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Enabled")
 
         _ = try store.archiveProject(id: project.record.id, at: start.addingTimeInterval(1))
+        XCTAssertEqual(store.automationRuleStatus(for: rule), .projectArchived)
         XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Project Archived")
 
         _ = try store.restoreProject(id: project.record.id)
         let missingFolder = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodePulseStatusRelink-\(UUID().uuidString)", isDirectory: true)
         XCTAssertTrue(store.updateProjectFolder(id: project.record.id, folderURL: missingFolder))
+        XCTAssertEqual(store.automationRuleStatus(for: rule), .needsRelink)
         XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Needs Relink")
     }
 

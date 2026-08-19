@@ -39,7 +39,7 @@ struct AutomationSettingsView: View {
                     AutomationRuleRow(
                         rule: rule,
                         preset: preset,
-                        statusLabel: store.automationRuleStatusLabel(for: rule),
+                        status: store.automationRuleStatus(for: rule),
                         edit: {
                             ruleBeingEdited = rule
                             isPresentingEditor = true
@@ -84,14 +84,14 @@ struct AutomationSettingsView: View {
 private struct AutomationRuleRow: View {
     let rule: SessionAutomationRule
     let preset: SessionPreset?
-    let statusLabel: String
+    let status: SessionAutomationRuleStatus
     let edit: () -> Void
     let delete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: iconName)
-                .foregroundStyle(statusLabel == "Enabled" ? Color.accentColor : Color.secondary)
+                .foregroundStyle(status == .enabled ? Color.accentColor : Color.secondary)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -153,23 +153,30 @@ private struct AutomationRuleRow: View {
         }
     }
 
+    private var statusLabel: String { status.label }
+
     private var statusStyle: SettingsStatusStyle {
-        if statusLabel == "Enabled" { return .success }
-        if statusLabel == "Project Archived" || statusLabel == "Disabled" { return .neutral }
-        if statusLabel == "Needs Relink" || statusLabel == "Enabled · Automation Off" || statusLabel.hasPrefix("Needs attention") {
+        switch status {
+        case .enabled:
+            return .success
+        case .projectArchived, .disabled:
+            return .neutral
+        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink, .needsAttention:
             return .warning
         }
-        return .error
     }
 
     private var statusSystemImage: String {
-        if statusLabel == "Enabled" { return "checkmark.circle" }
-        if statusLabel == "Project Archived" { return "archivebox" }
-        if statusLabel == "Disabled" { return "minus.circle" }
-        if statusLabel == "Needs Relink" || statusLabel == "Enabled · Automation Off" || statusLabel.hasPrefix("Needs attention") {
+        switch status {
+        case .enabled:
+            return "checkmark.circle"
+        case .projectArchived:
+            return "archivebox"
+        case .disabled:
+            return "minus.circle"
+        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink, .needsAttention:
             return "exclamationmark.triangle"
         }
-        return "xmark.octagon"
     }
 
 }

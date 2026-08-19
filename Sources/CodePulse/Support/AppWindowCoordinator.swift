@@ -119,7 +119,9 @@ final class AppWindowCoordinator: ObservableObject {
                 contentMinimumSize: Self.settingsMinimumContentSize
             )
         }
-        window.delegate = settingsWindowMinimumDelegate
+        if window.delegate == nil {
+            window.delegate = settingsWindowMinimumDelegate
+        }
     }
 
     private func applySettingsMinimumSize(to window: NSWindow) {
