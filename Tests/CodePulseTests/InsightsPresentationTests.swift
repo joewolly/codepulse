@@ -19,6 +19,22 @@ final class InsightsPresentationTests: XCTestCase {
         XCTAssertEqual(InsightsPresentation.summaryColumnCount(for: 880), 4)
     }
 
+    func testDrawableContentWidthMatchesPaddedReadableContainerAtSupportedWindowSizes() {
+        let minimum = InsightsPresentation.drawableContentWidth(for: 740)
+        let defaultWidth = InsightsPresentation.drawableContentWidth(for: 880)
+        let wide = InsightsPresentation.drawableContentWidth(for: 1_200)
+
+        XCTAssertEqual(minimum, 708)
+        XCTAssertEqual(defaultWidth, 848)
+        XCTAssertEqual(wide, 848)
+        XCTAssertEqual(InsightsPresentation.summaryColumnCount(for: minimum), 2)
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: minimum), 1)
+        XCTAssertEqual(InsightsPresentation.summaryColumnCount(for: defaultWidth), 4)
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: defaultWidth), 2)
+        XCTAssertEqual(InsightsPresentation.summaryColumnCount(for: wide), 4)
+        XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: wide), 2)
+    }
+
     func testMainGridStaysSingleColumnAtMinimumAndUsesTwoColumnsAtDefault() {
         XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: 740), 1)
         XCTAssertEqual(InsightsPresentation.mainGridColumnCount(for: 799), 1)
@@ -128,6 +144,15 @@ final class InsightsPresentationTests: XCTestCase {
         XCTAssertTrue(buckets.allSatisfy(\.isWeekly))
         XCTAssertEqual(buckets.first?.date, date(year: 2024, month: 1, day: 1))
         XCTAssertEqual(buckets.last?.date, date(year: 2024, month: 1, day: 8))
+        XCTAssertEqual(buckets.map(\.label), ["Jan 1 – Jan 7", "Jan 8 – Jan 14"])
+
+        let dailyBuckets = InsightsPresentation.activityBuckets(
+            activity: [activity[0]],
+            timeframe: .last30Days,
+            calendar: calendar
+        )
+        XCTAssertEqual(dailyBuckets.map(\.label), ["Monday, January 1"])
+        XCTAssertFalse(dailyBuckets[0].isWeekly)
     }
 
     func testComparisonCopyIsSuppressedForAllTime() {

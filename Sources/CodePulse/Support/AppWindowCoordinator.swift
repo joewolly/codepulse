@@ -3,6 +3,8 @@ import SwiftUI
 
 @MainActor
 final class AppWindowCoordinator: ObservableObject {
+    private static let insightsMinimumContentSize = NSSize(width: 740, height: 540)
+
     private let store: SessionStore
     private var historyWindow: NSWindow?
     private var insightsWindow: NSWindow?
@@ -63,7 +65,7 @@ final class AppWindowCoordinator: ObservableObject {
             newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             newWindow.toolbarStyle = .unified
             newWindow.setContentSize(NSSize(width: 880, height: 640))
-            newWindow.contentMinSize = NSSize(width: 740, height: 540)
+            newWindow.contentMinSize = Self.insightsMinimumContentSize
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             insightsWindow = newWindow
@@ -72,7 +74,8 @@ final class AppWindowCoordinator: ObservableObject {
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        window.contentMinSize = NSSize(width: 740, height: 540)
+        // Reapply the minimum for reused or pre-existing Insights windows.
+        window.contentMinSize = Self.insightsMinimumContentSize
     }
 
     func showSettings() {

@@ -24,7 +24,7 @@ struct InsightsView: View {
                 ScrollView(.vertical) {
                     VStack(alignment: .leading, spacing: 12) {
                         if let summary = calculatedSummary {
-                            let contentWidth = min(max(proxy.size.width - 32, 0), 880)
+                            let contentWidth = InsightsPresentation.drawableContentWidth(for: proxy.size.width)
                             InsightSummarySection(
                                 summary: summary,
                                 contentWidth: contentWidth
@@ -73,7 +73,7 @@ struct InsightsView: View {
                         }
                     }
                     .padding(16)
-                    .frame(maxWidth: 880, alignment: .topLeading)
+                    .frame(maxWidth: InsightsPresentation.readableContentWidth, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
             }
@@ -348,7 +348,8 @@ private struct InsightSummaryCard: View {
                         Text(detail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     } else {
                         Color.clear
                             .accessibilityHidden(true)
@@ -753,7 +754,8 @@ private struct InsightMetric: View {
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
     }
@@ -1170,10 +1172,18 @@ private struct DeveloperToolInsightSection: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if insights.hasModelData {
-                InsightMetadataList(title: "Models", values: insights.modelBreakdown)
+                InsightMetadataList(
+                    title: "Models",
+                    values: insights.modelBreakdown,
+                    limit: InsightsPresentation.modelBreakdownLimit
+                )
             }
             if insights.hasProfileData {
-                InsightMetadataList(title: "Profiles / Agents", values: insights.profileBreakdown)
+                InsightMetadataList(
+                    title: "Profiles / Agents",
+                    values: insights.profileBreakdown,
+                    limit: InsightsPresentation.profileBreakdownLimit
+                )
             }
         }
     }
@@ -1198,11 +1208,9 @@ private struct InsightCountRow: View {
 private struct InsightMetadataList: View {
     let title: String
     let values: [InsightsCountBreakdown]
+    let limit: Int
 
     private var boundedValues: (visible: [InsightsCountBreakdown], overflow: Int) {
-        let limit = title == "Models"
-            ? InsightsPresentation.modelBreakdownLimit
-            : InsightsPresentation.profileBreakdownLimit
         return InsightsPresentation.boundedMetadata(values, limit: limit)
     }
 
@@ -1243,14 +1251,13 @@ private struct GitInsightSection: View {
                 InsightValueRow(label: "Files Changed", value: InsightsPresentation.gitMetricText(insights.totalFilesChanged))
                 InsightValueRow(
                     label: "Insertions",
-                    value: insights.totalInsertions.map { "+\($0)" } ?? "Unavailable"
+                    value: insights.totalInsertions.map { "+\($0)" } ?? InsightsPresentation.gitMetricText(nil)
                 )
                 InsightValueRow(
                     label: "Deletions",
-                    value: insights.totalDeletions.map { "−\($0)" } ?? "Unavailable"
+                    value: insights.totalDeletions.map { "−\($0)" } ?? InsightsPresentation.gitMetricText(nil)
                 )
-                if !insights.hasMetrics ||
-                    insights.totalCommits == nil ||
+                if insights.totalCommits == nil ||
                     insights.totalFilesChanged == nil ||
                     insights.totalInsertions == nil ||
                     insights.totalDeletions == nil {

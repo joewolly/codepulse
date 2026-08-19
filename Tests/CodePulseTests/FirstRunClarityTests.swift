@@ -254,6 +254,15 @@ final class FirstRunClarityTests: XCTestCase {
         )
         XCTAssertEqual(noInsights.title, "No Saved Sessions")
         XCTAssertTrue(noInsights.message.contains("Completed development sessions"))
+
+        let filteredAllProjects = EmptyStateCopy.insights(
+            hasSavedSessions: true,
+            timeframeTitle: "This Week",
+            projectTitle: "All Projects",
+            isAllProjects: true
+        )
+        XCTAssertEqual(filteredAllProjects.title, "No Activity in This Week")
+
         XCTAssertEqual(filteredInsights.title, "No Activity for Demo")
         XCTAssertTrue(filteredInsights.message.contains("menu bar"))
 

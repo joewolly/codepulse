@@ -18,7 +18,10 @@ enum InsightsPresentation {
     /// The readable canvas is intentionally capped so a wide window does not
     /// turn the charts into a full-width document. The two-column threshold is
     /// between the supported 740pt minimum and the 880pt default canvas.
-    static let regularLayoutMinimumWidth: CGFloat = 780
+    static let readableContentWidth: CGFloat = 880
+    static let contentHorizontalPadding: CGFloat = 32
+    static let maximumDrawableContentWidth: CGFloat =
+        readableContentWidth - contentHorizontalPadding
     static let wideLayoutThreshold: CGFloat = 800
     static let projectBreakdownLimit = 8
     static let modelBreakdownLimit = 6
@@ -28,6 +31,13 @@ enum InsightsPresentation {
     static let singleProjectOutcomeLimit = 3
     static let allProjectsOutcomeEntryLimit = 1
     static let singleProjectOutcomeEntryLimit = 3
+
+    static func drawableContentWidth(for containerWidth: CGFloat) -> CGFloat {
+        min(
+            max(containerWidth - contentHorizontalPadding, 0),
+            maximumDrawableContentWidth
+        )
+    }
 
     static func summaryColumnCount(for contentWidth: CGFloat) -> Int {
         contentWidth >= wideLayoutThreshold ? 4 : 2
@@ -92,11 +102,23 @@ enum InsightsPresentation {
                 InsightsActivityBucket(
                     date: date,
                     duration: duration,
-                    label: CodePulseFormatting.fullDay(date, calendar: calendar),
+                    label: weeklyActivityLabel(for: date, calendar: calendar),
                     isWeekly: true
                 )
             }
             .sorted { $0.date < $1.date }
+    }
+
+    private static func weeklyActivityLabel(for weekStart: Date, calendar: Calendar) -> String {
+        guard let week = calendar.dateInterval(of: .weekOfYear, for: weekStart),
+              let weekEnd = calendar.date(byAdding: .day, value: -1, to: week.end) else {
+            return CodePulseFormatting.fullDay(weekStart, calendar: calendar)
+        }
+        return CodePulseFormatting.dateRange(
+            start: week.start,
+            end: weekEnd,
+            calendar: calendar
+        )
     }
 
     static func comparisonLabel(for timeframe: InsightsTimeframe) -> String? {
