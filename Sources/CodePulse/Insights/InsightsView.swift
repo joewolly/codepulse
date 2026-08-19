@@ -16,77 +16,102 @@ struct InsightsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                InsightsFilterBar(
-                    timeframe: $timeframe,
-                    project: $project,
-                    projectOptions: calculatedProjectOptions,
-                    onExport: exportReport
-                )
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
 
-                if let summary = calculatedSummary {
-                    if summary.hasActivity {
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 20) {
+                    if let summary = calculatedSummary {
                         InsightSummarySection(summary: summary)
-                        GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
-                        ProjectOutcomeInsightSection(
-                            insights: summary.projectOutcomeInsights,
-                            isAllProjects: project == .allProjects,
-                            calendar: store.calendar
-                        )
-                        FocusPatternsSection(
-                            insights: summary.focusInsights,
-                            comparison: summary.comparisonFocusInsights,
-                            calendar: store.calendar,
-                            timeframe: timeframe
-                        )
-                        ActivityChart(
-                            activity: summary.dailyActivity,
-                            timeframe: timeframe,
-                            calendar: store.calendar
-                        )
 
-                        InsightSection(title: "Work Type", systemImage: "square.grid.2x2") {
-                            InsightBreakdownBars(values: summary.typeBreakdown)
-                        }
+                        if summary.hasActivity {
+                            ActivityChart(
+                                activity: summary.dailyActivity,
+                                timeframe: timeframe,
+                                calendar: store.calendar
+                            )
 
-                        InsightSection(title: "Projects", systemImage: "folder") {
-                            InsightBreakdownBars(values: summary.projectBreakdown)
-                        }
+                            FocusPatternsSection(
+                                insights: summary.focusInsights,
+                                calendar: store.calendar
+                            )
 
-                        DeveloperToolInsightSection(insights: summary.developerToolInsights)
+                            WorkDistributionSection(
+                                projectBreakdown: summary.projectBreakdown,
+                                typeBreakdown: summary.typeBreakdown
+                            )
 
-                        if summary.gitInsights.sessionsWithGitContext > 0 {
-                            GitInsightSection(insights: summary.gitInsights)
-                        }
+                            GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
+                            ProjectOutcomeInsightSection(
+                                insights: summary.projectOutcomeInsights,
+                                isAllProjects: project == .allProjects,
+                                calendar: store.calendar
+                            )
 
-                        if summary.githubInsights.sessionsWithGitHubContext > 0 {
-                            GitHubInsightSection(insights: summary.githubInsights)
+                            if summary.developerToolInsights.sessionsWithAnyTool > 0 ||
+                                summary.gitInsights.sessionsWithGitContext > 0 ||
+                                summary.githubInsights.sessionsWithGitHubContext > 0 {
+                                DeveloperEcosystemSection(summary: summary)
+                            }
+                        } else {
+                            InsightsEmptyState(
+                                timeframe: timeframe,
+                                projectTitle: project.title(options: calculatedProjectOptions),
+                                isAllProjects: project == .allProjects,
+                                hasSavedSessions: hasSavedSessions,
+                                onShowAllProjects: project == .allProjects
+                                    ? nil
+                                    : { project = .allProjects }
+                            )
                         }
                     } else {
-                        GoalOutcomeInsightSection(insights: summary.goalOutcomeInsights)
-                        ProjectOutcomeInsightSection(
-                            insights: summary.projectOutcomeInsights,
-                            isAllProjects: project == .allProjects,
-                            calendar: store.calendar
-                        )
-                        InsightsEmptyState(
-                            timeframe: timeframe,
-                            projectTitle: project.title(options: calculatedProjectOptions),
-                            isAllProjects: project == .allProjects,
-                            hasSavedSessions: hasSavedSessions
-                        )
+                        ProgressView("Calculating Insights…")
+                            .frame(maxWidth: .infinity, minHeight: 180)
+                            .accessibilityLabel("Calculating Insights")
                     }
-                } else {
-                    ProgressView("Calculating Insights…")
-                        .frame(maxWidth: .infinity, minHeight: 180)
-                        .accessibilityLabel("Calculating Insights")
                 }
+                .padding(24)
+                .frame(maxWidth: 880, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Insights")
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Picker("Timeframe", selection: $timeframe) {
+                    ForEach(InsightsTimeframe.allCases) { option in
+                        Text(option.title).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityLabel("Insights timeframe")
+                .accessibilityValue(timeframe.title)
+
+                Picker("Project", selection: $project) {
+                    Text("All Projects").tag(InsightsProjectFilter.allProjects)
+                    Text("No Project").tag(InsightsProjectFilter.noProject)
+                    if !calculatedProjectOptions.isEmpty {
+                        Divider()
+                        ForEach(calculatedProjectOptions) { option in
+                            Text(option.title).tag(option.filter)
+                        }
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityLabel("Insights project")
+                .accessibilityValue(project.title(options: calculatedProjectOptions))
+            }
+
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: exportReport) {
+                    Label("Export Report…", systemImage: "square.and.arrow.down")
+                }
+                .accessibilityLabel("Export Insights Report")
+                .accessibilityHint("Saves the current Insights timeframe and project as a Markdown report")
+            }
+        }
         .alert("Report Export Failed", isPresented: $reportExportError) {
             Button("OK", role: .cancel) { reportExportError = false }
         } message: {
@@ -97,7 +122,6 @@ struct InsightsView: View {
         .onChange(of: project) { _ in refreshInsights() }
         .onChange(of: store.stateRevision) { _ in refreshInsights() }
         .onChange(of: insightsReferenceMinute) { _ in refreshInsights() }
-        .frame(minWidth: 700, idealWidth: 760, minHeight: 560, idealHeight: 620)
     }
 
     private func refreshInsights() {
@@ -170,57 +194,54 @@ private extension InsightsProjectFilter {
     }
 }
 
-private struct InsightsFilterBar: View {
-    @Binding var timeframe: InsightsTimeframe
-    @Binding var project: InsightsProjectFilter
-    let projectOptions: [InsightsProjectOption]
-    let onExport: () -> Void
+private struct InsightCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(timeframe.title)
-                    .font(.title2.weight(.semibold))
-                Text("Local active time from saved and current sessions")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+        content()
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1)
             }
+    }
+}
 
-            Spacer(minLength: 16)
+private struct ResponsiveInsightGrid<Content: View>: View {
+    let narrowColumns: Int
+    let regularColumns: Int
+    @ViewBuilder let content: () -> Content
 
-            Picker("Timeframe", selection: $timeframe) {
-                ForEach(InsightsTimeframe.allCases) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityLabel("Insights timeframe")
-            .accessibilityValue(timeframe.title)
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.flexible(), alignment: .leading),
+                    count: regularColumns
+                ),
+                alignment: .leading,
+                spacing: 16,
+                content: content
+            )
+            .frame(
+                minWidth: InsightsPresentation.regularLayoutMinimumWidth,
+                alignment: .leading
+            )
 
-            Picker("Project", selection: $project) {
-                Text("All Projects").tag(InsightsProjectFilter.allProjects)
-                Text("No Project").tag(InsightsProjectFilter.noProject)
-                if !projectOptions.isEmpty {
-                    Divider()
-                    ForEach(projectOptions) { option in
-                        Text(option.title).tag(option.filter)
-                    }
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityLabel("Insights project")
-            .accessibilityValue(project.title(options: projectOptions))
-
-            Button {
-                onExport()
-            } label: {
-                Label("Export Report…", systemImage: "doc.text")
-            }
-            .buttonStyle(.bordered)
-            .accessibilityLabel("Export Insights Report")
-            .accessibilityHint("Saves the current Insights timeframe and project as a Markdown report")
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.flexible(), alignment: .leading),
+                    count: narrowColumns
+                ),
+                alignment: .leading,
+                spacing: 16,
+                content: content
+            )
         }
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -228,64 +249,56 @@ private struct InsightSummarySection: View {
     let summary: InsightsSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Summary")
-                .font(.headline)
+        InsightCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Period Summary", systemImage: "chart.bar.doc.horizontal")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 135), alignment: .leading)],
-                alignment: .leading,
-                spacing: 16
-            ) {
-                InsightMetric(
-                    title: "Active Time",
-                    value: CodePulseFormatting.duration(summary.totalDuration),
-                    detail: summary.durationDifference.map {
-                        "\(CodePulseFormatting.signedDuration($0)) \(comparisonLabel)"
-                    }
-                )
-                InsightMetric(
-                    title: "Sessions",
-                    value: "\(summary.sessionCount)",
-                    detail: sessionDifference
-                )
-                InsightMetric(
-                    title: "Average Session",
-                    value: summary.sessionCount == 0
-                        ? "—"
-                        : CodePulseFormatting.duration(summary.averageSessionDuration),
-                    detail: nil
-                )
-                InsightMetric(
-                    title: "Longest Session",
-                    value: summary.sessionCount == 0
-                        ? "—"
-                        : CodePulseFormatting.duration(summary.longestSessionDuration),
-                    detail: nil
-                )
+                Text("Local active time from saved and current sessions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ResponsiveInsightGrid(narrowColumns: 2, regularColumns: 4) {
+                    InsightMetric(
+                        title: "Active Time",
+                        value: CodePulseFormatting.duration(summary.totalDuration),
+                        detail: summary.durationDifference.flatMap {
+                            guard let label = InsightsPresentation.comparisonLabel(for: summary.timeframe) else {
+                                return nil
+                            }
+                            return "\(CodePulseFormatting.signedDuration($0)) \(label)"
+                        }
+                    )
+                    InsightMetric(
+                        title: "Sessions",
+                        value: "\(summary.sessionCount)",
+                        detail: sessionDifference
+                    )
+                    InsightMetric(
+                        title: "Average Session",
+                        value: summary.sessionCount == 0
+                            ? "—"
+                            : CodePulseFormatting.duration(summary.averageSessionDuration),
+                        detail: nil
+                    )
+                    InsightMetric(
+                        title: "Longest Session",
+                        value: summary.sessionCount == 0
+                            ? "—"
+                            : CodePulseFormatting.duration(summary.longestSessionDuration),
+                        detail: nil
+                    )
+                }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.secondary.opacity(0.08))
-            )
-        }
-    }
-
-    private var comparisonLabel: String {
-        switch summary.timeframe {
-        case .thisWeek: return "vs last week"
-        case .lastWeek: return "vs the week before"
-        case .thisMonth: return "vs last month"
-        case .last30Days: return "vs the previous 30 days"
-        case .last90Days: return "vs the previous 90 days"
-        case .allTime: return ""
         }
     }
 
     private var sessionDifference: String? {
         guard let comparisonSessionCount = summary.comparisonSessionCount else { return nil }
+        guard let comparisonLabel = InsightsPresentation.comparisonLabel(for: summary.timeframe) else {
+            return nil
+        }
         let difference = summary.sessionCount - comparisonSessionCount
         let sign = difference < 0 ? "−" : "+"
         return "\(sign)\(abs(difference)) \(comparisonLabel)"
@@ -296,61 +309,52 @@ private struct GoalOutcomeInsightSection: View {
     let insights: GoalOutcomeInsights
 
     var body: some View {
-        InsightSection(title: "Goal vs Actual", systemImage: "target") {
-            if insights.completedSessionCount == 0 {
-                Text("No completed sessions in this period yet.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("No completed sessions in this period yet")
-            } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 135), alignment: .leading)],
-                    alignment: .leading,
-                    spacing: 16
-                ) {
-                    InsightMetric(
-                        title: "Goals Set",
-                        value: "\(insights.sessionsWithGoal)",
-                        detail: nil
-                    )
-                    InsightMetric(
-                        title: "Outcomes Recorded",
-                        value: "\(insights.sessionsWithOutcome)",
-                        detail: nil
-                    )
-                    InsightMetric(
-                        title: "Closed Loop",
-                        value: "\(insights.closedLoopCount)",
-                        detail: insights.closedLoopRate.map { "\(percentage($0)) of goal sessions" }
-                    )
-                    InsightMetric(
-                        title: "Needs Follow-Up",
-                        value: "\(insights.needsFollowUpCount)",
-                        detail: nil
-                    )
-                }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.secondary.opacity(0.08))
+        InsightSection(title: "Goals & Outcomes", systemImage: "target") {
+            ResponsiveInsightGrid(narrowColumns: 2, regularColumns: 4) {
+                InsightMetric(
+                    title: "Goals Set",
+                    value: "\(insights.sessionsWithGoal)",
+                    detail: nil
                 )
-
-                if insights.outcomeOnlyCount > 0 {
-                    Text("\(insights.outcomeOnlyCount) \(sessionLabel(insights.outcomeOnlyCount)) recorded \(insights.outcomeOnlyCount == 1 ? "an outcome" : "outcomes") without \(insights.outcomeOnlyCount == 1 ? "a goal" : "goals").")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if insights.untrackedCount > 0 {
-                    Text("\(insights.untrackedCount) completed \(sessionLabel(insights.untrackedCount)) had neither a goal nor outcome.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                InsightMetric(
+                    title: "Outcomes Recorded",
+                    value: "\(insights.sessionsWithOutcome)",
+                    detail: nil
+                )
+                InsightMetric(
+                    title: "Closed Loop",
+                    value: "\(insights.closedLoopCount)",
+                    detail: insights.closedLoopRate.map { "\(percentage($0)) of goal sessions" }
+                )
+                InsightMetric(
+                    title: "Needs Follow-Up",
+                    value: "\(insights.needsFollowUpCount)",
+                    detail: nil
+                )
             }
 
-            Text("Actual reflects the outcome you recorded. CodePulse does not judge whether a goal was achieved.")
+            if insights.completedSessionCount == 0 {
+                Text("No completed sessions in this period yet. Active sessions are excluded from Goals & Outcomes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("No completed sessions in this period yet. Active sessions are excluded from Goals and Outcomes.")
+            }
+
+            if insights.outcomeOnlyCount > 0 {
+                Text("\(insights.outcomeOnlyCount) \(sessionLabel(insights.outcomeOnlyCount)) recorded \(insights.outcomeOnlyCount == 1 ? "an outcome" : "outcomes") without \(insights.outcomeOnlyCount == 1 ? "a goal" : "goals").")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if insights.untrackedCount > 0 {
+                Text("\(insights.untrackedCount) completed \(sessionLabel(insights.untrackedCount)) had neither a goal nor outcome.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("Reflects the outcome you recorded. CodePulse does not judge whether a goal was achieved.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -371,10 +375,9 @@ private struct ProjectOutcomeInsightSection: View {
     let isAllProjects: Bool
     let calendar: Calendar
 
-    private let overviewProjectLimit = 6
-
     private var visibleInsights: [ProjectOutcomeInsights] {
-        isAllProjects ? Array(insights.prefix(overviewProjectLimit)) : insights
+        let limits = InsightsPresentation.outcomeLimits(isAllProjects: isAllProjects)
+        return Array(insights.prefix(limits.projects))
     }
 
     var body: some View {
@@ -395,16 +398,17 @@ private struct ProjectOutcomeInsightSection: View {
                         ProjectOutcomeCard(
                             insights: project,
                             calendar: calendar,
-                            entryLimit: isAllProjects ? 1 : 3
+                            entryLimit: InsightsPresentation.outcomeLimits(isAllProjects: isAllProjects).entries
                         )
                     }
                 }
-                if isAllProjects, insights.count > overviewProjectLimit {
-                    Text("Showing \(overviewProjectLimit) of \(insights.count) project summaries. Choose a project above to inspect it individually.")
+                let projectLimit = InsightsPresentation.outcomeLimits(isAllProjects: isAllProjects).projects
+                if isAllProjects, insights.count > projectLimit {
+                    Text("Showing \(projectLimit) of \(insights.count) project summaries. Choose a project above to inspect it individually.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel("Showing \(overviewProjectLimit) of \(insights.count) project summaries. Choose a project above to inspect it individually.")
+                        .accessibilityLabel("Showing \(projectLimit) of \(insights.count) project summaries. Choose a project above to inspect it individually.")
                 }
             }
         }
@@ -475,8 +479,12 @@ private struct ProjectOutcomeCard: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.secondary.opacity(0.08))
+                .fill(Color(nsColor: .controlBackgroundColor))
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(insights.label)
     }
@@ -500,7 +508,7 @@ private struct ProjectOutcomeEntryView: View {
                     .lineLimit(3)
             }
             if let outcome = entry.outcome {
-                Text("Actual")
+                Text("Outcome")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(outcome)
@@ -515,7 +523,7 @@ private struct ProjectOutcomeEntryView: View {
     private var accessibilityText: String {
         var parts = [shortDate(entry.endedAt)]
         if let goal = entry.goal { parts.append("Goal: \(goal)") }
-        if let outcome = entry.outcome { parts.append("Actual: \(outcome)") }
+        if let outcome = entry.outcome { parts.append("Outcome: \(outcome)") }
         return parts.joined(separator: ", ")
     }
 
@@ -570,7 +578,7 @@ private struct InsightMetric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(value)
-                .font(.title3.weight(.semibold))
+                .font(.title2.weight(.semibold))
                 .monospacedDigit()
                 .lineLimit(1)
             Text(title)
@@ -596,65 +604,55 @@ private struct InsightSection<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-            content()
+        InsightCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(title, systemImage: systemImage)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                content()
+            }
         }
     }
 }
 
 private struct FocusPatternsSection: View {
     let insights: FocusInsights
-    let comparison: FocusInsights?
     let calendar: Calendar
-    let timeframe: InsightsTimeframe
 
     var body: some View {
         InsightSection(title: "Focus Patterns", systemImage: "scope") {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 135), alignment: .leading)],
-                alignment: .leading,
-                spacing: 16
-            ) {
+            ResponsiveInsightGrid(narrowColumns: 2, regularColumns: 3) {
                 InsightMetric(
                     title: "Focus Blocks",
                     value: "\(insights.focusBlockCount)",
                     detail: nil
                 )
                 InsightMetric(
-                    title: "Longest Focus",
-                    value: CodePulseFormatting.duration(insights.longestFocusBlockDuration),
-                    detail: longestComparison
+                    title: "Sustained Focus",
+                    value: CodePulseFormatting.duration(insights.sustainedFocusDuration),
+                    detail: "at least 30m per block"
                 )
                 InsightMetric(
-                    title: "Average Focus Block",
+                    title: "Sustained Share",
+                    value: insights.sustainedFocusShare.map(percentage) ?? "—",
+                    detail: insights.sustainedFocusShare.map { "\(percentage($0)) of active time" }
+                )
+                InsightMetric(
+                    title: "Average Block",
                     value: CodePulseFormatting.duration(insights.averageFocusBlockDuration),
                     detail: nil
                 )
                 InsightMetric(
-                    title: "Sustained Focus",
-                    value: CodePulseFormatting.duration(insights.sustainedFocusDuration),
-                    detail: sustainedDetail
+                    title: "Longest Focus",
+                    value: CodePulseFormatting.duration(insights.longestFocusBlockDuration),
+                    detail: nil
                 )
                 InsightMetric(
                     title: "Project Switches",
                     value: "\(insights.projectSwitchCount)",
-                    detail: projectSwitchDetail
-                )
-                InsightMetric(
-                    title: "Peak Focus Hour",
-                    value: insights.peakFocusHour.map { hourRange($0, calendar: calendar) } ?? "—",
-                    detail: nil
+                    detail: "within 15m"
                 )
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.secondary.opacity(0.08))
-            )
 
             if let bestFocusDay = insights.bestFocusDay {
                 Text("Best focus day: \(shortDate(bestFocusDay.date, calendar: calendar)) · \(CodePulseFormatting.duration(bestFocusDay.duration)) sustained focus")
@@ -663,55 +661,18 @@ private struct FocusPatternsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let peakFocusHour = insights.peakFocusHour {
+                Text("Peak focus hour: \(hourRange(peakFocusHour, calendar: calendar))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             FocusHourChart(hourly: insights.hourlySustainedFocus, calendar: calendar)
 
-            Text("Focus blocks join work on the same project across brief interruptions of up to 15 minutes. Sustained focus means at least 30 minutes of active time. Project switches count rapid transitions between identified projects; CodePulse does not estimate their cognitive cost.")
+            Text("Focus blocks join work on the same project across interruptions up to 15m. Sustained focus requires at least 30m of active time. Project switches count rapid transitions between identified projects without estimating cognitive cost.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var comparisonLabel: String {
-        switch timeframe {
-        case .thisWeek: return "vs last week"
-        case .lastWeek: return "vs the week before"
-        case .thisMonth: return "vs last month"
-        case .last30Days: return "vs the previous 30 days"
-        case .last90Days: return "vs the previous 90 days"
-        case .allTime: return ""
-        }
-    }
-
-    private var longestComparison: String? {
-        guard let comparison else { return nil }
-        return "\(CodePulseFormatting.signedDuration(insights.longestFocusBlockDuration - comparison.longestFocusBlockDuration)) \(comparisonLabel)"
-    }
-
-    private var sustainedDetail: String? {
-        guard let share = insights.sustainedFocusShare else { return nil }
-        var detail = "\(percentage(share)) of active time"
-        if let comparisonShare = comparison?.sustainedFocusShare {
-            let points = (share - comparisonShare) * 100
-            let sign = points < 0 ? "−" : "+"
-            detail += " · \(sign)\(Int(abs(points).rounded())) pts \(comparisonLabel)"
-        }
-        return detail
-    }
-
-    private var projectSwitchDetail: String? {
-        guard let comparison else { return "within 15m" }
-        return "\(insights.projectSwitchCount) vs \(comparison.projectSwitchCount) \(comparisonPeriod) · within 15m"
-    }
-
-    private var comparisonPeriod: String {
-        switch timeframe {
-        case .thisWeek: return "last week"
-        case .lastWeek: return "the week before"
-        case .thisMonth: return "last month"
-        case .last30Days: return "the previous 30 days"
-        case .last90Days: return "the previous 90 days"
-        case .allTime: return "comparison"
         }
     }
 
@@ -762,35 +723,29 @@ private struct FocusHourChart: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Sustained Focus by Hour")
                 .font(.subheadline.weight(.semibold))
-            if hourly.allSatisfy({ $0.duration == 0 }) {
-                Text("No sustained focus blocks in this period.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                Chart(hourly) { value in
-                    BarMark(
-                        x: .value("Hour", value.hour),
-                        y: .value("Sustained Focus Hours", value.duration / 3_600)
-                    )
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityLabel(Text(hourLabel(value.hour)))
-                    .accessibilityValue(Text(CodePulseFormatting.duration(value.duration)))
-                }
-                .chartYAxisLabel("Hours")
-                .chartXAxis {
-                    AxisMarks(values: Array(stride(from: 0, through: 20, by: 4))) { value in
-                        AxisGridLine()
-                        AxisTick()
-                        if let hour = value.as(Int.self) {
-                            AxisValueLabel(hourLabel(hour))
-                        }
+            Chart(hourly) { value in
+                BarMark(
+                    x: .value("Hour", value.hour),
+                    y: .value("Sustained Focus Hours", value.duration / 3_600)
+                )
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel(Text(hourLabel(value.hour)))
+                .accessibilityValue(Text(CodePulseFormatting.duration(value.duration)))
+            }
+            .chartYAxisLabel("Hours")
+            .chartXAxis {
+                AxisMarks(values: Array(stride(from: 0, through: 20, by: 4))) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    if let hour = value.as(Int.self) {
+                        AxisValueLabel(hourLabel(hour))
                     }
                 }
-                .frame(height: 150)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Sustained Focus by Hour")
-                .accessibilityValue(accessibilitySummary)
             }
+            .frame(height: 140)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Sustained Focus by Hour")
+            .accessibilityValue(accessibilitySummary)
         }
     }
 
@@ -812,23 +767,117 @@ private struct FocusHourChart: View {
     }
 }
 
+private struct WorkDistributionSection: View {
+    let projectBreakdown: [InsightsBreakdown]
+    let typeBreakdown: [InsightsBreakdown]
+
+    var body: some View {
+        InsightSection(title: "Work Distribution", systemImage: "square.grid.2x2") {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    DistributionCard(
+                        title: "By Project",
+                        values: projectBreakdown,
+                        limit: InsightsPresentation.projectBreakdownLimit,
+                        overflowLabel: "projects"
+                    )
+                    DistributionCard(
+                        title: "By Session Type",
+                        values: typeBreakdown,
+                        limit: nil,
+                        overflowLabel: nil
+                    )
+                }
+                .frame(minWidth: InsightsPresentation.regularLayoutMinimumWidth)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    DistributionCard(
+                        title: "By Project",
+                        values: projectBreakdown,
+                        limit: InsightsPresentation.projectBreakdownLimit,
+                        overflowLabel: "projects"
+                    )
+                    DistributionCard(
+                        title: "By Session Type",
+                        values: typeBreakdown,
+                        limit: nil,
+                        overflowLabel: nil
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct DistributionCard: View {
+    let title: String
+    let values: [InsightsBreakdown]
+    let limit: Int?
+    let overflowLabel: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            InsightBreakdownBars(
+                values: values,
+                limit: limit,
+                overflowLabel: overflowLabel
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.3), lineWidth: 1)
+        }
+    }
+}
+
 private struct InsightBreakdownBars: View {
     let values: [InsightsBreakdown]
+    let limit: Int?
+    let overflowLabel: String?
+
+    init(
+        values: [InsightsBreakdown],
+        limit: Int? = nil,
+        overflowLabel: String? = nil
+    ) {
+        self.values = values
+        self.limit = limit
+        self.overflowLabel = overflowLabel
+    }
+
+    private var boundedValues: (visible: [InsightsBreakdown], overflow: Int) {
+        guard let limit else { return (values, 0) }
+        return InsightsPresentation.boundedBreakdown(values, limit: limit)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            if values.isEmpty {
+            if boundedValues.visible.isEmpty {
                 Text("No activity")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(values) { value in
+                ForEach(boundedValues.visible) { value in
                     DistributionBar(
                         label: value.label,
                         value: value.duration,
-                        maximum: values.first?.duration ?? value.duration,
+                        maximum: boundedValues.visible.first?.duration ?? value.duration,
                         valueLabel: CodePulseFormatting.duration(value.duration)
                     )
+                }
+
+                if boundedValues.overflow > 0, let overflowLabel {
+                    Text("+\(boundedValues.overflow) more \(overflowLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -867,46 +916,32 @@ private struct DistributionBar: View {
     }
 }
 
-private struct ActivityBucket: Identifiable {
-    let date: Date
-    let duration: TimeInterval
-    let label: String
-
-    var id: Date { date }
-}
-
 private struct ActivityChart: View {
     let activity: [DailyActivity]
     let timeframe: InsightsTimeframe
     let calendar: Calendar
+    private let buckets: [InsightsActivityBucket]
 
-    private var usesWeeklyBuckets: Bool {
-        timeframe == .last90Days || (timeframe == .allTime && activity.count > 45)
+    init(
+        activity: [DailyActivity],
+        timeframe: InsightsTimeframe,
+        calendar: Calendar
+    ) {
+        self.activity = activity
+        self.timeframe = timeframe
+        self.calendar = calendar
+        self.buckets = InsightsPresentation.activityBuckets(
+            activity: activity,
+            timeframe: timeframe,
+            calendar: calendar
+        )
     }
 
-    private var buckets: [ActivityBucket] {
-        guard usesWeeklyBuckets else {
-            return activity.map {
-                ActivityBucket(
-                    date: $0.date,
-                    duration: $0.duration,
-                    label: CodePulseFormatting.fullDay($0.date, calendar: calendar)
-                )
-            }
-        }
-
-        var grouped: [Date: TimeInterval] = [:]
-        for day in activity {
-            let weekStart = calendar.dateInterval(of: .weekOfYear, for: day.date)?.start ?? day.date
-            grouped[weekStart, default: 0] += day.duration
-        }
-        return grouped.map { date, duration in
-            ActivityBucket(
-                date: date,
-                duration: duration,
-                label: CodePulseFormatting.fullDay(date, calendar: calendar)
-            )
-        }.sorted { $0.date < $1.date }
+    private var usesWeeklyBuckets: Bool {
+        InsightsPresentation.usesWeeklyActivityBuckets(
+            timeframe: timeframe,
+            dailyBucketCount: activity.count
+        )
     }
 
     var body: some View {
@@ -932,7 +967,7 @@ private struct ActivityChart: View {
                     }
                 }
             }
-            .frame(height: 190)
+            .frame(height: 180)
             .accessibilityElement(children: buckets.count <= 31 ? .contain : .ignore)
             .accessibilityLabel(usesWeeklyBuckets ? "Weekly active time chart" : "Daily active time chart")
             .accessibilityValue(accessibilitySummary)
@@ -951,6 +986,24 @@ private struct ActivityChart: View {
     }
 }
 
+private struct DeveloperEcosystemSection: View {
+    let summary: InsightsSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if summary.developerToolInsights.sessionsWithAnyTool > 0 {
+                DeveloperToolInsightSection(insights: summary.developerToolInsights)
+            }
+            if summary.gitInsights.sessionsWithGitContext > 0 {
+                GitInsightSection(insights: summary.gitInsights)
+            }
+            if summary.githubInsights.sessionsWithGitHubContext > 0 {
+                GitHubInsightSection(insights: summary.githubInsights)
+            }
+        }
+    }
+}
+
 private struct DeveloperToolInsightSection: View {
     let insights: DeveloperToolInsights
 
@@ -964,7 +1017,7 @@ private struct DeveloperToolInsightSection: View {
                 InsightCountRow(label: "No developer tool", count: insights.sessionsWithNoTool)
             }
 
-            Text("Participation counts sessions. A session using both tools is included in both tool totals and the overlapping Both tools total.")
+            Text("Participation counts selected sessions containing developer-tool context. It does not estimate tool time, output, effectiveness, or productivity.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -999,12 +1052,19 @@ private struct InsightMetadataList: View {
     let title: String
     let values: [InsightsCountBreakdown]
 
+    private var boundedValues: (visible: [InsightsCountBreakdown], overflow: Int) {
+        let limit = title == "Models"
+            ? InsightsPresentation.modelBreakdownLimit
+            : InsightsPresentation.profileBreakdownLimit
+        return InsightsPresentation.boundedMetadata(values, limit: limit)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .padding(.top, 4)
-            ForEach(values) { value in
+            ForEach(boundedValues.visible) { value in
                 HStack {
                     Text(value.label)
                         .lineLimit(1)
@@ -1015,6 +1075,11 @@ private struct InsightMetadataList: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityElement(children: .combine)
+            }
+            if boundedValues.overflow > 0 {
+                Text("+\(boundedValues.overflow) more")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -1027,23 +1092,31 @@ private struct GitInsightSection: View {
         InsightSection(title: "Git Activity", systemImage: "arrow.triangle.branch") {
             VStack(alignment: .leading, spacing: 8) {
                 InsightCountRow(label: "Sessions with Git context", count: insights.sessionsWithGitContext)
-                if let totalCommits = insights.totalCommits {
-                    InsightValueRow(label: "Commits", value: "\(totalCommits)")
-                }
-                if let totalFilesChanged = insights.totalFilesChanged {
-                    InsightValueRow(label: "Files Changed", value: "\(totalFilesChanged)")
-                }
-                if let totalInsertions = insights.totalInsertions {
-                    InsightValueRow(label: "Insertions", value: "+\(totalInsertions)")
-                }
-                if let totalDeletions = insights.totalDeletions {
-                    InsightValueRow(label: "Deletions", value: "−\(totalDeletions)")
-                }
-                if !insights.hasMetrics {
-                    Text("Detailed Git totals are unavailable for these historical snapshots.")
+                InsightValueRow(label: "Commits", value: InsightsPresentation.gitMetricText(insights.totalCommits))
+                InsightValueRow(label: "Files Changed", value: InsightsPresentation.gitMetricText(insights.totalFilesChanged))
+                InsightValueRow(
+                    label: "Insertions",
+                    value: insights.totalInsertions.map { "+\($0)" } ?? "Unavailable"
+                )
+                InsightValueRow(
+                    label: "Deletions",
+                    value: insights.totalDeletions.map { "−\($0)" } ?? "Unavailable"
+                )
+                if !insights.hasMetrics ||
+                    insights.totalCommits == nil ||
+                    insights.totalFilesChanged == nil ||
+                    insights.totalInsertions == nil ||
+                    insights.totalDeletions == nil {
+                    Text(InsightsPresentation.unavailableGitTotalsCopy)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Text("Git values are totals from the included session snapshots, not time-apportioned events in this period.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -1066,7 +1139,11 @@ private struct GitHubInsightSection: View {
                     Text("Repository Time")
                         .font(.subheadline.weight(.semibold))
                         .padding(.top, 4)
-                    InsightBreakdownBars(values: insights.repositoryBreakdown)
+                    InsightBreakdownBars(
+                        values: insights.repositoryBreakdown,
+                        limit: InsightsPresentation.repositoryBreakdownLimit,
+                        overflowLabel: "repositories"
+                    )
                 }
             }
         }
@@ -1094,6 +1171,7 @@ private struct InsightsEmptyState: View {
     let projectTitle: String
     let isAllProjects: Bool
     let hasSavedSessions: Bool
+    let onShowAllProjects: (() -> Void)?
 
     var body: some View {
         EmptyStateView(
@@ -1102,7 +1180,9 @@ private struct InsightsEmptyState: View {
                 timeframeTitle: timeframe.title,
                 projectTitle: projectTitle,
                 isAllProjects: isAllProjects
-            )
+            ),
+            actionTitle: isAllProjects ? nil : "Show All Projects",
+            action: onShowAllProjects
         )
         .frame(maxWidth: .infinity, minHeight: 260)
     }

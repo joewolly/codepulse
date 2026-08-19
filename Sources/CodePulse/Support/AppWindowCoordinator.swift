@@ -61,8 +61,9 @@ final class AppWindowCoordinator: ObservableObject {
             let newWindow = NSWindow(contentViewController: hostingController)
             newWindow.title = "Insights"
             newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            newWindow.setContentSize(NSSize(width: 760, height: 620))
-            newWindow.minSize = NSSize(width: 640, height: 520)
+            newWindow.toolbarStyle = .unified
+            newWindow.setContentSize(NSSize(width: 880, height: 640))
+            newWindow.contentMinSize = NSSize(width: 740, height: 540)
             newWindow.isReleasedWhenClosed = false
             newWindow.center()
             insightsWindow = newWindow
@@ -71,6 +72,7 @@ final class AppWindowCoordinator: ObservableObject {
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.contentMinSize = NSSize(width: 740, height: 540)
     }
 
     func showSettings() {

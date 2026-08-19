@@ -252,10 +252,10 @@ final class FirstRunClarityTests: XCTestCase {
             projectTitle: "Demo",
             isAllProjects: false
         )
-        XCTAssertEqual(noInsights.title, "Not Enough Activity Yet")
-        XCTAssertTrue(noInsights.message.contains("save sessions"))
-        XCTAssertEqual(filteredInsights.title, "No Activity in This Selection")
-        XCTAssertTrue(filteredInsights.message.contains("Demo"))
+        XCTAssertEqual(noInsights.title, "No Saved Sessions")
+        XCTAssertTrue(noInsights.message.contains("Completed development sessions"))
+        XCTAssertEqual(filteredInsights.title, "No Activity for Demo")
+        XCTAssertTrue(filteredInsights.message.contains("menu bar"))
 
         XCTAssertEqual(
             EmptyStateCopy.presetAvailability(savedCount: 0, availableCount: 0),
