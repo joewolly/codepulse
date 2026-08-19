@@ -102,6 +102,7 @@ struct InsightsView: View {
                     .accessibilityLabel("Insights timeframe")
                     .accessibilityValue(timeframe.title)
                 }
+                .padding(.leading, 8)
             }
 
             ToolbarItem(placement: .navigation) {
