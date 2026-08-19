@@ -98,7 +98,7 @@ struct InsightsView: View {
                     }
                     .pickerStyle(.menu)
                     .controlSize(.small)
-                    .frame(width: 128, alignment: .leading)
+                    .frame(width: 144, alignment: .leading)
                     .accessibilityLabel("Insights timeframe")
                     .accessibilityValue(timeframe.title)
                 }
@@ -126,11 +126,11 @@ struct InsightsView: View {
                     }
                     .pickerStyle(.menu)
                     .controlSize(.small)
-                    .frame(width: 170, alignment: .leading)
+                    .frame(width: 152, alignment: .leading)
                     .accessibilityLabel("Insights project")
                     .accessibilityValue(project.title(options: calculatedProjectOptions))
                 }
-                .padding(.leading, 12)
+                .padding(.leading, 8)
             }
 
             ToolbarItem(placement: .primaryAction) {
