@@ -50,6 +50,19 @@ enum CodePulseFormatting {
         return formatter.string(from: date)
     }
 
+    static func dateRange(start: Date, end: Date, calendar: Calendar) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = calendar.locale ?? .current
+        formatter.timeZone = calendar.timeZone
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        let startLabel = formatter.string(from: start)
+        let endLabel = formatter.string(from: end)
+        return calendar.isDate(start, inSameDayAs: end)
+            ? startLabel
+            : "\(startLabel) – \(endLabel)"
+    }
+
     static func signedDuration(_ duration: TimeInterval) -> String {
         let sign = duration < 0 ? "−" : "+"
         return "\(sign)\(self.duration(abs(duration)))"

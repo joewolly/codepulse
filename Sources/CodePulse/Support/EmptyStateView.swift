@@ -37,23 +37,20 @@ enum EmptyStateCopy {
     ) -> EmptyStateContent {
         guard hasSavedSessions else {
             return EmptyStateContent(
-                systemImage: "clock",
-                title: "Not Enough Activity Yet",
-                message: "Insights appear after you save sessions."
+                systemImage: "calendar.badge.clock",
+                title: "No Saved Sessions",
+                message: "Completed development sessions will generate Insights automatically."
             )
         }
 
-        let message: String
-        if isAllProjects {
-            message = "There is no saved activity in \(timeframeTitle.lowercased()). Try another timeframe."
-        } else {
-            message = "There is no saved activity for \(projectTitle) in \(timeframeTitle.lowercased()). Try another project or timeframe."
-        }
+        let title = isAllProjects
+            ? "No Activity in \(timeframeTitle)"
+            : "No Activity for \(projectTitle)"
 
         return EmptyStateContent(
-            systemImage: "chart.bar.xaxis",
-            title: "No Activity in This Selection",
-            message: message
+            systemImage: "calendar.badge.clock",
+            title: title,
+            message: "Start a session from the menu bar or select a different timeframe."
         )
     }
 

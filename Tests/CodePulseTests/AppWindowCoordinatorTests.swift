@@ -148,6 +148,8 @@ final class AppWindowCoordinatorTests: XCTestCase {
         let insightsWindow = application.windows.first(where: { $0.title == "Insights" })
         XCTAssertNotNil(insightsWindow)
         XCTAssertTrue(insightsWindow?.isVisible == true)
+        XCTAssertEqual(insightsWindow?.contentMinSize, NSSize(width: 740, height: 540))
+        XCTAssertEqual(insightsWindow?.contentView?.bounds.size, NSSize(width: 880, height: 640))
 
         coordinator.showInsights()
         XCTAssertEqual(application.windows.filter { $0.title == "Insights" }.count, 1)
