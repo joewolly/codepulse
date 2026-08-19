@@ -98,7 +98,7 @@ struct InsightsView: View {
                     }
                     .pickerStyle(.menu)
                     .controlSize(.small)
-                    .frame(width: 122, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
                     .accessibilityLabel("Insights timeframe")
                     .accessibilityValue(timeframe.title)
                 }
