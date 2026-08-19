@@ -117,6 +117,12 @@ final class AppWindowCoordinatorTests: XCTestCase {
         XCTAssertEqual(firstWindow?.toolbarStyle, .unified)
         XCTAssertEqual(firstWindow?.contentView?.bounds.size, NSSize(width: 560, height: 520))
         XCTAssertEqual(firstWindow?.contentMinSize, NSSize(width: 540, height: 480))
+        XCTAssertEqual(
+            firstWindow?.minSize,
+            firstWindow?.frameRect(
+                forContentRect: NSRect(origin: .zero, size: AppWindowCoordinator.settingsMinimumContentSize)
+            ).size
+        )
 
         coordinator.showSettings()
         let settingsWindows = NSApp.windows.filter { $0.title == "Settings" }

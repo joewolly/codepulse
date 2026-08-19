@@ -15,6 +15,7 @@ final class AppWindowCoordinator: ObservableObject {
     private var onboardingWindow: NSWindow?
     private var recoveryWindow: NSWindow?
     private var settingsContentFactory: (() -> NSViewController)?
+    private var settingsWindowMinimumDelegate: SettingsWindowMinimumDelegate?
 
     init(store: SessionStore) {
         self.store = store
@@ -106,8 +107,27 @@ final class AppWindowCoordinator: ObservableObject {
         // Keep the Settings selector in the same native chrome layer when a
         // previously created or externally supplied Settings window is reused.
         window.toolbarStyle = .unified
+        configureSettingsMinimumDelegate(for: window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        applySettingsMinimumSize(to: window)
+    }
+
+    private func configureSettingsMinimumDelegate(for window: NSWindow) {
+        if settingsWindowMinimumDelegate == nil {
+            settingsWindowMinimumDelegate = SettingsWindowMinimumDelegate(
+                contentMinimumSize: Self.settingsMinimumContentSize
+            )
+        }
+        window.delegate = settingsWindowMinimumDelegate
+    }
+
+    private func applySettingsMinimumSize(to window: NSWindow) {
+        let contentMinimumSize = Self.settingsMinimumContentSize
+        window.contentMinSize = contentMinimumSize
+        window.minSize = window.frameRect(
+            forContentRect: NSRect(origin: .zero, size: contentMinimumSize)
+        ).size
     }
 
     func showOnboardingIfNeeded() {
@@ -174,5 +194,36 @@ final class AppWindowCoordinator: ObservableObject {
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+}
+
+private final class SettingsWindowMinimumDelegate: NSObject, NSWindowDelegate {
+    private let contentMinimumSize: NSSize
+
+    init(contentMinimumSize: NSSize) {
+        self.contentMinimumSize = contentMinimumSize
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        applyMinimum(to: window)
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        let minimumFrameSize = applyMinimum(to: sender)
+        return NSSize(
+            width: max(frameSize.width, minimumFrameSize.width),
+            height: max(frameSize.height, minimumFrameSize.height)
+        )
+    }
+
+    @discardableResult
+    private func applyMinimum(to window: NSWindow) -> NSSize {
+        window.contentMinSize = contentMinimumSize
+        let minimumFrameSize = window.frameRect(
+            forContentRect: NSRect(origin: .zero, size: contentMinimumSize)
+        ).size
+        window.minSize = minimumFrameSize
+        return minimumFrameSize
     }
 }
