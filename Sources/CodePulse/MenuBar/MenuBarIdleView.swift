@@ -60,7 +60,7 @@ struct MenuBarIdleView: View {
             .disabled(!store.isProjectAvailableForManualStart(selectedProjectID))
             .accessibilityLabel("Start Session")
             .accessibilityValue("Start Session")
-            .accessibilityHint("Starts a coding session")
+            .accessibilityHint("Starts a \(selectedType.title.lowercased()) session")
             .accessibilityIdentifier("start-session-button")
         }
         .onAppear {
