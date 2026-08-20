@@ -4,7 +4,7 @@ The current release candidate is CodePulse **1.3.0 (build 1300)**. The
 instructions below describe the local ad-hoc-signed Universal 2 packaging and
 the separate Sparkle update-signing path.
 
-CodePulse 1.3.0 completes the current Actionable Insights roadmap with Goal vs
+CodePulse 1.3.0 continues the local Actionable Insights experience with Goal vs
 Actual tracking, deterministic Focus Patterns, Project Outcomes, and aggregate
 follow-up signals, alongside a broad native macOS UI modernization across the
 Menu Bar, History, Insights, Settings, onboarding, and session-edit surfaces.

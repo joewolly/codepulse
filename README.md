@@ -16,12 +16,11 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.3.0 (build 1300)**. It completes
-the current Actionable Insights roadmap and a broad native-macOS UI
+The current release candidate is CodePulse **1.3.0 (build 1300)**. It continues
+the local Actionable Insights experience while shipping a broad native-macOS UI
 modernization across the Menu Bar, History, Insights, Settings, and related
-secondary surfaces, including Goal vs Actual tracking, deterministic Focus
-Patterns, Project Outcomes, and local follow-up signals. All analysis remains
-local and deterministic.
+secondary surfaces. Goal vs Actual tracking, deterministic Focus Patterns,
+Project Outcomes, and local follow-up signals remain local and deterministic.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
