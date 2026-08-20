@@ -72,20 +72,23 @@ final class ReadmeScreenshotTests: XCTestCase {
             outputDirectory: outputDirectory
         )
 
+        let historyStore = fixture.makeStore()
         try render(
             HistoryView()
-                .environmentObject(fixture.makeStore()),
-            size: CGSize(width: 760, height: 600),
+                .environmentObject(historyStore),
+            size: CGSize(width: 880, height: 600),
             name: "history",
-            outputDirectory: outputDirectory
+            outputDirectory: outputDirectory,
+            includeWindowFrame: true
         )
 
         try render(
             InsightsView()
                 .environmentObject(fixture.makeStore()),
-            size: CGSize(width: 760, height: 1400),
+            size: CGSize(width: 1040, height: 1400),
             name: "insights",
-            outputDirectory: outputDirectory
+            outputDirectory: outputDirectory,
+            includeWindowFrame: true
         )
 
         for name in ["menu-bar-session", "history", "insights"] {
@@ -100,7 +103,8 @@ final class ReadmeScreenshotTests: XCTestCase {
         _ content: Content,
         size: CGSize,
         name: String,
-        outputDirectory: URL
+        outputDirectory: URL,
+        includeWindowFrame: Bool = false
     ) throws {
         let root = content
             .frame(width: size.width, height: size.height)
@@ -113,15 +117,25 @@ final class ReadmeScreenshotTests: XCTestCase {
         let hostingController = NSHostingController(rootView: root)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.borderless],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
+        window.title = name.capitalized
+        window.toolbarStyle = .unified
         window.contentViewController = hostingController
         window.setContentSize(size)
         window.isReleasedWhenClosed = false
-        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.setFrameOrigin(
+            includeWindowFrame
+                ? NSPoint(x: 100, y: 100)
+                : NSPoint(x: -10_000, y: -10_000)
+        )
         window.orderFrontRegardless()
+        if includeWindowFrame {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
         defer {
             window.orderOut(nil)
             window.contentViewController = nil
@@ -130,6 +144,29 @@ final class ReadmeScreenshotTests: XCTestCase {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.15))
         hostingController.view.layoutSubtreeIfNeeded()
         hostingController.view.displayIfNeeded()
+
+        // History and Insights use native window-level split/toolbar chrome;
+        // capture the test window itself so those production surfaces remain
+        // visible in the README asset instead of rendering only its content.
+        if includeWindowFrame {
+            guard let windowImage = CGWindowListCreateImage(
+                .null,
+                .optionIncludingWindow,
+                CGWindowID(window.windowNumber),
+                [.bestResolution]
+            ) else {
+                throw ScreenshotError.renderingFailed(name)
+            }
+            let bitmap = NSBitmapImageRep(cgImage: windowImage)
+            guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw ScreenshotError.encodingFailed(name)
+            }
+            try png.write(
+                to: outputDirectory.appendingPathComponent("\(name).png"),
+                options: .atomic
+            )
+            return
+        }
 
         let bounds = hostingController.view.bounds
         guard let bitmap = hostingController.view.bitmapImageRepForCachingDisplay(in: bounds) else {
