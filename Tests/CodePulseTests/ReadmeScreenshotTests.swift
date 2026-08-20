@@ -148,13 +148,15 @@ final class ReadmeScreenshotTests: XCTestCase {
         // History and Insights use native window-level split/toolbar chrome;
         // capture the test window itself so those production surfaces remain
         // visible in the README asset instead of rendering only its content.
-        if includeWindowFrame,
-           let windowImage = CGWindowListCreateImage(
-               .null,
-               .optionIncludingWindow,
-               CGWindowID(window.windowNumber),
-               [.bestResolution]
-           ) {
+        if includeWindowFrame {
+            guard let windowImage = CGWindowListCreateImage(
+                .null,
+                .optionIncludingWindow,
+                CGWindowID(window.windowNumber),
+                [.bestResolution]
+            ) else {
+                throw ScreenshotError.renderingFailed(name)
+            }
             let bitmap = NSBitmapImageRep(cgImage: windowImage)
             guard let png = bitmap.representation(using: .png, properties: [:]) else {
                 throw ScreenshotError.encodingFailed(name)
