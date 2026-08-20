@@ -4,7 +4,7 @@ import XCTest
 @testable import CodePulse
 
 final class ReleaseReadinessTests: XCTestCase {
-    func testCanonicalAppMetadataMatchesV1_2_0AndExistingSparkleTrustKey() throws {
+    func testCanonicalAppMetadataMatchesV1_3_0AndExistingSparkleTrustKey() throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -19,8 +19,8 @@ final class ReleaseReadinessTests: XCTestCase {
             ) as? [String: Any]
         )
 
-        XCTAssertEqual(metadata["CFBundleShortVersionString"] as? String, "1.2.0")
-        XCTAssertEqual(metadata["CFBundleVersion"] as? String, "1200")
+        XCTAssertEqual(metadata["CFBundleShortVersionString"] as? String, "1.3.0")
+        XCTAssertEqual(metadata["CFBundleVersion"] as? String, "1300")
         XCTAssertEqual(metadata["LSMinimumSystemVersion"] as? String, "13.0")
         XCTAssertEqual(metadata["LSUIElement"] as? Bool, true)
         XCTAssertEqual(
