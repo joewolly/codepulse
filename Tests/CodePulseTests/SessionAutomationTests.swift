@@ -88,7 +88,7 @@ final class SessionAutomationTests: XCTestCase {
         XCTAssertEqual(trigger["developerTool"] as? String, "codex")
     }
 
-    func testCoordinatorMatchesCodexAndOpenCodeOnlyForConfiguredProject() throws {
+    func testCoordinatorUsesTheResolvedProjectForDeveloperToolStarts() throws {
         let fixture = try makeFixture(tool: .codex, enabled: true, seedEvent: nil)
         let coordinator = SessionAutomationCoordinator()
         let child = fixture.projectURL.appendingPathComponent("Sources")
@@ -101,7 +101,7 @@ final class SessionAutomationTests: XCTestCase {
         )
         XCTAssertEqual(
             coordinator.action(for: matching, in: fixture.state, now: start),
-            .start(rule: fixture.rule, startDate: start)
+            .startWithResolvedProject(rule: fixture.rule, projectID: fixture.project.id, startDate: start)
         )
 
         let prefix = event(
@@ -121,6 +121,569 @@ final class SessionAutomationTests: XCTestCase {
             timestamp: start
         )
         XCTAssertNil(coordinator.action(for: wrongTool, in: fixture.state, now: start))
+    }
+
+    func testProjectResolutionDrivesOneProjectIndependentCodexAndOpenCodeRule() throws {
+        let fixture = try makeTwoProjectFixture()
+        let coordinator = SessionAutomationCoordinator()
+
+        let codePulseCodex = event(
+            tool: .codex,
+            sessionID: "codex-codepulse",
+            type: .activity,
+            path: fixture.codePulseURL.appendingPathComponent("Sources/CodePulse/Insights").path
+        )
+        let proxPilotCodex = event(
+            tool: .codex,
+            sessionID: "codex-proxpilot",
+            type: .activity,
+            path: fixture.proxPilotURL.path
+        )
+        let codePulseOpenCode = event(
+            tool: .opencode,
+            sessionID: "opencode-codepulse",
+            type: .activity,
+            path: fixture.codePulseURL.path
+        )
+        let proxPilotOpenCode = event(
+            tool: .opencode,
+            sessionID: "opencode-proxpilot",
+            type: .activity,
+            path: fixture.proxPilotURL.appendingPathComponent("Sources").path
+        )
+
+        XCTAssertEqual(
+            DeveloperToolProjectResolver.projectID(
+                for: codePulseCodex.workingDirectory,
+                in: fixture.state.projects
+            ),
+            fixture.codePulse.id
+        )
+        XCTAssertEqual(
+            DeveloperToolProjectResolver.projectID(
+                for: proxPilotCodex.workingDirectory,
+                in: fixture.state.projects
+            ),
+            fixture.proxPilot.id
+        )
+        XCTAssertEqual(
+            coordinator.action(for: codePulseCodex, in: fixture.state, now: start),
+            .startWithResolvedProject(rule: fixture.codexRule, projectID: fixture.codePulse.id, startDate: start)
+        )
+        XCTAssertEqual(
+            coordinator.action(for: proxPilotCodex, in: fixture.state, now: start),
+            .startWithResolvedProject(rule: fixture.codexRule, projectID: fixture.proxPilot.id, startDate: start)
+        )
+        XCTAssertEqual(
+            coordinator.action(for: codePulseOpenCode, in: fixture.state, now: start),
+            .startWithResolvedProject(rule: fixture.openCodeRule, projectID: fixture.codePulse.id, startDate: start)
+        )
+        XCTAssertEqual(
+            coordinator.action(for: proxPilotOpenCode, in: fixture.state, now: start),
+            .startWithResolvedProject(rule: fixture.openCodeRule, projectID: fixture.proxPilot.id, startDate: start)
+        )
+    }
+
+    func testDeveloperToolLegacyScopeAndProjectlessFallbackPreserveTemplateSelection() throws {
+        let root = try temporaryDirectory()
+        let codePulseURL = root.appendingPathComponent("CodePulse", isDirectory: true)
+        let proxPilotURL = root.appendingPathComponent("ProxPilot", isDirectory: true)
+        try FileManager.default.createDirectory(at: codePulseURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: proxPilotURL, withIntermediateDirectories: true)
+        let codePulse = ProjectRecord(name: "CodePulse", folderPath: codePulseURL.path, createdAt: start)
+        let proxPilot = ProjectRecord(name: "ProxPilot", folderPath: proxPilotURL.path, createdAt: start)
+        let codePulseLegacyRule = SessionAutomationRule(
+            name: "CodePulse Legacy Codex",
+            trigger: .developerTool(.codex),
+            projectID: codePulse.id,
+            sessionType: .debugging,
+            goal: "Goal A",
+            minimumSavedDuration: 0
+        )
+        let projectlessPreset = SessionPreset(
+            name: "Projectless Codex Template",
+            projectID: nil,
+            sessionType: .review,
+            goal: "Fallback goal"
+        )
+        let projectlessRule = SessionAutomationRule(
+            name: "Projectless Codex",
+            trigger: .developerTool(.codex),
+            presetID: projectlessPreset.id,
+            minimumSavedDuration: 0
+        )
+        let state = AppState(
+            projects: [codePulse, proxPilot],
+            settings: CodePulseSettings(automationEnabled: true),
+            sessionPresets: [projectlessPreset],
+            automationRules: [codePulseLegacyRule, projectlessRule]
+        )
+        let canonicalLegacyRule = try XCTUnwrap(
+            state.automationRules.first(where: { $0.id == codePulseLegacyRule.id })
+        )
+        let codePulseEvent = event(
+            tool: .codex,
+            sessionID: "legacy-codepulse",
+            type: .sessionStarted,
+            path: codePulseURL.path
+        )
+        let proxPilotEvent = event(
+            tool: .codex,
+            sessionID: "projectless-proxpilot",
+            type: .sessionStarted,
+            path: proxPilotURL.path
+        )
+        let coordinator = SessionAutomationCoordinator()
+
+        XCTAssertEqual(
+            coordinator.action(for: codePulseEvent, in: state, now: start),
+            .startWithResolvedProject(
+                rule: canonicalLegacyRule,
+                projectID: codePulse.id,
+                startDate: start
+            )
+        )
+        XCTAssertEqual(
+            coordinator.action(for: proxPilotEvent, in: state, now: start),
+            .startWithResolvedProject(
+                rule: projectlessRule,
+                projectID: proxPilot.id,
+                startDate: start
+            )
+        )
+        XCTAssertNil(
+            coordinator.action(
+                for: proxPilotEvent,
+                in: AppState(
+                    projects: [codePulse, proxPilot],
+                    settings: CodePulseSettings(automationEnabled: true),
+                    automationRules: [codePulseLegacyRule]
+                ),
+                now: start
+            )
+        )
+
+        let codePulsePersistence = AutomationTestPersistence(state)
+        let codePulseInbox = DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+            applicationSupportDirectory: root.appendingPathComponent("support-codepulse")
+        ))
+        let codePulseStore = makeStore(
+            state: state,
+            clock: AutomationTestClock(start),
+            persistence: codePulsePersistence,
+            inbox: codePulseInbox
+        )
+        XCTAssertTrue(codePulseStore.startAutomatedSession(
+            with: canonicalLegacyRule,
+            event: codePulseEvent,
+            at: start,
+            signalAt: start
+        ))
+        XCTAssertEqual(codePulseStore.activeSession?.projectID, codePulse.id)
+        XCTAssertEqual(codePulseStore.activeSession?.type, .debugging)
+        XCTAssertEqual(codePulseStore.activeSession?.goal, "Goal A")
+
+        let proxPilotPersistence = AutomationTestPersistence(state)
+        let proxPilotInbox = DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+            applicationSupportDirectory: root.appendingPathComponent("support-proxpilot")
+        ))
+        let proxPilotStore = makeStore(
+            state: state,
+            clock: AutomationTestClock(start),
+            persistence: proxPilotPersistence,
+            inbox: proxPilotInbox
+        )
+        XCTAssertFalse(proxPilotStore.startAutomatedSession(
+            with: canonicalLegacyRule,
+            event: proxPilotEvent,
+            at: start,
+            signalAt: start
+        ))
+        XCTAssertNil(proxPilotStore.activeSession)
+        XCTAssertTrue(proxPilotStore.startAutomatedSession(
+            with: projectlessRule,
+            event: proxPilotEvent,
+            at: start,
+            signalAt: start
+        ))
+        XCTAssertEqual(proxPilotStore.activeSession?.projectID, proxPilot.id)
+        XCTAssertEqual(proxPilotStore.activeSession?.type, .review)
+        XCTAssertEqual(proxPilotStore.activeSession?.goal, "Fallback goal")
+
+        XCTAssertEqual(
+            coordinator.action(
+                for: event(
+                    tool: .codex,
+                    sessionID: "projectless-codepulse",
+                    type: .sessionStarted,
+                    path: codePulseURL.path
+                ),
+                in: AppState(
+                    projects: [codePulse, proxPilot],
+                    settings: CodePulseSettings(automationEnabled: true),
+                    sessionPresets: [projectlessPreset],
+                    automationRules: [projectlessRule]
+                ),
+                now: start
+            ),
+            .startWithResolvedProject(
+                rule: projectlessRule,
+                projectID: codePulse.id,
+                startDate: start
+            )
+        )
+    }
+
+    func testTwoLegacyDeveloperRulesSelectTheMatchingProjectTemplate() throws {
+        for tool in DeveloperTool.allCases {
+            let root = try temporaryDirectory()
+            let codePulseURL = root.appendingPathComponent("CodePulse", isDirectory: true)
+            let proxPilotURL = root.appendingPathComponent("ProxPilot", isDirectory: true)
+            try FileManager.default.createDirectory(at: codePulseURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: proxPilotURL, withIntermediateDirectories: true)
+            let codePulse = ProjectRecord(name: "CodePulse", folderPath: codePulseURL.path, createdAt: start)
+            let proxPilot = ProjectRecord(name: "ProxPilot", folderPath: proxPilotURL.path, createdAt: start)
+            let codePulseRule = SessionAutomationRule(
+                name: "CodePulse (tool.title)",
+                trigger: .developerTool(tool),
+                projectID: codePulse.id,
+                sessionType: .debugging,
+                goal: "Goal A",
+                minimumSavedDuration: 0
+            )
+            let proxPilotRule = SessionAutomationRule(
+                name: "ProxPilot (tool.title)",
+                trigger: .developerTool(tool),
+                projectID: proxPilot.id,
+                sessionType: .review,
+                goal: "Goal B",
+                minimumSavedDuration: 0
+            )
+            let state = AppState(
+                projects: [codePulse, proxPilot],
+                settings: CodePulseSettings(automationEnabled: true),
+                automationRules: [codePulseRule, proxPilotRule]
+            )
+            let canonicalCodePulseRule = try XCTUnwrap(
+                state.automationRules.first(where: { $0.id == codePulseRule.id })
+            )
+            let canonicalProxPilotRule = try XCTUnwrap(
+                state.automationRules.first(where: { $0.id == proxPilotRule.id })
+            )
+            let codePulseEvent = event(
+                tool: tool,
+                sessionID: "(tool.rawValue)-codepulse-legacy",
+                type: .sessionStarted,
+                path: codePulseURL.path
+            )
+            let proxPilotEvent = event(
+                tool: tool,
+                sessionID: "(tool.rawValue)-proxpilot-legacy",
+                type: .sessionStarted,
+                path: proxPilotURL.path
+            )
+            let coordinator = SessionAutomationCoordinator()
+
+            XCTAssertEqual(
+                coordinator.action(for: codePulseEvent, in: state, now: start),
+                .startWithResolvedProject(
+                    rule: canonicalCodePulseRule,
+                    projectID: codePulse.id,
+                    startDate: start
+                ),
+                tool.rawValue
+            )
+            XCTAssertEqual(
+                coordinator.action(for: proxPilotEvent, in: state, now: start),
+                .startWithResolvedProject(
+                    rule: canonicalProxPilotRule,
+                    projectID: proxPilot.id,
+                    startDate: start
+                ),
+                tool.rawValue
+            )
+
+            let codePulsePersistence = AutomationTestPersistence(state)
+            let codePulseStore = makeStore(
+                state: state,
+                clock: AutomationTestClock(start),
+                persistence: codePulsePersistence,
+                inbox: DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+                    applicationSupportDirectory: root.appendingPathComponent("support-codepulse")
+                ))
+            )
+            XCTAssertTrue(codePulseStore.startAutomatedSession(
+                with: canonicalCodePulseRule,
+                event: codePulseEvent,
+                at: start,
+                signalAt: start
+            ))
+            XCTAssertEqual(codePulseStore.activeSession?.projectID, codePulse.id)
+            XCTAssertEqual(codePulseStore.activeSession?.type, .debugging)
+            XCTAssertEqual(codePulseStore.activeSession?.goal, "Goal A")
+
+            let proxPilotPersistence = AutomationTestPersistence(state)
+            let proxPilotStore = makeStore(
+                state: state,
+                clock: AutomationTestClock(start),
+                persistence: proxPilotPersistence,
+                inbox: DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+                    applicationSupportDirectory: root.appendingPathComponent("support-proxpilot")
+                ))
+            )
+            XCTAssertTrue(proxPilotStore.startAutomatedSession(
+                with: canonicalProxPilotRule,
+                event: proxPilotEvent,
+                at: start,
+                signalAt: start
+            ))
+            XCTAssertEqual(proxPilotStore.activeSession?.projectID, proxPilot.id)
+            XCTAssertEqual(proxPilotStore.activeSession?.type, .review)
+            XCTAssertEqual(proxPilotStore.activeSession?.goal, "Goal B")
+        }
+    }
+
+    func testAmbiguousProjectlessDeveloperRulesFailClosed() throws {
+        for tool in DeveloperTool.allCases {
+            let root = try temporaryDirectory()
+            let projectURL = root.appendingPathComponent("Project", isDirectory: true)
+            try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+            let project = ProjectRecord(name: "Project", folderPath: projectURL.path, createdAt: start)
+            let firstPreset = SessionPreset(name: "First (tool.title)", projectID: nil)
+            let secondPreset = SessionPreset(name: "Second (tool.title)", projectID: nil)
+            let firstRule = SessionAutomationRule(
+                name: "First (tool.title)",
+                trigger: .developerTool(tool),
+                presetID: firstPreset.id,
+                minimumSavedDuration: 0
+            )
+            let secondRule = SessionAutomationRule(
+                name: "Second (tool.title)",
+                trigger: .developerTool(tool),
+                presetID: secondPreset.id,
+                minimumSavedDuration: 0
+            )
+            let state = AppState(
+                projects: [project],
+                settings: CodePulseSettings(automationEnabled: true),
+                sessionPresets: [firstPreset, secondPreset],
+                automationRules: [firstRule, secondRule]
+            )
+            let event = event(
+                tool: tool,
+                sessionID: "(tool.rawValue)-ambiguous-projectless",
+                type: .sessionStarted,
+                path: projectURL.path
+            )
+
+            XCTAssertNil(SessionAutomationCoordinator().action(for: event, in: state, now: start), tool.rawValue)
+            XCTAssertTrue(
+                SessionAutomationCoordinator().rulesSupporting(
+                    .developerTool(tool: tool, externalSessionID: event.externalSessionID),
+                    projectID: project.id,
+                    in: state
+                ).isEmpty,
+                tool.rawValue
+            )
+        }
+    }
+
+    func testAmbiguousLegacyDeveloperRulesFailClosed() throws {
+        for tool in DeveloperTool.allCases {
+            let root = try temporaryDirectory()
+            let projectURL = root.appendingPathComponent("Project", isDirectory: true)
+            try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+            let project = ProjectRecord(name: "Project", folderPath: projectURL.path, createdAt: start)
+            let firstRule = SessionAutomationRule(
+                name: "First (tool.title)",
+                trigger: .developerTool(tool),
+                projectID: project.id,
+                goal: "Goal A",
+                minimumSavedDuration: 0
+            )
+            let secondRule = SessionAutomationRule(
+                name: "Second (tool.title)",
+                trigger: .developerTool(tool),
+                projectID: project.id,
+                goal: "Goal B",
+                minimumSavedDuration: 0
+            )
+            let state = AppState(
+                projects: [project],
+                settings: CodePulseSettings(automationEnabled: true),
+                automationRules: [firstRule, secondRule]
+            )
+            let event = event(
+                tool: tool,
+                sessionID: "(tool.rawValue)-ambiguous-legacy",
+                type: .sessionStarted,
+                path: projectURL.path
+            )
+
+            XCTAssertNil(SessionAutomationCoordinator().action(for: event, in: state, now: start), tool.rawValue)
+            XCTAssertTrue(
+                SessionAutomationCoordinator().rulesSupporting(
+                    .developerTool(tool: tool, externalSessionID: event.externalSessionID),
+                    projectID: project.id,
+                    in: state
+                ).isEmpty,
+                tool.rawValue
+            )
+        }
+    }
+
+    func testDirectDeveloperToolStartWithoutAnEventProjectFailsClosed() throws {
+        let fixture = try makeTwoProjectFixture()
+        let persistence = AutomationTestPersistence(fixture.state)
+        let inbox = DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+            applicationSupportDirectory: fixture.root.appendingPathComponent("support")
+        ))
+        let store = makeStore(
+            state: fixture.state,
+            clock: AutomationTestClock(start),
+            persistence: persistence,
+            inbox: inbox
+        )
+
+        XCTAssertFalse(store.startAutomatedSession(
+            with: fixture.codexRule,
+            source: .developerTool(tool: .codex, externalSessionID: "without-event"),
+            at: start,
+            signalAt: start
+        ))
+        XCTAssertNil(store.activeSession)
+    }
+
+    func testUnattributedDeveloperToolActivityFailsClosedForProjectAutomations() throws {
+        let fixture = try makeTwoProjectFixture()
+        let coordinator = SessionAutomationCoordinator()
+        let outside = fixture.root.appendingPathComponent("unrelated-repository", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+
+        let unrelated = event(
+            tool: .codex,
+            sessionID: "codex-unrelated",
+            type: .activity,
+            path: outside.path
+        )
+        let malformed = event(
+            tool: .opencode,
+            sessionID: "opencode-relative",
+            type: .activity,
+            path: "relative/project"
+        )
+
+        XCTAssertNil(DeveloperToolProjectResolver.projectID(
+            for: unrelated.workingDirectory,
+            in: fixture.state.projects
+        ))
+        XCTAssertNil(coordinator.action(for: unrelated, in: fixture.state, now: start))
+        XCTAssertNil(coordinator.action(for: malformed, in: fixture.state, now: start))
+
+        let activeFixture = try makeFixture(
+            tool: .codex,
+            enabled: true,
+            seedEvent: event(
+                tool: .codex,
+                sessionID: "active-codepulse",
+                type: .sessionStarted,
+                path: fixtureProjectPath()
+            )
+        )
+        XCTAssertNil(coordinator.action(for: malformed, in: activeFixture.store.state, now: start))
+    }
+
+    func testSeparateDeveloperToolSessionsRemainProjectIsolatedWithoutGlobalCurrentProject() throws {
+        let fixture = try makeTwoProjectFixture()
+        let coordinator = SessionAutomationCoordinator()
+        let codePulseEvent = event(
+            tool: .codex,
+            sessionID: "session-a",
+            type: .sessionStarted,
+            path: fixture.codePulseURL.appendingPathComponent("Sources").path
+        )
+        let proxPilotEvent = event(
+            tool: .codex,
+            sessionID: "session-b",
+            type: .sessionStarted,
+            path: fixture.proxPilotURL.appendingPathComponent("Sources").path
+        )
+
+        let firstAction = coordinator.action(for: codePulseEvent, in: fixture.state, now: start)
+        let secondAction = coordinator.action(for: proxPilotEvent, in: fixture.state, now: start)
+
+        XCTAssertEqual(firstAction, .startWithResolvedProject(rule: fixture.codexRule, projectID: fixture.codePulse.id, startDate: start))
+        XCTAssertEqual(secondAction, .startWithResolvedProject(rule: fixture.codexRule, projectID: fixture.proxPilot.id, startDate: start))
+        if case .startWithResolvedProject(let firstRule, let firstProjectID, _) = firstAction {
+            XCTAssertEqual(firstRule.presetID, fixture.codexRule.presetID)
+            XCTAssertEqual(firstProjectID, fixture.codePulse.id)
+        } else {
+            XCTFail("CodePulse activity did not produce a start action")
+        }
+        if case .startWithResolvedProject(let secondRule, let secondProjectID, _) = secondAction {
+            XCTAssertEqual(secondRule.presetID, fixture.codexRule.presetID)
+            XCTAssertEqual(secondProjectID, fixture.proxPilot.id)
+        } else {
+            XCTFail("ProxPilot activity did not produce a start action")
+        }
+    }
+
+    func testActiveDeveloperToolSessionRemainsIsolatedWhenAnotherProjectEventArrives() throws {
+        for tool in DeveloperTool.allCases {
+            let fixture = try makeTwoProjectFixture()
+            let clock = AutomationTestClock(start)
+            let persistence = AutomationTestPersistence(fixture.state)
+            let inbox = DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+                applicationSupportDirectory: fixture.root.appendingPathComponent("support-\(tool.rawValue)")
+            ))
+            let store = makeStore(
+                state: fixture.state,
+                clock: clock,
+                persistence: persistence,
+                inbox: inbox
+            )
+
+            let codePulseEvent = event(
+                tool: tool,
+                sessionID: "\(tool.rawValue)-codepulse",
+                type: .sessionStarted,
+                path: fixture.codePulseURL.appendingPathComponent("Sources").path,
+                timestamp: start
+            )
+            XCTAssertNotNil(store.sessionAutomationCoordinator.action(for: codePulseEvent, in: store.state, now: start))
+            try inbox.write(codePulseEvent)
+            clock.now = start.addingTimeInterval(5)
+            store.refresh()
+
+            let codePulseSessionID = try XCTUnwrap(store.activeSession?.id)
+            XCTAssertEqual(store.activeSession?.projectID, fixture.codePulse.id)
+            XCTAssertTrue(store.activeSession?.automationMetadata?.controlEnabled == true)
+            XCTAssertEqual(
+                store.activeSession?.automationMetadata?.claims.map(\.source),
+                [.developerTool(tool: tool, externalSessionID: "\(tool.rawValue)-codepulse")]
+            )
+
+            clock.now = start.addingTimeInterval(10)
+            try inbox.write(event(
+                tool: tool,
+                sessionID: "\(tool.rawValue)-proxpilot",
+                type: .activity,
+                path: fixture.proxPilotURL.appendingPathComponent("Sources").path,
+                timestamp: clock.now
+            ))
+            store.refresh()
+
+            XCTAssertEqual(store.activeSession?.id, codePulseSessionID)
+            XCTAssertEqual(store.activeSession?.projectID, fixture.codePulse.id)
+            XCTAssertEqual(
+                store.activeSession?.automationMetadata?.claims.map(\.source),
+                [.developerTool(tool: tool, externalSessionID: "\(tool.rawValue)-codepulse")]
+            )
+            XCTAssertFalse(store.activeSession?.developerToolContexts.contains(where: {
+                $0.externalSessionID == "\(tool.rawValue)-proxpilot"
+            }) == true)
+            XCTAssertEqual(store.state.developerToolIntegration?.processedEvents.count, 2)
+        }
     }
 
     func testAutomaticStartAttachesContextBeforeEventAcknowledgement() throws {
@@ -697,6 +1260,73 @@ final class SessionAutomationTests: XCTestCase {
         XCTAssertTrue(persistence.state.completedSessions.isEmpty)
     }
 
+    private func makeTwoProjectFixture() throws -> TwoProjectAutomationFixture {
+        let root = try temporaryDirectory()
+        let codePulseURL = root.appendingPathComponent("CodePulse", isDirectory: true)
+        let proxPilotURL = root.appendingPathComponent("ProxPilot", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codePulseURL.appendingPathComponent("Sources/CodePulse/Insights", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: proxPilotURL.appendingPathComponent("Sources", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let codePulse = ProjectRecord(
+            name: "CodePulse",
+            folderPath: codePulseURL.path,
+            createdAt: start
+        )
+        let proxPilot = ProjectRecord(
+            name: "ProxPilot",
+            folderPath: proxPilotURL.path,
+            createdAt: start
+        )
+        let codexPreset = SessionPreset(
+            name: "Developer coding template",
+            projectID: nil,
+            goal: "Automated goal"
+        )
+        let openCodePreset = SessionPreset(
+            name: "Developer review template",
+            projectID: nil,
+            sessionType: .review
+        )
+        let codexRule = SessionAutomationRule(
+            name: "Codex automation",
+            trigger: .developerTool(.codex),
+            presetID: codexPreset.id,
+            minimumSavedDuration: 0
+        )
+        let openCodeRule = SessionAutomationRule(
+            name: "OpenCode automation",
+            trigger: .developerTool(.opencode),
+            presetID: openCodePreset.id,
+            minimumSavedDuration: 0
+        )
+        let state = AppState(
+            projects: [codePulse, proxPilot],
+            settings: CodePulseSettings(automationEnabled: true),
+            sessionPresets: [codexPreset, openCodePreset],
+            automationRules: [
+                codexRule,
+                openCodeRule
+            ]
+        )
+
+        return TwoProjectAutomationFixture(
+            root: root,
+            codePulseURL: codePulseURL,
+            proxPilotURL: proxPilotURL,
+            codePulse: codePulse,
+            proxPilot: proxPilot,
+            codexRule: codexRule,
+            openCodeRule: openCodeRule,
+            state: state
+        )
+    }
+
     private func makeFixture(
         tool: DeveloperTool,
         enabled: Bool,
@@ -850,6 +1480,17 @@ private struct AutomationFixture {
     let inbox: DeveloperToolInbox
     let clock: AutomationTestClock
     let store: SessionStore
+}
+
+private struct TwoProjectAutomationFixture {
+    let root: URL
+    let codePulseURL: URL
+    let proxPilotURL: URL
+    let codePulse: ProjectRecord
+    let proxPilot: ProjectRecord
+    let codexRule: SessionAutomationRule
+    let openCodeRule: SessionAutomationRule
+    let state: AppState
 }
 
 private final class AutomationTestClock: SessionClock {

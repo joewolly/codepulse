@@ -193,6 +193,44 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         ))
     }
 
+    func testProjectResolverChoosesTheDeepestConfiguredRoot() throws {
+        let root = try temporaryDirectory()
+        let parentURL = root.appendingPathComponent("Parent", isDirectory: true)
+        let childURL = parentURL.appendingPathComponent("Child", isDirectory: true)
+        let workingURL = childURL.appendingPathComponent("Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: workingURL, withIntermediateDirectories: true)
+
+        let parent = ProjectRecord(name: "Parent", folderPath: parentURL.path, createdAt: now)
+        let child = ProjectRecord(name: "Child", folderPath: childURL.path, createdAt: now)
+
+        XCTAssertEqual(
+            DeveloperToolProjectResolver.projectID(
+                for: workingURL.path,
+                in: [parent, child]
+            ),
+            child.id
+        )
+    }
+
+    func testProjectResolverFailsClosedForDuplicateCanonicalRoots() throws {
+        let root = try temporaryDirectory()
+        let projectURL = root.appendingPathComponent("Project", isDirectory: true)
+        let workingURL = projectURL.appendingPathComponent("Sources", isDirectory: true)
+        try FileManager.default.createDirectory(at: workingURL, withIntermediateDirectories: true)
+        let linkURL = root.appendingPathComponent("Project-Link", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: projectURL)
+
+        let first = ProjectRecord(name: "First", folderPath: projectURL.path, createdAt: now)
+        let second = ProjectRecord(name: "Second", folderPath: linkURL.path, createdAt: now)
+
+        XCTAssertNil(
+            DeveloperToolProjectResolver.projectID(
+                for: workingURL.path,
+                in: [first, second]
+            )
+        )
+    }
+
     func testEventConsumerAttachesOnlyToSelectedProjectAndSupportsMultipleExternalSessions() throws {
         let root = try temporaryDirectory()
         let projectURL = root.appendingPathComponent("codepulse", isDirectory: true)

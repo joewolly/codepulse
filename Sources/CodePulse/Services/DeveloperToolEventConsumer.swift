@@ -28,12 +28,11 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
     func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool {
         guard var session = state.activeSession,
               session.projectID != nil,
-              let project = state.projects.first(where: { $0.id == session.projectID }),
-              let projectPath = DeveloperToolProjectResolver.folderPath(for: project),
-              DeveloperToolProjectPathMatcher.matches(
-                projectPath: projectPath,
-                workingDirectory: event.workingDirectory
+              let resolvedProjectID = DeveloperToolProjectResolver.projectID(
+                  for: event.workingDirectory,
+                  in: state.projects
               ),
+              resolvedProjectID == session.projectID,
               event.timestamp >= session.startedAt,
               event.timestamp <= session.endedAt ?? now else {
             return false
