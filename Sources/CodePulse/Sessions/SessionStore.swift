@@ -38,7 +38,6 @@ enum SessionAutomationRuleStatus: Equatable, Sendable {
     case projectArchived
     case needsRelink
     case enabled
-    case needsAttention
 
     var label: String {
         switch self {
@@ -58,8 +57,6 @@ enum SessionAutomationRuleStatus: Equatable, Sendable {
             return "Needs Relink"
         case .enabled:
             return "Enabled"
-        case .needsAttention:
-            return "Needs attention"
         }
     }
 }
@@ -1539,7 +1536,7 @@ final class SessionStore: ObservableObject {
         if project.requiresRelink {
             return .needsRelink
         }
-        return isAutomationRuleUsable(rule) ? .enabled : .needsAttention
+        return .enabled
     }
 
     func automationRuleStatusLabel(for rule: SessionAutomationRule) -> String {

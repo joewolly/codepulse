@@ -120,18 +120,21 @@ private struct SessionPresetRow: View {
                 style: .neutral,
                 systemImage: "archivebox"
             )
+            .accessibilityHidden(true)
         } else if preset.projectID != nil && !isAvailableForManualStart {
             SettingsStatusBadge(
                 "Project unavailable for Quick Start",
                 style: .warning,
                 systemImage: "exclamationmark.triangle"
             )
+            .accessibilityHidden(true)
         } else if preset.projectID != nil && !isAutomationUsable {
             SettingsStatusBadge(
                 "Project unavailable for automation",
                 style: .warning,
                 systemImage: "exclamationmark.triangle"
             )
+            .accessibilityHidden(true)
         }
     }
 

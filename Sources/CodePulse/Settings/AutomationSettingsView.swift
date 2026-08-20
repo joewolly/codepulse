@@ -106,6 +106,7 @@ private struct AutomationRuleRow: View {
                         style: statusStyle,
                         systemImage: statusSystemImage
                     )
+                    .accessibilityHidden(true)
                 }
                 Text("\(triggerSummary) → \(preset?.name ?? "Missing preset")")
                     .font(.caption)
@@ -161,7 +162,7 @@ private struct AutomationRuleRow: View {
             return .success
         case .projectArchived, .disabled:
             return .neutral
-        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink, .needsAttention:
+        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink:
             return .warning
         }
     }
@@ -174,7 +175,7 @@ private struct AutomationRuleRow: View {
             return "archivebox"
         case .disabled:
             return "minus.circle"
-        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink, .needsAttention:
+        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink:
             return "exclamationmark.triangle"
         }
     }

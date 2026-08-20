@@ -100,9 +100,43 @@ final class SessionPresetAutomationTests: XCTestCase {
         ))
         let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
 
+        var disabledRule = rule
+        disabledRule.isEnabled = false
+        XCTAssertEqual(store.automationRuleStatus(for: disabledRule), .disabled)
+        XCTAssertEqual(store.automationRuleStatusLabel(for: disabledRule), "Disabled")
+
         XCTAssertEqual(store.automationRuleStatus(for: rule), .automationOff)
         XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Enabled · Automation Off")
         store.updateSettings { $0.automationEnabled = true }
+
+        var invalidRule = rule
+        invalidRule.name = String(repeating: "x", count: 201)
+        XCTAssertEqual(store.automationRuleStatus(for: invalidRule), .invalidRule)
+        XCTAssertEqual(store.automationRuleStatusLabel(for: invalidRule), "Needs attention · Invalid rule")
+
+        let missingPresetRule = SessionAutomationRule(
+            name: "Missing Preset Rule",
+            trigger: .developerTool(.codex),
+            presetID: UUID(),
+            minimumSavedDuration: 0
+        )
+        XCTAssertEqual(store.automationRuleStatus(for: missingPresetRule), .missingPreset)
+        XCTAssertEqual(store.automationRuleStatusLabel(for: missingPresetRule), "Needs attention · Missing preset")
+
+        let missingProjectPreset = SessionPreset(
+            name: "Missing Project Preset",
+            projectID: UUID()
+        )
+        XCTAssertTrue(store.upsertSessionPreset(missingProjectPreset))
+        let missingProjectRule = SessionAutomationRule(
+            name: "Missing Project Rule",
+            trigger: .developerTool(.codex),
+            presetID: missingProjectPreset.id,
+            minimumSavedDuration: 0
+        )
+        XCTAssertEqual(store.automationRuleStatus(for: missingProjectRule), .missingProject)
+        XCTAssertEqual(store.automationRuleStatusLabel(for: missingProjectRule), "Needs attention · Missing project")
+
         XCTAssertEqual(store.automationRuleStatus(for: rule), .enabled)
         XCTAssertEqual(store.automationRuleStatusLabel(for: rule), "Enabled")
 

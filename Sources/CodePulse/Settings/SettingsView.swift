@@ -528,10 +528,12 @@ private struct ProjectSettingsRow: View {
                     if project.isArchived {
                         SettingsStatusBadge("Archived", style: .neutral, systemImage: "archivebox")
                             .accessibilityLabel("\(project.name) is archived")
+                            .accessibilityHidden(true)
                     }
                     if project.requiresRelink {
                         SettingsStatusBadge("Needs Relink", style: .warning, systemImage: "exclamationmark.triangle")
                             .accessibilityLabel("\(project.name) needs relinking")
+                            .accessibilityHidden(true)
                     }
                 }
                 if let path = project.folderPath {
