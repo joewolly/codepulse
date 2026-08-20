@@ -85,7 +85,7 @@ for Apple silicon and Intel Macs.
 
 Download the latest DMG from
 [GitHub Releases](https://github.com/joewolly/codepulse/releases/latest), open
-it, and drag CodePulse to Applications. The 1.3.0 build is intentionally not
+it, and drag CodePulse to Applications. The downloaded build is intentionally not
 Developer ID signed or notarized; it is ad-hoc signed locally for macOS runtime
 compatibility. Ad-hoc signing does not establish publisher identity or
 notarization trust, so macOS may still require an explicit first-launch
