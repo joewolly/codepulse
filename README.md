@@ -16,12 +16,11 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.2.0 (build 1200)**. It completes
-the current Actionable Insights roadmap and a broad native-macOS UI
+The current release candidate is CodePulse **1.3.0 (build 1300)**. It continues
+the local Actionable Insights experience while shipping a broad native-macOS UI
 modernization across the Menu Bar, History, Insights, Settings, and related
-secondary surfaces, including Goal vs Actual tracking, deterministic Focus
-Patterns, Project Outcomes, and local follow-up signals. All analysis remains
-local and deterministic.
+secondary surfaces. Goal vs Actual tracking, deterministic Focus Patterns,
+Project Outcomes, and local follow-up signals remain local and deterministic.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -86,7 +85,7 @@ for Apple silicon and Intel Macs.
 
 Download the latest DMG from
 [GitHub Releases](https://github.com/joewolly/codepulse/releases/latest), open
-it, and drag CodePulse to Applications. The 1.2.0 build is intentionally not
+it, and drag CodePulse to Applications. The downloaded build is intentionally not
 Developer ID signed or notarized; it is ad-hoc signed locally for macOS runtime
 compatibility. Ad-hoc signing does not establish publisher identity or
 notarization trust, so macOS may still require an explicit first-launch
@@ -114,8 +113,8 @@ automatic update check.
    switches, and local time-of-day distribution. These are observable timing
    summaries, not a productivity score.
 8. If desired, create a **Settings → Projects → Session Presets** entry for a
-   reusable Quick Start, then open **Settings → Automation → Developer
-   Integrations** to enable Codex or OpenCode context enrichment. Integrations
+   reusable Quick Start, then open **Settings → Automation → Developer Integrations**
+   to enable Codex or OpenCode context enrichment. Integrations
    are optional and separate from **Settings → Automation → Session Automation**,
    which is also optional and disabled by default.
 9. For a shell, Shortcuts **Run Shell Script**, Raycast, Alfred, Stream Deck, or
@@ -137,7 +136,7 @@ Use **Settings → Data → Backup & Restore** and choose **Export Backup…** t
 a portable, pretty-printed JSON backup of local CodePulse projects, settings,
 presets, automation rules, saved sessions, captured Git/GitHub context,
 developer-tool session context, and any active-session timeline. The backup
-format remains `codepulse-backup` version 1. CodePulse 1.2.0 continues to read
+format remains `codepulse-backup` version 1. CodePulse 1.3.0 continues to read
 and restore version-1 backups; future format changes will be called out in the
 release documentation.
 

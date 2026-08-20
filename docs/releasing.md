@@ -1,10 +1,10 @@
 # CodePulse macOS release packaging
 
-The current release candidate is CodePulse **1.2.0 (build 1200)**. The
+The current release candidate is CodePulse **1.3.0 (build 1300)**. The
 instructions below describe the local ad-hoc-signed Universal 2 packaging and
 the separate Sparkle update-signing path.
 
-CodePulse 1.2.0 completes the current Actionable Insights roadmap with Goal vs
+CodePulse 1.3.0 continues the local Actionable Insights experience with Goal vs
 Actual tracking, deterministic Focus Patterns, Project Outcomes, and aggregate
 follow-up signals, alongside a broad native macOS UI modernization across the
 Menu Bar, History, Insights, Settings, onboarding, and session-edit surfaces.
@@ -17,7 +17,7 @@ CodePulse is distributed as a native macOS application inside a drag-to-install
 `.dmg`. The package is built from Swift Package Manager source and does not
 use Electron, Catalyst, or an installer package.
 
-CodePulse 1.2.0 is ad-hoc signed locally for macOS runtime compatibility and is
+CodePulse 1.3.0 is ad-hoc signed locally for macOS runtime compatibility and is
 not notarized. No Apple Developer Program account, Developer ID identity, or
 paid signing credential is required to build it. Ad-hoc signing provides bundle
 integrity and a local code identity for macOS bundle registration; it does not
@@ -68,7 +68,7 @@ Developer ID signing.
 The version and build number can be overridden without editing source files:
 
 ```sh
-CODEPULSE_VERSION=1.2.0 CODEPULSE_BUILD=1200 ./script/package_release.sh
+CODEPULSE_VERSION=1.3.0 CODEPULSE_BUILD=1300 ./script/package_release.sh
 ```
 
 ## Output
@@ -78,7 +78,7 @@ The default release writes:
 ```text
 dist/release/
 ├── CodePulse.app
-├── CodePulse-1.2.0.dmg
+├── CodePulse-1.3.0.dmg
 └── checksums.txt
 ```
 
@@ -93,7 +93,7 @@ transparent shell alias.
 ## Sparkle updates
 
 CodePulse uses Sparkle for update discovery and installation. The signed
-appcast provides the v1.2.0 upgrade path for supported existing installations
+appcast provides the v1.3.0 upgrade path for supported existing installations
 once the release candidate is published; the installed app and update archive
 remain independently subject to macOS and Sparkle trust checks.
 
@@ -138,8 +138,8 @@ A release is initiated only after its version/build change has been merged to
 ```sh
 git checkout main
 git pull --ff-only
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 The `GitHub Release` workflow then:
@@ -188,7 +188,7 @@ flow is also an appropriate way to make the explicit first-launch decision.
 The checksum file uses the release filename:
 
 ```text
-SHA256 (CodePulse-1.2.0.dmg) = <64 hexadecimal characters>
+SHA256 (CodePulse-1.3.0.dmg) = <64 hexadecimal characters>
 ```
 
 Useful local checks include:
@@ -198,7 +198,7 @@ plutil -p dist/release/CodePulse.app/Contents/Info.plist
 file dist/release/CodePulse.app/Contents/MacOS/CodePulse
 lipo -info dist/release/CodePulse.app/Contents/MacOS/CodePulse
 otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
-shasum -a 256 dist/release/CodePulse-1.2.0.dmg
+shasum -a 256 dist/release/CodePulse-1.3.0.dmg
 ```
 
 The default package is ad-hoc signed locally. `codesign --verify --strict`
