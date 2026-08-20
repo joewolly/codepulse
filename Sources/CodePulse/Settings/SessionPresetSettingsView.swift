@@ -83,19 +83,7 @@ private struct SessionPresetRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if isProjectArchived {
-                    Text("Project Archived — unavailable until restored")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                } else if preset.projectID != nil && !isAvailableForManualStart {
-                    Text("Project unavailable for Quick Start")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                } else if preset.projectID != nil && !isAutomationUsable {
-                    Text("Project unavailable for automation")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
+                availabilityBadge
                 if let goal = preset.goal {
                     Text(goal)
                         .font(.caption2)
@@ -122,6 +110,32 @@ private struct SessionPresetRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(preset.name), \(projectLabel), \(preset.sessionType.title)")
         .accessibilityValue(availabilitySummary)
+    }
+
+    @ViewBuilder
+    private var availabilityBadge: some View {
+        if isProjectArchived {
+            SettingsStatusBadge(
+                "Project Archived",
+                style: .neutral,
+                systemImage: "archivebox"
+            )
+            .accessibilityHidden(true)
+        } else if preset.projectID != nil && !isAvailableForManualStart {
+            SettingsStatusBadge(
+                "Project unavailable for Quick Start",
+                style: .warning,
+                systemImage: "exclamationmark.triangle"
+            )
+            .accessibilityHidden(true)
+        } else if preset.projectID != nil && !isAutomationUsable {
+            SettingsStatusBadge(
+                "Project unavailable for automation",
+                style: .warning,
+                systemImage: "exclamationmark.triangle"
+            )
+            .accessibilityHidden(true)
+        }
     }
 
     private var projectLabel: String {

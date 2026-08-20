@@ -17,6 +17,8 @@ private final class CoordinatorTestPersistence: StatePersisting {
     }
 }
 
+private final class CoordinatorExistingWindowDelegate: NSObject, NSWindowDelegate {}
+
 @MainActor
 final class AppWindowCoordinatorTests: XCTestCase {
     func testApplicationMenuContainsSettingsAndQuitCommands() {
@@ -114,6 +116,15 @@ final class AppWindowCoordinatorTests: XCTestCase {
         let firstWindow = NSApp.windows.first(where: { $0.title == "Settings" })
         XCTAssertNotNil(firstWindow)
         XCTAssertTrue(firstWindow?.isVisible == true)
+        XCTAssertEqual(firstWindow?.toolbarStyle, .unified)
+        XCTAssertEqual(firstWindow?.contentView?.bounds.size, NSSize(width: 560, height: 520))
+        XCTAssertEqual(firstWindow?.contentMinSize, NSSize(width: 540, height: 480))
+        XCTAssertEqual(
+            firstWindow?.minSize,
+            firstWindow?.frameRect(
+                forContentRect: NSRect(origin: .zero, size: AppWindowCoordinator.settingsMinimumContentSize)
+            ).size
+        )
 
         coordinator.showSettings()
         let settingsWindows = NSApp.windows.filter { $0.title == "Settings" }
@@ -126,6 +137,62 @@ final class AppWindowCoordinatorTests: XCTestCase {
         coordinator.showSettings()
         XCTAssertTrue(firstWindow?.isVisible == true)
         firstWindow?.close()
+    }
+
+    func testSettingsWindowPreservesAnExistingDelegate() {
+        _ = NSApplication.shared
+        for window in NSApp.windows where window.title == "Settings" {
+            window.close()
+            window.title = "Closed test window"
+        }
+
+        let existingWindow = NSWindow(
+            contentViewController: NSHostingController(rootView: Text("Existing Settings"))
+        )
+        existingWindow.title = "Settings"
+        existingWindow.styleMask = [.titled, .closable, .resizable]
+        let existingDelegate = CoordinatorExistingWindowDelegate()
+        existingWindow.delegate = existingDelegate
+        existingWindow.makeKeyAndOrderFront(nil)
+
+        let store = SessionStore(
+            persistence: CoordinatorTestPersistence(),
+            clock: CoordinatorTestClock(),
+            automaticallyRefresh: false
+        )
+        let coordinator = AppWindowCoordinator(store: store)
+        coordinator.configureSettingsWindow {
+            NSHostingController(rootView: Text("Settings test content"))
+        }
+
+        coordinator.showSettings()
+
+        XCTAssertTrue(existingWindow.delegate === existingDelegate)
+        XCTAssertEqual(existingWindow.contentMinSize, AppWindowCoordinator.settingsMinimumContentSize)
+        existingWindow.close()
+    }
+
+    func testOnboardingWindowUsesUnclippedContentSize() {
+        _ = NSApplication.shared
+        for window in NSApp.windows where window.title == "Getting Started with CodePulse" {
+            window.close()
+            window.title = "Closed test window"
+        }
+
+        let store = SessionStore(
+            persistence: CoordinatorTestPersistence(),
+            clock: CoordinatorTestClock(),
+            automaticallyRefresh: false
+        )
+        let coordinator = AppWindowCoordinator(store: store)
+
+        coordinator.showOnboarding()
+        let onboardingWindow = NSApp.windows.first(where: { $0.title == "Getting Started with CodePulse" })
+        XCTAssertNotNil(onboardingWindow)
+        XCTAssertTrue(onboardingWindow?.isVisible == true)
+        XCTAssertEqual(onboardingWindow?.contentView?.bounds.size, NSSize(width: 540, height: 490))
+        XCTAssertEqual(onboardingWindow?.contentMinSize, NSSize(width: 540, height: 490))
+        onboardingWindow?.close()
     }
 
     func testInsightsAndHistoryWindowsAreExplicitAndReusable() {

@@ -39,7 +39,7 @@ struct AutomationSettingsView: View {
                     AutomationRuleRow(
                         rule: rule,
                         preset: preset,
-                        statusLabel: store.automationRuleStatusLabel(for: rule),
+                        status: store.automationRuleStatus(for: rule),
                         edit: {
                             ruleBeingEdited = rule
                             isPresentingEditor = true
@@ -84,14 +84,14 @@ struct AutomationSettingsView: View {
 private struct AutomationRuleRow: View {
     let rule: SessionAutomationRule
     let preset: SessionPreset?
-    let statusLabel: String
+    let status: SessionAutomationRuleStatus
     let edit: () -> Void
     let delete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: iconName)
-                .foregroundStyle(statusLabel == "Enabled" ? Color.accentColor : Color.secondary)
+                .foregroundStyle(status == .enabled ? Color.accentColor : Color.secondary)
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -101,11 +101,12 @@ private struct AutomationRuleRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(rule.name)
-                    Text(statusLabel)
-                        .font(.caption2)
-                        .foregroundStyle(statusLabel == "Enabled" ? .green : .orange)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                    SettingsStatusBadge(
+                        statusLabel,
+                        style: statusStyle,
+                        systemImage: statusSystemImage
+                    )
+                    .accessibilityHidden(true)
                 }
                 Text("\(triggerSummary) → \(preset?.name ?? "Missing preset")")
                     .font(.caption)
@@ -150,6 +151,32 @@ private struct AutomationRuleRow: View {
             return tool.title
         case .applications(let trigger):
             return trigger.applications.map(\.displayName).joined(separator: " + ")
+        }
+    }
+
+    private var statusLabel: String { status.label }
+
+    private var statusStyle: SettingsStatusStyle {
+        switch status {
+        case .enabled:
+            return .success
+        case .projectArchived, .disabled:
+            return .neutral
+        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink:
+            return .warning
+        }
+    }
+
+    private var statusSystemImage: String {
+        switch status {
+        case .enabled:
+            return "checkmark.circle"
+        case .projectArchived:
+            return "archivebox"
+        case .disabled:
+            return "minus.circle"
+        case .automationOff, .invalidRule, .missingPreset, .missingProject, .needsRelink:
+            return "exclamationmark.triangle"
         }
     }
 

@@ -6,8 +6,10 @@ the separate Sparkle update-signing path.
 
 CodePulse 1.2.0 completes the current Actionable Insights roadmap with Goal vs
 Actual tracking, deterministic Focus Patterns, Project Outcomes, and aggregate
-follow-up signals. The AppKit lifecycle and hardened release packaging
-introduced for v1.1.3 remain unchanged.
+follow-up signals, alongside a broad native macOS UI modernization across the
+Menu Bar, History, Insights, Settings, onboarding, and session-edit surfaces.
+The AppKit lifecycle and hardened release packaging introduced for v1.1.3
+remain unchanged.
 
 ## What the artifact is
 

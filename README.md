@@ -16,10 +16,12 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.2.0 (build 1200)**. This release
-expands Actionable Insights with Goal vs Actual tracking, deterministic Focus
-Patterns, Project Outcomes, and local follow-up signals while keeping all
-analysis local and deterministic.
+The current release candidate is CodePulse **1.2.0 (build 1200)**. It completes
+the current Actionable Insights roadmap and a broad native-macOS UI
+modernization across the Menu Bar, History, Insights, Settings, and related
+secondary surfaces, including Goal vs Actual tracking, deterministic Focus
+Patterns, Project Outcomes, and local follow-up signals. All analysis remains
+local and deterministic.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -34,6 +36,10 @@ analysis local and deterministic.
 ### Insights
 
 <img src="docs/images/insights.png" alt="CodePulse Insights showing local summary metrics, Goal vs Actual, Project Outcomes, Focus Patterns, activity, work types, and project totals" width="760">
+
+### Settings
+
+<img src="docs/images/settings.png" alt="CodePulse Settings showing the General, Projects, Automation, and Data categories" width="760">
 
 ## What it does
 
@@ -89,8 +95,8 @@ approval. Follow the safe first-launch instructions in
 disable Gatekeeper globally.
 
 Authenticated in-app updates are provided by Sparkle. After the initial
-installation, use **Settings → Check for Updates…** or allow the automatic
-update check.
+installation, use **Settings → General → Check for Updates…** or allow the
+automatic update check.
 
 ## Quick start
 
@@ -107,10 +113,11 @@ update check.
 7. Review Focus Patterns such as longest and sustained focus blocks, project
    switches, and local time-of-day distribution. These are observable timing
    summaries, not a productivity score.
-8. If desired, create a **Settings → Session Presets** entry for a reusable
-   Quick Start, then open **Settings → Integrations** to enable Codex or OpenCode
-   context enrichment. Integrations are optional and separate from **Settings →
-   Session Automation**, which is also optional and disabled by default.
+8. If desired, create a **Settings → Projects → Session Presets** entry for a
+   reusable Quick Start, then open **Settings → Automation → Developer
+   Integrations** to enable Codex or OpenCode context enrichment. Integrations
+   are optional and separate from **Settings → Automation → Session Automation**,
+   which is also optional and disabled by default.
 9. For a shell, Shortcuts **Run Shell Script**, Raycast, Alfred, Stream Deck, or
    IDE task, use the bundled `codepulsectl` command described below.
 
@@ -126,17 +133,18 @@ the introduction later from **Settings → General → Show Introduction…**.
 
 ## Backup and restore
 
-Use **Settings → Data → Export Backup…** to save a portable, pretty-printed JSON
-backup of local CodePulse projects, settings, presets, automation rules, saved
-sessions, captured Git/GitHub context, developer-tool session context, and any
-active-session timeline. The backup format remains `codepulse-backup` version 1.
-CodePulse 1.2.0 continues to read and restore version-1 backups; future format
-changes will be called out in the release documentation.
+Use **Settings → Data → Backup & Restore** and choose **Export Backup…** to save
+a portable, pretty-printed JSON backup of local CodePulse projects, settings,
+presets, automation rules, saved sessions, captured Git/GitHub context,
+developer-tool session context, and any active-session timeline. The backup
+format remains `codepulse-backup` version 1. CodePulse 1.2.0 continues to read
+and restore version-1 backups; future format changes will be called out in the
+release documentation.
 
-Use **Settings → Data → Restore Backup…** to inspect the selected backup before
-confirming. Restore replaces the current local CodePulse data; it does not merge
-sessions or projects. CodePulse first creates and verifies a private automatic
-recovery backup at
+Use **Settings → Data → Backup & Restore** and choose **Restore Backup…** to
+inspect the selected backup before confirming. Restore replaces the current
+local CodePulse data; it does not merge sessions or projects. CodePulse first
+creates and verifies a private automatic recovery backup at
 `~/Library/Application Support/CodePulse/Backups/Pre-Restore Backup ...json`.
 The newest five automatic pre-restore recovery backups are retained. A failed
 restore leaves the current data in place or reports whether automatic rollback
@@ -184,7 +192,7 @@ not upload CSV or Markdown exports.
 
 ## Local daily and weekly digests
 
-Settings → **Actionable Insights** offers opt-in daily and weekly digests
+**Settings → Data → Actionable Insights** offers opt-in daily and weekly digests
 (disabled by default). A digest summarizes the **previous completed local
 calendar day or week** — active time, session count, top project and work type,
 and Codex/OpenCode participation, with a comparison to the preceding equivalent
@@ -211,7 +219,7 @@ completed sessions.
 Archived projects remain available in History and Insights, including History
 CSV and Insights Markdown exports. Session Presets and automation rules that
 reference an archived project are preserved and shown as unavailable until the
-project is restored. Use **Restore** in Project Settings to make the same
+project is restored. Use **Restore** in **Settings → Projects** to make the same
 project, preset, and rule eligible again. Archive state is part of local backup
 configuration and is independent from **Needs Relink** folder status.
 

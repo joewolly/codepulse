@@ -29,6 +29,38 @@ enum CompletedSessionProjectAssignment: Equatable {
     case project(UUID)
 }
 
+enum SessionAutomationRuleStatus: Equatable, Sendable {
+    case disabled
+    case automationOff
+    case invalidRule
+    case missingPreset
+    case missingProject
+    case projectArchived
+    case needsRelink
+    case enabled
+
+    var label: String {
+        switch self {
+        case .disabled:
+            return "Disabled"
+        case .automationOff:
+            return "Enabled · Automation Off"
+        case .invalidRule:
+            return "Needs attention · Invalid rule"
+        case .missingPreset:
+            return "Needs attention · Missing preset"
+        case .missingProject:
+            return "Needs attention · Missing project"
+        case .projectArchived:
+            return "Project Archived"
+        case .needsRelink:
+            return "Needs Relink"
+        case .enabled:
+            return "Enabled"
+        }
+    }
+}
+
 enum ProjectArchiveError: LocalizedError, Equatable {
     case projectNotFound
     case alreadyArchived
@@ -1485,26 +1517,30 @@ final class SessionStore: ObservableObject {
         return true
     }
 
-    func automationRuleStatusLabel(for rule: SessionAutomationRule) -> String {
-        guard rule.isEnabled else { return "Disabled" }
-        guard state.settings.automationEnabled else { return "Enabled · Automation Off" }
+    func automationRuleStatus(for rule: SessionAutomationRule) -> SessionAutomationRuleStatus {
+        guard rule.isEnabled else { return .disabled }
+        guard state.settings.automationEnabled else { return .automationOff }
         guard rule.isValid, isAutomationTriggerValid(rule.trigger) else {
-            return "Needs attention · Invalid rule"
+            return .invalidRule
         }
         guard let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }) else {
-            return "Needs attention · Missing preset"
+            return .missingPreset
         }
         guard let projectID = preset.projectID,
               let project = state.projects.first(where: { $0.id == projectID }) else {
-            return "Needs attention · Missing project"
+            return .missingProject
         }
         if project.isArchived {
-            return "Project Archived"
+            return .projectArchived
         }
         if project.requiresRelink {
-            return "Needs Relink"
+            return .needsRelink
         }
-        return isAutomationRuleUsable(rule) ? "Enabled" : "Needs attention"
+        return .enabled
+    }
+
+    func automationRuleStatusLabel(for rule: SessionAutomationRule) -> String {
+        automationRuleStatus(for: rule).label
     }
 
     @discardableResult

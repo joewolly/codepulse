@@ -34,7 +34,7 @@ Markdown report export.
 
 ### Local daily and weekly digests
 
-Daily and weekly digests are **opt-in** (Settings → Actionable Insights) and
+Daily and weekly digests are **opt-in** (Settings → Data → Actionable Insights) and
 disabled by default, including for existing installs. When enabled, CodePulse
 summarizes the **previous completed local calendar day or week** — active time,
 session count, top project and work type, Codex/OpenCode participation, and an
@@ -84,7 +84,7 @@ opt-in and disabled by default.
 | Auto-finish on long idle | Considering | Finish a session after a configurable inactivity window. Must never surprise: notification or countdown before finishing. |
 | Shortcuts-native actions | Considering | Real Shortcuts actions instead of wrapping Run Shell Script. Also adds scriptable value to `codepulsectl`. |
 | `codepulsectl` report surface | Considering | Add report-style output (daily/weekly summaries, JSON everywhere) so scripts can consume Insights without the UI. |
-| Menu-bar project and timer at a glance | Accepted | The v1.0 Milestone 3 audit (`docs/m3-audit.md`) found the status item omits the selected project and session type. Show project and elapsed time in the menu-bar item, with concise accessibility output. |
+| Menu-bar project and timer at a glance | Implemented | The native menu-bar presentation shows the selected project, session type, and elapsed timer with concise accessibility output. |
 
 ---
 
