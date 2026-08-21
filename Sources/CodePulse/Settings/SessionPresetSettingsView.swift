@@ -212,7 +212,7 @@ private struct SessionPresetEditorView: View {
             }
             .formStyle(.grouped)
 
-            Text("Presets with archived projects remain saved but are unavailable for Quick Start and application automation until the project is restored. Developer-tool automations can use a projectless preset and detect the runtime project from each event.")
+            Text("Presets with archived projects remain saved but are unavailable for Quick Start, application automation, and project-backed developer-tool automation until the project is restored. A developer-tool automation can also use a preset with no project and detect the runtime project from each event.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

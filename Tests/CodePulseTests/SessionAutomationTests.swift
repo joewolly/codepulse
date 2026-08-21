@@ -344,7 +344,7 @@ final class SessionAutomationTests: XCTestCase {
             let codePulse = ProjectRecord(name: "CodePulse", folderPath: codePulseURL.path, createdAt: start)
             let proxPilot = ProjectRecord(name: "ProxPilot", folderPath: proxPilotURL.path, createdAt: start)
             let codePulseRule = SessionAutomationRule(
-                name: "CodePulse (tool.title)",
+                name: "CodePulse (\(tool.title))",
                 trigger: .developerTool(tool),
                 projectID: codePulse.id,
                 sessionType: .debugging,
@@ -352,7 +352,7 @@ final class SessionAutomationTests: XCTestCase {
                 minimumSavedDuration: 0
             )
             let proxPilotRule = SessionAutomationRule(
-                name: "ProxPilot (tool.title)",
+                name: "ProxPilot (\(tool.title))",
                 trigger: .developerTool(tool),
                 projectID: proxPilot.id,
                 sessionType: .review,
@@ -372,13 +372,13 @@ final class SessionAutomationTests: XCTestCase {
             )
             let codePulseEvent = event(
                 tool: tool,
-                sessionID: "(tool.rawValue)-codepulse-legacy",
+                sessionID: "\(tool.rawValue)-codepulse-legacy",
                 type: .sessionStarted,
                 path: codePulseURL.path
             )
             let proxPilotEvent = event(
                 tool: tool,
-                sessionID: "(tool.rawValue)-proxpilot-legacy",
+                sessionID: "\(tool.rawValue)-proxpilot-legacy",
                 type: .sessionStarted,
                 path: proxPilotURL.path
             )
@@ -449,16 +449,16 @@ final class SessionAutomationTests: XCTestCase {
             let projectURL = root.appendingPathComponent("Project", isDirectory: true)
             try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
             let project = ProjectRecord(name: "Project", folderPath: projectURL.path, createdAt: start)
-            let firstPreset = SessionPreset(name: "First (tool.title)", projectID: nil)
-            let secondPreset = SessionPreset(name: "Second (tool.title)", projectID: nil)
+            let firstPreset = SessionPreset(name: "First (\(tool.title))", projectID: nil)
+            let secondPreset = SessionPreset(name: "Second (\(tool.title))", projectID: nil)
             let firstRule = SessionAutomationRule(
-                name: "First (tool.title)",
+                name: "First (\(tool.title))",
                 trigger: .developerTool(tool),
                 presetID: firstPreset.id,
                 minimumSavedDuration: 0
             )
             let secondRule = SessionAutomationRule(
-                name: "Second (tool.title)",
+                name: "Second (\(tool.title))",
                 trigger: .developerTool(tool),
                 presetID: secondPreset.id,
                 minimumSavedDuration: 0
@@ -471,7 +471,7 @@ final class SessionAutomationTests: XCTestCase {
             )
             let event = event(
                 tool: tool,
-                sessionID: "(tool.rawValue)-ambiguous-projectless",
+                sessionID: "\(tool.rawValue)-ambiguous-projectless",
                 type: .sessionStarted,
                 path: projectURL.path
             )
@@ -495,14 +495,14 @@ final class SessionAutomationTests: XCTestCase {
             try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
             let project = ProjectRecord(name: "Project", folderPath: projectURL.path, createdAt: start)
             let firstRule = SessionAutomationRule(
-                name: "First (tool.title)",
+                name: "First (\(tool.title))",
                 trigger: .developerTool(tool),
                 projectID: project.id,
                 goal: "Goal A",
                 minimumSavedDuration: 0
             )
             let secondRule = SessionAutomationRule(
-                name: "Second (tool.title)",
+                name: "Second (\(tool.title))",
                 trigger: .developerTool(tool),
                 projectID: project.id,
                 goal: "Goal B",
@@ -515,7 +515,7 @@ final class SessionAutomationTests: XCTestCase {
             )
             let event = event(
                 tool: tool,
-                sessionID: "(tool.rawValue)-ambiguous-legacy",
+                sessionID: "\(tool.rawValue)-ambiguous-legacy",
                 type: .sessionStarted,
                 path: projectURL.path
             )
