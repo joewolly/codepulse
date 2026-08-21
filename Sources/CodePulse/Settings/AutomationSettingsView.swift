@@ -7,6 +7,7 @@ struct AutomationSettingsView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var ruleBeingEdited: SessionAutomationRule?
     @State private var isPresentingEditor = false
+    @State private var newEditorIdentity = UUID()
 
     var body: some View {
         Section("Session Automation") {
@@ -24,7 +25,7 @@ struct AutomationSettingsView: View {
                     .accessibilityElement(children: .combine)
             }
 
-            Text("Optional and local. Developer-tool rules use lifecycle metadata and project paths. Application rules observe only the current frontmost application's bundle identifier while enabled; they do not inspect windows or collect usage history.")
+            Text("Optional and local. Developer-tool rules use lifecycle events and detect the active project from Codex or OpenCode working-directory activity. Frontmost-application rules remain tied to their project-backed session preset; an open developer tool never supplies project context.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -36,9 +37,13 @@ struct AutomationSettingsView: View {
             } else {
                 ForEach(store.automationRulesSorted) { rule in
                     let preset = store.sessionPreset(id: rule.presetID)
+                    let projectName = preset?.projectID.flatMap { projectID in
+                        store.state.projects.first(where: { $0.id == projectID })?.name
+                    }
                     AutomationRuleRow(
                         rule: rule,
                         preset: preset,
+                        projectName: projectName,
                         status: store.automationRuleStatus(for: rule),
                         edit: {
                             ruleBeingEdited = rule
@@ -51,15 +56,20 @@ struct AutomationSettingsView: View {
 
             Button {
                 ruleBeingEdited = nil
+                newEditorIdentity = UUID()
                 isPresentingEditor = true
             } label: {
                 Label("Add Automation Rule…", systemImage: "plus")
             }
-            .disabled(store.sessionPresetsAvailableForAutomation.isEmpty)
-            .accessibilityHint(store.sessionPresetsAvailableForAutomation.isEmpty ? "Create a session preset for an active project before creating an automation rule" : "Creates a local developer-tool or application session rule")
+            .disabled(store.sessionPresetsAvailableForDeveloperAutomation.isEmpty && store.sessionPresetsAvailableForAutomation.isEmpty)
+            .accessibilityHint(
+                store.sessionPresetsAvailableForDeveloperAutomation.isEmpty && store.sessionPresetsAvailableForAutomation.isEmpty
+                    ? "Create a reusable session preset before creating an automation rule"
+                    : "Creates a local developer-tool or application session rule"
+            )
 
-            if store.sessionPresetsAvailableForAutomation.isEmpty {
-                Text("Add an active, relinked project preset before creating an automation rule.")
+            if store.sessionPresetsAvailableForDeveloperAutomation.isEmpty && store.sessionPresetsAvailableForAutomation.isEmpty {
+                Text("Add a reusable session preset before creating an automation rule. Developer-tool rules can use a projectless session template; application rules require an active, relinked project preset.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -68,7 +78,8 @@ struct AutomationSettingsView: View {
         .sheet(isPresented: $isPresentingEditor) {
             AutomationRuleEditorView(
                 rule: ruleBeingEdited,
-                presets: store.presetsForAutomationEditing(ruleBeingEdited),
+                developerToolPresets: store.developerToolPresetsForAutomationEditing(ruleBeingEdited),
+                applicationPresets: store.applicationPresetsForAutomationEditing(ruleBeingEdited),
                 projects: store.projectsSortedByRecentUse,
                 save: { rule in
                     guard store.upsertAutomationRule(rule) else { return false }
@@ -77,6 +88,7 @@ struct AutomationSettingsView: View {
                 },
                 cancel: { isPresentingEditor = false }
             )
+            .id(ruleBeingEdited?.id ?? newEditorIdentity)
         }
     }
 }
@@ -84,6 +96,7 @@ struct AutomationSettingsView: View {
 private struct AutomationRuleRow: View {
     let rule: SessionAutomationRule
     let preset: SessionPreset?
+    let projectName: String?
     let status: SessionAutomationRuleStatus
     let edit: () -> Void
     let delete: () -> Void
@@ -108,11 +121,17 @@ private struct AutomationRuleRow: View {
                     )
                     .accessibilityHidden(true)
                 }
-                Text("\(triggerSummary) → \(preset?.name ?? "Missing preset")")
+                Text("\(triggerSummary) → \(preset?.name ?? "Missing preset") · \(ownershipSummary)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let invalidDeveloperApplicationMessage {
+                    Text(invalidDeveloperApplicationMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text("Pause \(Int(rule.pauseDelay))s · finish \(Int(rule.finishDelay))s · minimum \(Int(rule.minimumSavedDuration))s")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -134,7 +153,7 @@ private struct AutomationRuleRow: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(rule.name), \(triggerSummary), \(preset?.name ?? "missing preset")")
+        .accessibilityLabel("\(rule.name), \(triggerSummary), \(preset?.name ?? "missing preset"), \(ownershipSummary)")
         .accessibilityValue(statusLabel)
     }
 
@@ -180,6 +199,26 @@ private struct AutomationRuleRow: View {
         }
     }
 
+    private var ownershipSummary: String {
+        switch rule.trigger {
+        case .developerTool:
+            if let projectName {
+                return "Legacy project scope: \(projectName)"
+            }
+            return "Project detected from activity"
+        case .applications:
+            return projectName ?? "Missing project"
+        }
+    }
+
+    private var invalidDeveloperApplicationMessage: String? {
+        guard case .applications(let trigger) = rule.trigger,
+              trigger.applications.contains(where: SessionAutomationCoordinator.isDeveloperToolApplication) else {
+            return nil
+        }
+        return "Codex/OpenCode application rules are unavailable; use the Developer Tool trigger."
+    }
+
 }
 
 private enum AutomationTriggerKind: String, CaseIterable, Identifiable {
@@ -198,7 +237,8 @@ private enum AutomationTriggerKind: String, CaseIterable, Identifiable {
 
 private struct AutomationRuleEditorView: View {
     let rule: SessionAutomationRule?
-    let presets: [SessionPreset]
+    let developerToolPresets: [SessionPreset]
+    let applicationPresets: [SessionPreset]
     let projects: [ProjectRecord]
     let save: (SessionAutomationRule) -> Bool
     let cancel: () -> Void
@@ -217,13 +257,15 @@ private struct AutomationRuleEditorView: View {
 
     init(
         rule: SessionAutomationRule?,
-        presets: [SessionPreset],
+        developerToolPresets: [SessionPreset],
+        applicationPresets: [SessionPreset],
         projects: [ProjectRecord],
         save: @escaping (SessionAutomationRule) -> Bool,
         cancel: @escaping () -> Void
     ) {
         self.rule = rule
-        self.presets = presets
+        self.developerToolPresets = developerToolPresets
+        self.applicationPresets = applicationPresets
         self.projects = projects
         self.save = save
         self.cancel = cancel
@@ -233,7 +275,10 @@ private struct AutomationRuleEditorView: View {
         _triggerKind = State(initialValue: trigger?.applicationTrigger == nil ? .developerTool : .applications)
         _tool = State(initialValue: trigger?.developerTool ?? .codex)
         _applications = State(initialValue: trigger?.applicationTrigger?.applications ?? [])
-        _presetID = State(initialValue: rule?.presetID ?? presets.first?.id)
+        let initialPresets = trigger?.applicationTrigger == nil
+            ? developerToolPresets
+            : applicationPresets
+        _presetID = State(initialValue: rule?.presetID ?? initialPresets.first?.id)
         _pauseDelay = State(initialValue: String(Int(rule?.pauseDelay ?? 60)))
         _finishDelay = State(initialValue: String(Int(rule?.finishDelay ?? 300)))
         _minimumSavedDuration = State(initialValue: String(Int(rule?.minimumSavedDuration ?? 60)))
@@ -267,14 +312,21 @@ private struct AutomationRuleEditorView: View {
                     }
                 }
 
-                Picker("Session preset", selection: $presetID) {
+                Picker(triggerKind == .developerTool ? "Session template" : "Session preset (project ownership)", selection: $presetID) {
                     Text("Choose a preset").tag(UUID?.none)
-                    ForEach(presets) { preset in
+                    ForEach(availablePresets) { preset in
                         Text(presetDisplayName(preset)).tag(Optional(preset.id))
                     }
-                    if let presetID, !presets.contains(where: { $0.id == presetID }) {
+                    if let presetID, !availablePresets.contains(where: { $0.id == presetID }) {
                         Text("Missing preset").tag(Optional(presetID))
                     }
+                }
+
+                if let selectedPreset = presetID.flatMap({ id in availablePresets.first(where: { $0.id == id }) }) {
+                    Text(developerToolContext(for: selectedPreset))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 TextField("Pause delay (seconds)", text: $pauseDelay)
@@ -344,14 +396,17 @@ private struct AutomationRuleEditorView: View {
         if triggerKind == .applications && applications.contains(where: { !$0.isValid }) {
             return "Each application must have a valid bundle identifier."
         }
+        if triggerKind == .applications && applications.contains(where: SessionAutomationCoordinator.isDeveloperToolApplication) {
+            return "Use the Developer Tool trigger for Codex or OpenCode; an open tool cannot provide project context."
+        }
         if triggerKind == .applications && ApplicationAutomationTrigger(applications: applications).applications.isEmpty {
             return "Choose at least one installed application."
         }
-        guard let presetID, let preset = presets.first(where: { $0.id == presetID }) else {
+        guard let presetID, let preset = availablePresets.first(where: { $0.id == presetID }) else {
             return "The selected preset is no longer available."
         }
-        guard preset.projectID != nil else {
-            return "Automatic rules require a preset with a configured project."
+        if triggerKind == .applications, preset.projectID == nil {
+            return "Application rules require a preset with a configured project."
         }
         return nil
     }
@@ -386,12 +441,35 @@ private struct AutomationRuleEditorView: View {
     }
 
     private func presetDisplayName(_ preset: SessionPreset) -> String {
-        guard let projectID = preset.projectID,
-              let project = projects.first(where: { $0.id == projectID }),
-              project.isArchived else {
+        if triggerKind == .developerTool {
+            if preset.projectID != nil {
+                return "\(preset.name) · Legacy project scope"
+            }
             return preset.name
         }
-        return "\(preset.name) (Archived Project)"
+        return "\(preset.name) · \(projectDisplayName(for: preset))"
+    }
+
+    private var availablePresets: [SessionPreset] {
+        triggerKind == .developerTool ? developerToolPresets : applicationPresets
+    }
+
+    private func developerToolContext(for preset: SessionPreset) -> String {
+        guard triggerKind == .developerTool else {
+            return "Project ownership: \(projectDisplayName(for: preset))"
+        }
+        if preset.projectID != nil {
+            return "Legacy project scope: \(projectDisplayName(for: preset)). Runtime project is still detected from developer-tool activity."
+        }
+        return "Project is detected automatically from developer-tool activity."
+    }
+
+    private func projectDisplayName(for preset: SessionPreset) -> String {
+        guard let projectID = preset.projectID,
+              let project = projects.first(where: { $0.id == projectID }) else {
+            return "Missing Project"
+        }
+        return project.isArchived ? "\(project.name) (Archived)" : project.name
     }
 
     private func finiteNonNegativeDouble(_ value: String) -> Double? {

@@ -350,6 +350,13 @@ final class SessionStore: ObservableObject {
         sessionPresetsSorted.filter(isPresetUsableForAutomation)
     }
 
+    /// New developer-tool rules use these values as session templates. Their
+    /// runtime project comes from the triggering event, so only projectless
+    /// presets are offered for new configuration.
+    var sessionPresetsAvailableForDeveloperAutomation: [SessionPreset] {
+        sessionPresetsSorted.filter { $0.projectID == nil && isDeveloperToolPresetUsable($0) }
+    }
+
     func projectsForPresetEditing(_ preset: SessionPreset?) -> [ProjectRecord] {
         var projects = activeProjectsSortedByRecentUse
         if let archivedProjectID = preset?.projectID,
@@ -359,15 +366,61 @@ final class SessionStore: ObservableObject {
         return projects
     }
 
-    func presetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
+    /// Presets offered for a developer-tool rule. New rules can select only
+    /// projectless templates. An existing developer rule may retain its
+    /// current project-backed preset as a legacy compatibility option, while
+    /// project-backed presets from other projects stay hidden.
+    func developerToolPresetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
+        let projectlessIDs = Set(
+            sessionPresetsSorted
+                .filter { $0.projectID == nil && isDeveloperToolPresetUsable($0) }
+                .map(\.id)
+        )
+        let legacyPresetID: UUID?
+        if let rule,
+           rule.trigger.developerTool != nil,
+           let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
+           preset.projectID != nil {
+            legacyPresetID = preset.id
+        } else {
+            legacyPresetID = nil
+        }
+
+        let allowedIDs = projectlessIDs.union(legacyPresetID.map { [$0] } ?? [])
+        return sessionPresetsSorted.filter { allowedIDs.contains($0.id) }
+    }
+
+    /// Presets offered for a frontmost-application rule remain project-bound.
+    /// The current preset is retained for editing even when its project is
+    /// archived or needs relinking, matching existing repair behavior.
+    func applicationPresetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
         sessionPresetsSorted.filter { preset in
             isPresetUsableForAutomation(preset) || preset.id == rule?.presetID
         }
     }
 
+    /// The default editor path is developer-tool scoped because a newly
+    /// created rule starts with the Developer Tool trigger.
+    func presetsForAutomationEditing(_ rule: SessionAutomationRule?) -> [SessionPreset] {
+        if rule?.trigger.applicationTrigger != nil {
+            return applicationPresetsForAutomationEditing(rule)
+        }
+        return developerToolPresetsForAutomationEditing(rule)
+    }
+
     func isPresetUsableForAutomation(_ preset: SessionPreset) -> Bool {
         guard let projectID = preset.projectID,
               let project = state.projects.first(where: { $0.id == projectID }),
+              project.isActive else {
+            return false
+        }
+        return DeveloperToolProjectResolver.isUsableFolder(for: project)
+    }
+
+    func isDeveloperToolPresetUsable(_ preset: SessionPreset) -> Bool {
+        guard preset.isValid else { return false }
+        guard let projectID = preset.projectID else { return true }
+        guard let project = state.projects.first(where: { $0.id == projectID }),
               project.isActive else {
             return false
         }
@@ -426,6 +479,7 @@ final class SessionStore: ObservableObject {
             return DeveloperTool.allCases.contains(tool)
         case .applications(let applicationTrigger):
             return applicationTrigger.isValid
+                && !applicationTrigger.applications.contains(where: SessionAutomationCoordinator.isDeveloperToolApplication)
         }
     }
 
@@ -484,14 +538,110 @@ final class SessionStore: ObservableObject {
         at startDate: Date,
         signalAt: Date
     ) -> Bool {
-        startAutomatedSession(
+        guard let resolvedProjectID = DeveloperToolProjectResolver.projectID(
+            for: event.workingDirectory,
+            in: state.projects
+        ) else {
+            return false
+        }
+
+        return startAutomatedSession(
             with: rule,
+            resolvedProjectID: resolvedProjectID,
+            event: event,
             source: .developerTool(
                 tool: event.tool,
                 externalSessionID: event.externalSessionID
             ),
             at: startDate,
             signalAt: signalAt
+        )
+    }
+
+    /// Direct developer-tool starts must receive the project resolved from the
+    /// event that caused them. Keeping this value in the call boundary prevents
+    /// a later mutation from consulting a global current-project variable.
+    @discardableResult
+    private func startAutomatedSession(
+        with rule: SessionAutomationRule,
+        resolvedProjectID: UUID,
+        event: DeveloperToolEvent,
+        source: SessionAutomationClaimSource,
+        at startDate: Date,
+        signalAt: Date
+    ) -> Bool {
+        guard DeveloperToolProjectResolver.projectID(
+                  for: event.workingDirectory,
+                  in: state.projects
+              ) == resolvedProjectID else {
+            return false
+        }
+        guard case .developerTool(let sourceTool, let sourceSessionID) = source,
+              sourceTool == event.tool,
+              sourceSessionID == event.externalSessionID else {
+            return false
+        }
+        return startAutomatedSession(
+            with: rule,
+            resolvedProjectID: resolvedProjectID,
+            source: source,
+            at: startDate,
+            signalAt: signalAt
+        )
+    }
+
+    @discardableResult
+    private func startAutomatedSession(
+        with rule: SessionAutomationRule,
+        resolvedProjectID: UUID,
+        source: SessionAutomationClaimSource,
+        at startDate: Date,
+        signalAt: Date
+    ) -> Bool {
+        guard rule.isEnabled,
+              rule.isValid,
+              case .developerTool = source,
+              state.activeSession == nil,
+              let project = state.projects.first(where: { $0.id == resolvedProjectID }),
+              project.isActive,
+              DeveloperToolProjectResolver.isUsableFolder(for: project),
+              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
+              isDeveloperToolPresetUsable(preset),
+              // Legacy developer-tool presets retain their project as an
+              // eligibility constraint. Projectless presets are reusable
+              // templates, but neither kind supplies the runtime project.
+              SessionAutomationCoordinator.developerToolPresetMatchesRuntimeProject(
+                  preset,
+                  resolvedProjectID: resolvedProjectID
+              ),
+              isAutomationTriggerValid(rule.trigger),
+              sourceMatchesTrigger(source, trigger: rule.trigger) else {
+            return false
+        }
+
+        let metadata = SessionAutomationMetadata(
+            startedByRuleID: rule.id,
+            startedByRuleName: rule.name,
+            startedBySource: source,
+            lastMatchingSignalAt: signalAt,
+            pauseEligibleAt: signalAt.addingTimeInterval(rule.pauseDelay),
+            finishEligibleAt: signalAt.addingTimeInterval(rule.finishDelay),
+            pauseDelay: rule.pauseDelay,
+            finishDelay: rule.finishDelay,
+            minimumSavedDuration: rule.minimumSavedDuration,
+            claims: [SessionAutomationClaim(
+                source: source,
+                isActive: true,
+                lastSignalAt: signalAt
+            )]
+        )
+
+        return startSessionInternal(
+            projectID: resolvedProjectID,
+            goal: preset.goal,
+            type: preset.sessionType,
+            at: startDate,
+            automationMetadata: metadata
         )
     }
 
@@ -502,11 +652,17 @@ final class SessionStore: ObservableObject {
         at startDate: Date,
         signalAt: Date
     ) -> Bool {
+        guard rule.isEnabled,
+              rule.isValid,
+              case .application(let bundleIdentifier) = source else { return false }
+
         guard state.activeSession == nil,
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
               isPresetUsableForAutomation(preset),
               isAutomationTriggerValid(rule.trigger),
+              !SessionAutomationCoordinator.isDeveloperToolApplicationBundleIdentifier(bundleIdentifier),
+              rule.applicationTrigger?.applications.contains(where: SessionAutomationCoordinator.isDeveloperToolApplication) != true,
               sourceMatchesTrigger(source, trigger: rule.trigger) else {
             return false
         }
@@ -1510,11 +1666,15 @@ final class SessionStore: ObservableObject {
     func isAutomationRuleUsable(_ rule: SessionAutomationRule) -> Bool {
         guard rule.isValid,
               isAutomationTriggerValid(rule.trigger),
-              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
-              isPresetUsableForAutomation(preset) else {
+              let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }) else {
             return false
         }
-        return true
+        switch rule.trigger {
+        case .developerTool:
+            return isDeveloperToolPresetUsable(preset)
+        case .applications:
+            return isPresetUsableForAutomation(preset)
+        }
     }
 
     func automationRuleStatus(for rule: SessionAutomationRule) -> SessionAutomationRuleStatus {
@@ -1526,17 +1686,28 @@ final class SessionStore: ObservableObject {
         guard let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }) else {
             return .missingPreset
         }
-        guard let projectID = preset.projectID,
-              let project = state.projects.first(where: { $0.id == projectID }) else {
-            return .missingProject
+        switch rule.trigger {
+        case .developerTool:
+            // A projectless preset is a reusable developer-tool session
+            // template. Legacy project-backed presets retain their saved
+            // project metadata for repair/status purposes, but that metadata
+            // is not the runtime project selected by a developer-tool event.
+            guard let projectID = preset.projectID else { return .enabled }
+            guard let project = state.projects.first(where: { $0.id == projectID }) else {
+                return .missingProject
+            }
+            if project.isArchived { return .projectArchived }
+            if project.requiresRelink { return .needsRelink }
+            return .enabled
+        case .applications:
+            guard let projectID = preset.projectID,
+                  let project = state.projects.first(where: { $0.id == projectID }) else {
+                return .missingProject
+            }
+            if project.isArchived { return .projectArchived }
+            if project.requiresRelink { return .needsRelink }
+            return .enabled
         }
-        if project.isArchived {
-            return .projectArchived
-        }
-        if project.requiresRelink {
-            return .needsRelink
-        }
-        return .enabled
     }
 
     func automationRuleStatusLabel(for rule: SessionAutomationRule) -> String {
@@ -1550,9 +1721,24 @@ final class SessionStore: ObservableObject {
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               isAutomationTriggerValid(rule.trigger) else { return false }
 
-        let preservesExistingPreset = state.automationRules
-            .first(where: { $0.id == rule.id })?.presetID == rule.presetID
-        if !preservesExistingPreset && !isPresetUsableForAutomation(preset) {
+        let existingRule = state.automationRules.first(where: { $0.id == rule.id })
+        let preservesExistingPreset = existingRule?.presetID == rule.presetID
+        if case .developerTool = rule.trigger,
+           !isDeveloperToolPresetSelectionAllowed(
+               preset,
+               existingRule: existingRule
+           ) {
+            return false
+        }
+
+        let presetIsUsable: Bool
+        switch rule.trigger {
+        case .developerTool:
+            presetIsUsable = isDeveloperToolPresetUsable(preset)
+        case .applications:
+            presetIsUsable = isPresetUsableForAutomation(preset)
+        }
+        if !preservesExistingPreset && !presetIsUsable {
             return false
         }
         var nextState = state
@@ -1563,6 +1749,25 @@ final class SessionStore: ObservableObject {
         }
         relinquishInvalidAutomation(in: &nextState)
         commit(nextState)
+        return true
+    }
+
+    /// Project-backed developer-tool presets are legacy-only. They may remain
+    /// attached to an already persisted developer-tool rule, but cannot be
+    /// introduced by a new rule or retargeted from one legacy project-backed
+    /// preset to another.
+    private func isDeveloperToolPresetSelectionAllowed(
+        _ preset: SessionPreset,
+        existingRule: SessionAutomationRule?
+    ) -> Bool {
+        guard preset.projectID != nil else { return true }
+        guard let existingRule,
+              existingRule.trigger.developerTool != nil,
+              let existingPreset = state.sessionPresets.first(where: { $0.id == existingRule.presetID }),
+              existingPreset.projectID != nil,
+              existingPreset.id == preset.id else {
+            return false
+        }
         return true
     }
 
@@ -1921,18 +2126,83 @@ final class SessionStore: ObservableObject {
             guard let event else { return true }
             let didStart = startAutomatedSession(with: rule, event: event, at: startDate, signalAt: event.timestamp)
             return didStart || !lastCriticalCommitFailed
+        case .startWithResolvedProject(let rule, let projectID, let startDate):
+            guard let event else { return true }
+            let didStart = startAutomatedSession(
+                with: rule,
+                resolvedProjectID: projectID,
+                event: event,
+                source: .developerTool(
+                    tool: event.tool,
+                    externalSessionID: event.externalSessionID
+                ),
+                at: startDate,
+                signalAt: event.timestamp
+            )
+            return didStart || !lastCriticalCommitFailed
         case .signal(let rule, let tool, let externalSessionID, let isActive):
+            guard let event,
+                  let resolvedProjectID = DeveloperToolProjectResolver.projectID(
+                      for: event.workingDirectory,
+                      in: state.projects
+                  ),
+                  state.activeSession?.projectID == resolvedProjectID,
+                  sessionAutomationCoordinator.hasSupportingRule(
+                      for: .developerTool(tool: tool, externalSessionID: externalSessionID),
+                      projectID: resolvedProjectID,
+                      in: state
+                  ) else {
+                return true
+            }
             return applyAutomationSignal(
                 rule: rule,
                 source: .developerTool(tool: tool, externalSessionID: externalSessionID),
                 isActive: isActive,
-                signalAt: event?.timestamp ?? date,
+                signalAt: event.timestamp,
+                transitionAt: date
+            )
+        case .signalWithResolvedProject(let rule, let projectID, let tool, let externalSessionID, let isActive):
+            guard let event,
+                  event.tool == tool,
+                  event.externalSessionID == externalSessionID,
+                  DeveloperToolProjectResolver.projectID(
+                      for: event.workingDirectory,
+                      in: state.projects
+                  ) == projectID,
+                  state.activeSession?.projectID == projectID,
+                  sessionAutomationCoordinator.hasSupportingRule(
+                      for: .developerTool(tool: tool, externalSessionID: externalSessionID),
+                      projectID: projectID,
+                      in: state
+                  ) else {
+                return true
+            }
+            return applyAutomationSignal(
+                rule: rule,
+                source: .developerTool(tool: tool, externalSessionID: externalSessionID),
+                isActive: isActive,
+                signalAt: event.timestamp,
                 transitionAt: date
             )
         case .startWithSource(let rule, let source, let startDate):
             let didStart = startAutomatedSession(with: rule, source: source, at: startDate, signalAt: date)
             return didStart || !lastCriticalCommitFailed
         case .signalWithSource(let rule, let source, let isActive):
+            if case .developerTool(let tool, let externalSessionID) = source {
+                guard let event,
+                      let resolvedProjectID = DeveloperToolProjectResolver.projectID(
+                          for: event.workingDirectory,
+                          in: state.projects
+                      ),
+                      state.activeSession?.projectID == resolvedProjectID,
+                      sessionAutomationCoordinator.hasSupportingRule(
+                          for: .developerTool(tool: tool, externalSessionID: externalSessionID),
+                          projectID: resolvedProjectID,
+                          in: state
+                      ) else {
+                    return true
+                }
+            }
             return applyAutomationSignal(
                 rule: rule,
                 source: source,

@@ -48,6 +48,32 @@ final class SessionPresetAutomationTests: XCTestCase {
         XCTAssertNotNil(canonicalRule["presetID"])
     }
 
+    func testProjectIndependentDeveloperTemplatePersistsWithoutProjectOwnership() throws {
+        let preset = SessionPreset(
+            name: "Developer Tool Template",
+            projectID: nil,
+            sessionType: .review,
+            goal: "Review the resolved repository"
+        )
+        let rule = SessionAutomationRule(
+            name: "Codex anywhere",
+            trigger: .developerTool(.codex),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let state = AppState(
+            settings: CodePulseSettings(automationEnabled: true),
+            sessionPresets: [preset],
+            automationRules: [rule]
+        )
+
+        let decoded = try decodeState(encode(state))
+        XCTAssertEqual(decoded, state)
+        XCTAssertNil(decoded.sessionPresets.first?.projectID)
+        XCTAssertEqual(decoded.automationRules.first?.presetID, preset.id)
+        XCTAssertNil(decoded.automationRules.first?.projectID)
+    }
+
     func testPresetRoundTripAndQuickStartRemainManual() throws {
         let project = try makeProject(name: "Preset Project")
         let preset = SessionPreset(
@@ -153,10 +179,35 @@ final class SessionPresetAutomationTests: XCTestCase {
     }
 
     func testUpsertAutomationRuleAcceptsNewRuleForUsablePreset() throws {
-        let project = try makeProject(name: "Usable Automation Project")
-        let preset = SessionPreset(name: "Usable Automation Preset", projectID: project.record.id)
+        let preset = SessionPreset(
+            name: "Projectless Automation Template",
+            projectID: nil,
+            sessionType: .review,
+            goal: "Use the runtime project"
+        )
         let rule = SessionAutomationRule(
             name: "Usable automation rule",
+            trigger: .developerTool(.codex),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            sessionPresets: [preset]
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        XCTAssertFalse(store.isPresetUsableForAutomation(preset))
+        XCTAssertTrue(store.isDeveloperToolPresetUsable(preset))
+        XCTAssertTrue(store.upsertAutomationRule(rule))
+        XCTAssertTrue(store.isAutomationRuleUsable(rule))
+        XCTAssertEqual(persistence.state.automationRules, [rule])
+    }
+
+    func testUpsertAutomationRuleRejectsNewDeveloperRuleForProjectBackedPreset() throws {
+        let project = try makeProject(name: "Hidden Scope Project")
+        let preset = SessionPreset(name: "Project Backed Template", projectID: project.record.id)
+        let rule = SessionAutomationRule(
+            name: "New project-backed developer rule",
             trigger: .developerTool(.codex),
             presetID: preset.id,
             minimumSavedDuration: 0
@@ -167,9 +218,42 @@ final class SessionPresetAutomationTests: XCTestCase {
         ))
         let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
 
-        XCTAssertTrue(store.isPresetUsableForAutomation(preset))
-        XCTAssertTrue(store.upsertAutomationRule(rule))
-        XCTAssertTrue(store.isAutomationRuleUsable(rule))
+        XCTAssertTrue(store.isDeveloperToolPresetUsable(preset))
+        XCTAssertFalse(store.upsertAutomationRule(rule))
+        XCTAssertTrue(persistence.state.automationRules.isEmpty)
+    }
+
+    func testExistingProjectlessDeveloperRuleRejectsAddingProjectBackedScope() throws {
+        let project = try makeProject(name: "Hidden Scope Update Project")
+        let projectlessPreset = SessionPreset(
+            name: "Projectless Template",
+            projectID: nil,
+            sessionType: .review,
+            goal: "Detected project"
+        )
+        let projectBackedPreset = SessionPreset(
+            name: "Project Backed Template",
+            projectID: project.record.id,
+            sessionType: .debugging,
+            goal: "Hidden project"
+        )
+        let rule = SessionAutomationRule(
+            name: "Projectless developer rule",
+            trigger: .developerTool(.codex),
+            presetID: projectlessPreset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [project.record],
+            sessionPresets: [projectlessPreset, projectBackedPreset],
+            automationRules: [rule]
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        var retargeted = rule
+        retargeted.presetID = projectBackedPreset.id
+
+        XCTAssertFalse(store.upsertAutomationRule(retargeted))
         XCTAssertEqual(persistence.state.automationRules, [rule])
     }
 
@@ -211,10 +295,17 @@ final class SessionPresetAutomationTests: XCTestCase {
                 minimumSavedDuration: 0
             )
 
-            XCTAssertFalse(store.isPresetUsableForAutomation(preset), preset.name)
-            XCTAssertFalse(store.upsertAutomationRule(rule), preset.name)
+            if preset.projectID == nil {
+                XCTAssertFalse(store.isPresetUsableForAutomation(preset), preset.name)
+                XCTAssertTrue(store.isDeveloperToolPresetUsable(preset), preset.name)
+                XCTAssertTrue(store.upsertAutomationRule(rule), preset.name)
+            } else {
+                XCTAssertFalse(store.isPresetUsableForAutomation(preset), preset.name)
+                XCTAssertFalse(store.isDeveloperToolPresetUsable(preset), preset.name)
+                XCTAssertFalse(store.upsertAutomationRule(rule), preset.name)
+            }
         }
-        XCTAssertTrue(persistence.state.automationRules.isEmpty)
+        XCTAssertEqual(persistence.state.automationRules.count, 1)
     }
 
     func testExistingRulePreservesArchivedAndNeedsRelinkPresetWhenEdited() throws {
@@ -230,10 +321,13 @@ final class SessionPresetAutomationTests: XCTestCase {
         )
         let persistence = PresetTestPersistence(AppState(
             projects: [project.record],
-            sessionPresets: [preset]
+            sessionPresets: [preset],
+            automationRules: [rule]
         ))
         let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
 
+        XCTAssertEqual(store.state.automationRules, [rule])
+        XCTAssertTrue(store.isAutomationRuleUsable(rule))
         XCTAssertTrue(store.upsertAutomationRule(rule))
 
         _ = try store.archiveProject(id: project.record.id, at: start.addingTimeInterval(1))
@@ -259,8 +353,37 @@ final class SessionPresetAutomationTests: XCTestCase {
         XCTAssertTrue(savedRule.isEnabled)
     }
 
-    func testExistingRuleRejectsRetargetingToUnusablePresetTargets() throws {
+    func testExistingLegacyDeveloperRuleCanConvertToProjectlessPreset() throws {
+        let project = try makeProject(name: "Legacy Conversion Project")
+        let legacyPreset = SessionPreset(name: "Legacy Template", projectID: project.record.id)
+        let projectlessPreset = SessionPreset(
+            name: "Runtime Template",
+            projectID: nil,
+            sessionType: .debugging,
+            goal: "Use the detected project"
+        )
+        let rule = SessionAutomationRule(
+            name: "Convertible legacy rule",
+            trigger: .developerTool(.codex),
+            presetID: legacyPreset.id,
+            minimumSavedDuration: 0
+        )
+        let persistence = PresetTestPersistence(AppState(
+            projects: [project.record],
+            sessionPresets: [legacyPreset, projectlessPreset],
+            automationRules: [rule]
+        ))
+        let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
+
+        var converted = rule
+        converted.presetID = projectlessPreset.id
+        XCTAssertTrue(store.upsertAutomationRule(converted))
+        XCTAssertEqual(persistence.state.automationRules.first?.presetID, projectlessPreset.id)
+    }
+
+    func testExistingLegacyRuleRejectsRetargetingToProjectBackedPresetTargets() throws {
         let validProject = try makeProject(name: "Retarget Source Project")
+        let otherProject = try makeProject(name: "Retarget Other Project")
         let archivedFolder = try makeProject(name: "Retarget Archived Project")
         let archivedProject = ProjectRecord(
             id: archivedFolder.record.id,
@@ -277,6 +400,7 @@ final class SessionPresetAutomationTests: XCTestCase {
             createdAt: start
         )
         let validPreset = SessionPreset(name: "Retarget Source Preset", projectID: validProject.record.id)
+        let otherPreset = SessionPreset(name: "Retarget Other Preset", projectID: otherProject.record.id)
         let unusablePresets = [
             SessionPreset(name: "Retarget No Project", projectID: nil),
             SessionPreset(name: "Retarget Missing Project", projectID: UUID()),
@@ -290,24 +414,37 @@ final class SessionPresetAutomationTests: XCTestCase {
             minimumSavedDuration: 0
         )
         let persistence = PresetTestPersistence(AppState(
-            projects: [validProject.record, archivedProject, relinkProject],
-            sessionPresets: [validPreset] + unusablePresets
+            projects: [validProject.record, otherProject.record, archivedProject, relinkProject],
+            sessionPresets: [validPreset, otherPreset] + unusablePresets,
+            automationRules: [rule]
         ))
         let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
 
-        XCTAssertTrue(store.upsertAutomationRule(rule))
-        for preset in unusablePresets {
+        XCTAssertEqual(store.state.automationRules, [rule])
+        var expectedRule = rule
+        var retargetedToOtherProject = rule
+        retargetedToOtherProject.presetID = otherPreset.id
+        XCTAssertFalse(store.upsertAutomationRule(retargetedToOtherProject))
+        XCTAssertEqual(store.state.automationRules, [rule])
+
+        for preset in [unusablePresets[0], otherPreset] + Array(unusablePresets.dropFirst()) {
             var retargetedRule = rule
             retargetedRule.name = "Retargeted to \(preset.name)"
             retargetedRule.presetID = preset.id
 
-            XCTAssertFalse(store.upsertAutomationRule(retargetedRule), preset.name)
-            XCTAssertEqual(persistence.state.automationRules, [rule])
+            if preset.projectID == nil {
+                XCTAssertTrue(store.upsertAutomationRule(retargetedRule), preset.name)
+                expectedRule = retargetedRule
+            } else {
+                XCTAssertFalse(store.upsertAutomationRule(retargetedRule), preset.name)
+            }
+            XCTAssertEqual(persistence.state.automationRules, [expectedRule])
         }
     }
 
     func testPresetsForAutomationEditingFiltersUnusableTargetsExceptCurrentPreset() throws {
         let validProject = try makeProject(name: "Editor Valid Project")
+        let unrelatedProject = try makeProject(name: "Editor Unrelated Project")
         let archivedFolder = try makeProject(name: "Editor Archived Project")
         let archivedProject = ProjectRecord(
             id: archivedFolder.record.id,
@@ -324,6 +461,7 @@ final class SessionPresetAutomationTests: XCTestCase {
             createdAt: start
         )
         let validPreset = SessionPreset(name: "Editor Valid Preset", projectID: validProject.record.id)
+        let unrelatedPreset = SessionPreset(name: "Editor Unrelated Preset", projectID: unrelatedProject.record.id)
         let unusablePresets = [
             SessionPreset(name: "Editor No Project", projectID: nil),
             SessionPreset(name: "Editor Missing Project", projectID: UUID()),
@@ -331,34 +469,166 @@ final class SessionPresetAutomationTests: XCTestCase {
             SessionPreset(name: "Editor Needs Relink Project", projectID: relinkProject.id)
         ]
         let persistence = PresetTestPersistence(AppState(
-            projects: [validProject.record, archivedProject, relinkProject],
-            sessionPresets: [validPreset] + unusablePresets
+            projects: [validProject.record, unrelatedProject.record, archivedProject, relinkProject],
+            sessionPresets: [validPreset, unrelatedPreset] + unusablePresets
         ))
         let store = makeStore(persistence: persistence, clock: PresetTestClock(start))
 
         XCTAssertEqual(
             Set(store.sessionPresetsAvailableForAutomation.map(\.id)),
-            Set([validPreset.id])
+            Set([validPreset.id, unrelatedPreset.id])
+        )
+        XCTAssertEqual(
+            Set(store.sessionPresetsAvailableForDeveloperAutomation.map(\.id)),
+            Set([unusablePresets[0].id])
         )
         XCTAssertEqual(
             Set(store.presetsForAutomationEditing(nil).map(\.id)),
-            Set([validPreset.id])
+            Set([unusablePresets[0].id])
         )
 
-        for preset in unusablePresets {
+        let legacyRule = SessionAutomationRule(
+            name: "Current legacy rule",
+            trigger: .developerTool(.codex),
+            presetID: validPreset.id,
+            minimumSavedDuration: 0
+        )
+        XCTAssertEqual(
+            Set(store.presetsForAutomationEditing(legacyRule).map(\.id)),
+            Set([validPreset.id, unusablePresets[0].id])
+        )
+        XCTAssertEqual(
+            Set(store.developerToolPresetsForAutomationEditing(legacyRule).map(\.id)),
+            Set([validPreset.id, unusablePresets[0].id])
+        )
+        XCTAssertEqual(
+            Set(store.applicationPresetsForAutomationEditing(nil).map(\.id)),
+            Set([validPreset.id, unrelatedPreset.id])
+        )
+    }
+
+    func testDeveloperToolApplicationPresenceCannotProvideProjectAutomationContext() throws {
+        let project = try makeProject(name: "Tool Presence Project")
+        let preset = SessionPreset(name: "Tool Presence Preset", projectID: project.record.id)
+        let applications = [
+            ApplicationIdentity(bundleIdentifier: "com.openai.codex", displayName: "Codex"),
+            ApplicationIdentity(bundleIdentifier: "com.example.opencode", displayName: "OpenCode")
+        ]
+
+        for application in applications {
             let rule = SessionAutomationRule(
-                name: "Current \(preset.name) rule",
-                trigger: .developerTool(.codex),
+                name: "\(application.displayName) presence",
+                trigger: .applications(ApplicationAutomationTrigger(applications: [application])),
                 presetID: preset.id,
                 minimumSavedDuration: 0
             )
-
-            XCTAssertEqual(
-                Set(store.presetsForAutomationEditing(rule).map(\.id)),
-                Set([validPreset.id, preset.id]),
-                preset.name
+            let state = AppState(
+                projects: [project.record],
+                settings: CodePulseSettings(automationEnabled: true),
+                sessionPresets: [preset],
+                automationRules: [rule]
             )
+            let store = makeStore(
+                persistence: PresetTestPersistence(state),
+                clock: PresetTestClock(start)
+            )
+
+            XCTAssertTrue(SessionAutomationCoordinator.isDeveloperToolApplication(application))
+            XCTAssertFalse(store.isAutomationRuleUsable(rule))
+            XCTAssertNil(SessionAutomationCoordinator().action(
+                for: application,
+                in: state,
+                now: start
+            ))
         }
+    }
+
+    func testDeveloperToolApplicationClassifierUsesExactNormalizedIdentitiesConsistently() throws {
+        let exactIdentities = [
+            ApplicationIdentity(bundleIdentifier: "com.openai.codex", displayName: "Desktop Client"),
+            ApplicationIdentity(bundleIdentifier: "com.example.shell", displayName: "  OpenCode ")
+        ]
+        for identity in exactIdentities {
+            XCTAssertTrue(SessionAutomationCoordinator.isDeveloperToolApplication(identity), identity.bundleIdentifier)
+        }
+
+        let nearMatches = [
+            ApplicationIdentity(bundleIdentifier: "com.example.codex-helper", displayName: "Codex Helper"),
+            ApplicationIdentity(bundleIdentifier: "com.example.opencode-tools", displayName: "OpenCode Tools"),
+            ApplicationIdentity(bundleIdentifier: "com.example.editor", displayName: "Code X")
+        ]
+        for identity in nearMatches {
+            XCTAssertFalse(SessionAutomationCoordinator.isDeveloperToolApplication(identity), identity.bundleIdentifier)
+        }
+
+        let project = try makeProject(name: "Classifier Project")
+        let preset = SessionPreset(name: "Classifier Preset", projectID: project.record.id)
+        let nearMatchRule = SessionAutomationRule(
+            name: "Near match application",
+            trigger: .applications(ApplicationAutomationTrigger(applications: [nearMatches[0]])),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let state = AppState(
+            projects: [project.record],
+            settings: CodePulseSettings(automationEnabled: true),
+            sessionPresets: [preset],
+            automationRules: [nearMatchRule]
+        )
+        let store = makeStore(
+            persistence: PresetTestPersistence(state),
+            clock: PresetTestClock(start)
+        )
+        XCTAssertTrue(store.isAutomationRuleUsable(nearMatchRule))
+        XCTAssertNotNil(SessionAutomationCoordinator().action(
+            for: nearMatches[0],
+            in: state,
+            now: start
+        ))
+    }
+
+    func testStaleDeveloperToolApplicationClaimIsRelinquishedOnReload() throws {
+        let project = try makeProject(name: "Stale Claim Project")
+        let preset = SessionPreset(name: "Stale Claim Preset", projectID: project.record.id)
+        let codex = ApplicationIdentity(bundleIdentifier: "com.openai.codex", displayName: "Codex")
+        let rule = SessionAutomationRule(
+            name: "Legacy Codex application",
+            trigger: .applications(ApplicationAutomationTrigger(applications: [codex])),
+            presetID: preset.id,
+            minimumSavedDuration: 0
+        )
+        let source = SessionAutomationClaimSource.application(bundleIdentifier: codex.bundleIdentifier)
+        let metadata = SessionAutomationMetadata(
+            startedByRuleID: rule.id,
+            startedByRuleName: rule.name,
+            startedBySource: source,
+            lastMatchingSignalAt: start,
+            pauseDelay: 60,
+            finishDelay: 300,
+            minimumSavedDuration: 0,
+            claims: [SessionAutomationClaim(source: source, isActive: true, lastSignalAt: start)]
+        )
+        let state = AppState(
+            projects: [project.record],
+            activeSession: ActiveSession(
+                projectID: project.record.id,
+                projectName: project.record.name,
+                startedAt: start,
+                automationMetadata: metadata
+            ),
+            settings: CodePulseSettings(automationEnabled: true),
+            sessionPresets: [preset],
+            automationRules: [rule]
+        )
+
+        let store = makeStore(
+            persistence: PresetTestPersistence(state),
+            clock: PresetTestClock(start)
+        )
+
+        XCTAssertFalse(store.activeSession?.automationMetadata?.controlEnabled ?? true)
+        XCTAssertTrue(store.activeSession?.automationMetadata?.claims.isEmpty == true)
+        XCTAssertNil(SessionAutomationCoordinator().action(for: codex, in: store.state, now: start))
     }
 
     func testApplicationRuleStartsAndSwitchesWithinOneSession() async throws {
