@@ -49,5 +49,12 @@ final class ReleaseReadinessTests: XCTestCase {
         XCTAssertTrue(script.contains("/usr/bin/codesign --verify --strict --verbose=2 \"$APP_BUNDLE\""))
         XCTAssertTrue(script.contains("Signature=adhoc"))
         XCTAssertTrue(script.contains("TeamIdentifier=not set"))
+
+        XCTAssertTrue(script.contains("RELEASE_APP_BUNDLE=\"$RELEASE_DIR/$APP_NAME.app\""))
+        XCTAssertTrue(script.contains("APP_BUNDLE=\"$TEMP_DIR/$APP_NAME.app\""))
+        XCTAssertTrue(script.contains("copy_bundle_without_metadata"))
+        XCTAssertTrue(script.contains("--norsrc"))
+        XCTAssertTrue(script.contains("--noextattr"))
+        XCTAssertTrue(script.contains("publish_release_bundle"))
     }
 }

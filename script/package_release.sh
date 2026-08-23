@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELEASE_DIR="$ROOT_DIR/dist/release"
 INFO_TEMPLATE="$ROOT_DIR/Resources/Info.plist"
 ICON_SOURCE="$ROOT_DIR/Resources/CodePulse.icns"
-APP_BUNDLE="$RELEASE_DIR/$APP_NAME.app"
+RELEASE_APP_BUNDLE="$RELEASE_DIR/$APP_NAME.app"
+APP_BUNDLE="$RELEASE_APP_BUNDLE"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_HELPERS="$APP_CONTENTS/Helpers"
@@ -86,6 +87,18 @@ clear_bundle_metadata() {
   /usr/bin/xattr -r -d 'com.apple.fileprovider.fpfs#P' "$bundle_path" >/dev/null 2>&1 || true
 }
 
+copy_bundle_without_metadata() {
+  local source_path="$1"
+  local destination_path="$2"
+  /usr/bin/ditto \
+    --norsrc \
+    --noextattr \
+    --noqtn \
+    --noacl \
+    "$source_path" \
+    "$destination_path"
+}
+
 parse_options() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -146,7 +159,16 @@ determine_version() {
 
 prepare_workspace() {
   TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codepulse-release.XXXXXX")"
-  mkdir -p "$RELEASE_DIR"
+  APP_BUNDLE="$TEMP_DIR/$APP_NAME.app"
+  APP_CONTENTS="$APP_BUNDLE/Contents"
+  APP_MACOS="$APP_CONTENTS/MacOS"
+  APP_HELPERS="$APP_CONTENTS/Helpers"
+  APP_RESOURCES="$APP_CONTENTS/Resources"
+  APP_FRAMEWORKS="$APP_CONTENTS/Frameworks"
+  APP_BINARY="$APP_MACOS/$APP_NAME"
+  APP_HELPER_BINARY="$APP_HELPERS/codepulse-integration"
+  APP_CONTROL_BINARY="$APP_HELPERS/codepulsectl"
+  INFO_PLIST="$APP_CONTENTS/Info.plist"
   echo "Packaging CodePulse $VERSION (build $BUILD_NUMBER)"
   echo "Temporary build workspace: $TEMP_DIR"
 }
@@ -325,7 +347,7 @@ stage_app_bundle() {
   cp "$UNIVERSAL_CONTROL" "$APP_CONTROL_BINARY"
   cp "$INFO_TEMPLATE" "$INFO_PLIST"
   cp "$ICON_SOURCE" "$APP_RESOURCES/CodePulse.icns"
-  /usr/bin/ditto "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
+  copy_bundle_without_metadata "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS/Sparkle.framework"
   chmod 755 "$APP_BINARY"
   chmod 755 "$APP_HELPER_BINARY"
   chmod 755 "$APP_CONTROL_BINARY"
@@ -352,13 +374,12 @@ stage_app_bundle() {
 optionally_adhoc_sign() {
   if [[ "$ADHOC_SIGN" == "1" || "$ADHOC_SIGN" == "true" ]]; then
     echo "Applying local ad-hoc signature"
-    local signing_bundle="$TEMP_DIR/$APP_NAME.app"
+    local signing_bundle="$APP_BUNDLE"
     local signing_helpers="$signing_bundle/Contents/Helpers"
 
-    # Sign outside the checkout so Finder/File Provider metadata cannot be
-    # reattached between staging and codesign. The verified bundle is copied
-    # back to the release path after the complete signature is sealed.
-    /usr/bin/ditto "$APP_BUNDLE" "$signing_bundle"
+    # The complete release bundle lives outside the checkout while it is
+    # mutated and validated. This keeps Finder/File Provider metadata races
+    # away from signing and strict verification.
     clear_bundle_metadata "$signing_bundle"
 
     # Sign nested executables before the outer app so the app seal contains
@@ -371,10 +392,6 @@ optionally_adhoc_sign() {
     /usr/bin/codesign --verify --strict --verbose=2 "$signing_bundle/Contents/Frameworks/Sparkle.framework"
     /usr/bin/codesign --force --sign - "$signing_bundle"
     /usr/bin/codesign --verify --strict --verbose=2 "$signing_bundle"
-
-    /bin/rm -rf "$APP_BUNDLE"
-    /usr/bin/ditto "$signing_bundle" "$APP_BUNDLE"
-    clear_bundle_metadata
   else
     echo "Signing: intentionally unsigned diagnostic bundle (no Developer ID or ad-hoc signature)"
   fi
@@ -439,6 +456,29 @@ verify_bundle() {
   fi
 }
 
+publish_release_bundle() {
+  echo "Copying strictly verified app to $RELEASE_APP_BUNDLE"
+
+  if [[ -L "$RELEASE_DIR" || ( -e "$RELEASE_DIR" && ! -d "$RELEASE_DIR" ) ]]; then
+    die "refusing to use an unsafe release directory: $RELEASE_DIR"
+  fi
+  mkdir -p "$RELEASE_DIR"
+  if [[ -L "$RELEASE_DIR" || ! -d "$RELEASE_DIR" ]]; then
+    die "release directory is not a real directory: $RELEASE_DIR"
+  fi
+
+  if [[ -e "$RELEASE_APP_BUNDLE" || -L "$RELEASE_APP_BUNDLE" ]]; then
+    [[ -d "$RELEASE_APP_BUNDLE" && ! -L "$RELEASE_APP_BUNDLE" ]] || die "refusing to replace non-directory app path: $RELEASE_APP_BUNDLE"
+    /bin/rm -rf "$RELEASE_APP_BUNDLE"
+  fi
+
+  copy_bundle_without_metadata "$APP_BUNDLE" "$RELEASE_APP_BUNDLE"
+  # The copy is no longer used for signing or strict validation. Remove only
+  # transient metadata from this generated artifact; File Provider may
+  # reattach FinderInfo to the developer checkout after this point.
+  clear_bundle_metadata "$RELEASE_APP_BUNDLE"
+}
+
 create_dmg() {
   local dmg_root="$TEMP_DIR/dmg-root"
   echo "Creating $DMG_PATH"
@@ -451,7 +491,7 @@ create_dmg() {
   fi
 
   mkdir -p "$dmg_root"
-  ditto "$APP_BUNDLE" "$dmg_root/$APP_NAME.app"
+  copy_bundle_without_metadata "$APP_BUNDLE" "$dmg_root/$APP_NAME.app"
   ln -s /Applications "$dmg_root/Applications"
 
   /usr/bin/hdiutil create \
@@ -518,9 +558,10 @@ main() {
   stage_app_bundle
   optionally_adhoc_sign
   verify_bundle
+  publish_release_bundle
 
   if [[ "$APP_ONLY" == true ]]; then
-    echo "Release app ready: $APP_BUNDLE"
+    echo "Release app ready: $RELEASE_APP_BUNDLE"
     smoke_validate_artifact
     return
   fi
