@@ -90,13 +90,39 @@ opt-in and disabled by default.
 
 ## Multi-Project Workspaces
 
-Expand CodePulse from project-aware session tracking into a local workspace for
-following work across multiple projects without combining their context or
-history.
+CodePulse is evolving from project-aware session tracking into a workspace
+model. A workspace is an organizational layer above projects, allowing multiple
+projects to be grouped together without combining histories, insights, or
+session context. Existing project behavior remains unchanged.
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Multi-Project Workspaces | Accepted | Track multiple projects as first-class workspaces, each with its own dashboard, current and recent activity, session history, and project-specific insights. This creates a foundation for future local intelligence such as cross-project focus trends, switching patterns, resume context, and suggested next steps. |
+| Feature                         | Status      | Notes                                                                                                                                                                                                                    |
+| ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Workspace foundation            | Accepted    | Introduce a workspace container that can own one or more projects while preserving existing project-level sessions, insights, and history. Existing installs migrate into a default workspace without changing behavior. |
+| Workspace switching             | Accepted    | Allow users to switch between active workspaces and quickly resume different areas of work without losing context.                                                                                                       |
+| Workspace dashboards            | Accepted    | Provide workspace-level views combining project activity, recent sessions, and aggregate activity while keeping project data separated.                                                                                  |
+| Cross-project activity insights | Considering | Show local patterns across projects, including focus distribution, switching patterns, and time allocation without creating productivity scores or cloud analysis.                                                       |
+| Resume context                  | Considering | Provide local context for returning to work, including recent projects, unfinished sessions, and relevant previous activity.                                                                                             |
+| Workspace intelligence          | Considering | Future local intelligence features built on workspace history, such as suggested next steps and continuation hints.                                                                                                      |
+
+Implementation should happen incrementally:
+
+1. Workspace foundation
+
+   - Add workspace persistence model
+   - Migrate existing projects into a default workspace
+   - Keep current project workflows working
+
+2. Workspace experience
+
+   - Workspace selector
+   - Workspace dashboard
+   - Workspace-scoped navigation
+
+3. Workspace intelligence
+
+   - Cross-project patterns
+   - Resume context
+   - Local suggestions
 
 The goal is a clear view of both an individual project's state and the broader
 portfolio of active work while preserving CodePulse's local-first privacy
