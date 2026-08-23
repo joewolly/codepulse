@@ -2250,6 +2250,14 @@ final class SessionStore: ObservableObject {
             metadata.lastMatchingSignalAt = signalDate
             metadata.pauseEligibleAt = signalDate.addingTimeInterval(metadata.pauseDelay)
             metadata.finishEligibleAt = signalDate.addingTimeInterval(metadata.finishDelay)
+        } else if metadata.claims.contains(where: { $0.source == source }) {
+            // A developer-tool Stop/session-end event is the transition to
+            // idle. Its timestamp, rather than the preceding turn-start
+            // signal, begins the automatic pause/finish countdown. The same
+            // transition also keeps application claims' existing behavior
+            // explicit when a frontmost application deactivates.
+            metadata.pauseEligibleAt = signalDate.addingTimeInterval(metadata.pauseDelay)
+            metadata.finishEligibleAt = signalDate.addingTimeInterval(metadata.finishDelay)
         }
         if isActive, session.phase == .paused {
             _ = session.resume(at: date)
@@ -2278,17 +2286,29 @@ final class SessionStore: ObservableObject {
             return
         }
 
-        let pauseEligibleAt = metadata.pauseEligibleAt
-            ?? metadata.lastMatchingSignalAt.addingTimeInterval(metadata.pauseDelay)
-        let finishEligibleAt = metadata.finishEligibleAt
-            ?? metadata.lastMatchingSignalAt.addingTimeInterval(metadata.finishDelay)
+        let pauseEligibleAt = automaticLifecycleDeadline(
+            stored: metadata.pauseEligibleAt,
+            fallbackSignalAt: metadata.lastMatchingSignalAt,
+            delay: metadata.pauseDelay,
+            claims: metadata.claims
+        )
+        let finishEligibleAt = automaticLifecycleDeadline(
+            stored: metadata.finishEligibleAt,
+            fallbackSignalAt: metadata.lastMatchingSignalAt,
+            delay: metadata.finishDelay,
+            claims: metadata.claims
+        )
         metadata.pauseEligibleAt = pauseEligibleAt
         metadata.finishEligibleAt = finishEligibleAt
 
-        let hasRecentActiveClaim = metadata.claims.contains { claim in
-            claim.isActive && date < claim.lastSignalAt.addingTimeInterval(metadata.pauseDelay)
+        let hasActiveClaim = metadata.claims.contains { claim in
+            claimKeepsAutomationAlive(
+                claim,
+                at: date,
+                pauseDelay: metadata.pauseDelay
+            )
         }
-        guard !hasRecentActiveClaim else { return }
+        guard !hasActiveClaim else { return }
 
         if session.phase == .running, date >= pauseEligibleAt {
             if session.pause(at: pauseEligibleAt) {
@@ -2306,6 +2326,43 @@ final class SessionStore: ObservableObject {
             return
         }
         finishAutomatically(at: min(date, finishEligibleAt))
+    }
+
+    /// Developer-tool claims describe a real session/turn and remain active
+    /// until an explicit idle or end event arrives. Application claims retain
+    /// their existing absence-of-notification timeout semantics.
+    private func claimKeepsAutomationAlive(
+        _ claim: SessionAutomationClaim,
+        at date: Date,
+        pauseDelay: TimeInterval
+    ) -> Bool {
+        guard claim.isActive else { return false }
+        switch claim.source {
+        case .developerTool:
+            return true
+        case .application:
+            return date < claim.lastSignalAt.addingTimeInterval(pauseDelay)
+        }
+    }
+
+    /// Preserve the persisted deadline as the primary compatibility value,
+    /// while accounting for a still-fresh application claim that may have a
+    /// later deadline after a mixed-source signal sequence.
+    private func automaticLifecycleDeadline(
+        stored: Date?,
+        fallbackSignalAt: Date,
+        delay: TimeInterval,
+        claims: [SessionAutomationClaim]
+    ) -> Date {
+        var deadline = stored ?? fallbackSignalAt.addingTimeInterval(delay)
+        for claim in claims {
+            guard claim.isActive,
+                  case .application = claim.source else {
+                continue
+            }
+            deadline = max(deadline, claim.lastSignalAt.addingTimeInterval(delay))
+        }
+        return deadline
     }
 
     private func finishAutomatically(at date: Date) {

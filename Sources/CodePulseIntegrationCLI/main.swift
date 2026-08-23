@@ -129,8 +129,12 @@ private struct CodexHookPayload: Decodable {
         switch hookEventName {
         case "SessionStart":
             return source == "compact" ? .activity : .sessionStarted
-        case "Stop":
+        // UserPromptSubmit is the Codex per-turn work-start event.
+        case "UserPromptSubmit":
             return .activity
+        // Stop means the current turn is idle; it is not positive activity.
+        case "Stop":
+            return .sessionIdle
         case "SessionEnd":
             return .sessionEnded
         default:

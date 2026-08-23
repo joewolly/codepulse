@@ -859,28 +859,129 @@ final class SessionAutomationTests: XCTestCase {
         )
     }
 
-    func testAutomaticPauseResumeUsesSameSessionAndExactThresholds() throws {
+    func testAutomaticCodexTurnDoesNotPauseWithoutIdleSignal() throws {
         let clock = AutomationTestClock(start)
         let fixture = try makeFixture(
             tool: .codex,
             enabled: true,
             seedEvent: event(tool: .codex, sessionID: "codex-a", type: .sessionStarted, path: fixtureProjectPath()),
             clock: clock,
-            pauseDelay: 10,
-            finishDelay: 40,
+            pauseDelay: 60,
+            finishDelay: 300,
+            minimumSavedDuration: 0
+        )
+
+        clock.now = start.addingTimeInterval(59)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .running)
+
+        clock.now = start.addingTimeInterval(60)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .running)
+
+        clock.now = start.addingTimeInterval(300)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .running)
+        XCTAssertTrue(fixture.store.activeSession?.automationMetadata?.claims.first?.isActive == true)
+    }
+
+    func testAutomaticCodexStopBeginsPauseCountdownAtExactThreshold() throws {
+        let clock = AutomationTestClock(start)
+        let fixture = try makeFixture(
+            tool: .codex,
+            enabled: true,
+            seedEvent: event(tool: .codex, sessionID: "codex-a", type: .sessionStarted, path: fixtureProjectPath()),
+            clock: clock,
+            pauseDelay: 60,
+            finishDelay: 300,
+            minimumSavedDuration: 0
+        )
+
+        clock.now = start.addingTimeInterval(300)
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-a",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: clock.now
+        ))
+        fixture.store.refresh()
+
+        clock.now = start.addingTimeInterval(359)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .running)
+
+        clock.now = start.addingTimeInterval(360)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .paused)
+    }
+
+    func testAutomaticCodexTurnBeforePauseCancelsIdleCountdown() throws {
+        let clock = AutomationTestClock(start)
+        let fixture = try makeFixture(
+            tool: .codex,
+            enabled: true,
+            seedEvent: event(tool: .codex, sessionID: "codex-a", type: .sessionStarted, path: fixtureProjectPath()),
+            clock: clock,
+            pauseDelay: 60,
+            finishDelay: 300,
             minimumSavedDuration: 0
         )
         let sessionID = try XCTUnwrap(fixture.store.activeSession?.id)
 
-        clock.now = start.addingTimeInterval(9)
+        clock.now = start.addingTimeInterval(300)
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-a",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: clock.now
+        ))
         fixture.store.refresh()
-        XCTAssertEqual(fixture.store.phase, .running)
 
-        clock.now = start.addingTimeInterval(10)
+        clock.now = start.addingTimeInterval(330)
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-a",
+            type: .activity,
+            path: fixture.projectURL.path,
+            timestamp: clock.now
+        ))
+        fixture.store.refresh()
+
+        XCTAssertEqual(fixture.store.phase, .running)
+        XCTAssertEqual(fixture.store.activeSession?.id, sessionID)
+        XCTAssertEqual(fixture.store.activeSession?.pauseIntervals.count, 0)
+        XCTAssertTrue(fixture.store.activeSession?.automationMetadata?.claims.first?.isActive == true)
+    }
+
+    func testAutomaticCodexTurnAfterPauseResumesSameSession() throws {
+        let clock = AutomationTestClock(start)
+        let fixture = try makeFixture(
+            tool: .codex,
+            enabled: true,
+            seedEvent: event(tool: .codex, sessionID: "codex-a", type: .sessionStarted, path: fixtureProjectPath()),
+            clock: clock,
+            pauseDelay: 60,
+            finishDelay: 300,
+            minimumSavedDuration: 0
+        )
+        let sessionID = try XCTUnwrap(fixture.store.activeSession?.id)
+
+        clock.now = start.addingTimeInterval(300)
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-a",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: clock.now
+        ))
+        fixture.store.refresh()
+        clock.now = start.addingTimeInterval(360)
         fixture.store.refresh()
         XCTAssertEqual(fixture.store.phase, .paused)
 
-        clock.now = start.addingTimeInterval(15)
+        clock.now = start.addingTimeInterval(390)
         try fixture.inbox.write(event(
             tool: .codex,
             sessionID: "codex-a",
@@ -892,6 +993,41 @@ final class SessionAutomationTests: XCTestCase {
         XCTAssertEqual(fixture.store.phase, .running)
         XCTAssertEqual(fixture.store.activeSession?.id, sessionID)
         XCTAssertEqual(fixture.store.activeSession?.pauseIntervals.count, 1)
+        XCTAssertTrue(fixture.persistence.state.completedSessions.isEmpty)
+    }
+
+    func testAutomaticCodexSessionEndMarksClaimIdle() throws {
+        let clock = AutomationTestClock(start)
+        let fixture = try makeFixture(
+            tool: .codex,
+            enabled: true,
+            seedEvent: event(tool: .codex, sessionID: "codex-a", type: .sessionStarted, path: fixtureProjectPath()),
+            clock: clock,
+            pauseDelay: 60,
+            finishDelay: 300,
+            minimumSavedDuration: 0
+        )
+
+        clock.now = start.addingTimeInterval(300)
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-a",
+            type: .sessionEnded,
+            path: fixture.projectURL.path,
+            timestamp: clock.now
+        ))
+        fixture.store.refresh()
+
+        XCTAssertEqual(
+            fixture.store.activeSession?.automationMetadata?.claims.first?.isActive,
+            false
+        )
+        clock.now = start.addingTimeInterval(359)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .running)
+        clock.now = start.addingTimeInterval(360)
+        fixture.store.refresh()
+        XCTAssertEqual(fixture.store.phase, .paused)
     }
 
     func testManualTakeoverSurvivesActivityAndRelaunch() throws {
@@ -981,6 +1117,13 @@ final class SessionAutomationTests: XCTestCase {
             finishDelay: 20,
             minimumSavedDuration: 0
         )
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-a",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: start
+        ))
         clock.now = start.addingTimeInterval(20)
         fixture.store.refresh()
         try await settle(fixture.store)
@@ -1008,6 +1151,13 @@ final class SessionAutomationTests: XCTestCase {
             minimumSavedDuration: 0,
             gitService: gitService
         )
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-git",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: start
+        ))
         try await settle(fixture.store)
         clock.now = start.addingTimeInterval(20)
         fixture.store.refresh()
@@ -1031,13 +1181,20 @@ final class SessionAutomationTests: XCTestCase {
             finishDelay: 2,
             minimumSavedDuration: 0
         )
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "codex-finish-retry",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: start.addingTimeInterval(5)
+        ))
 
-        clock.now = start.addingTimeInterval(1)
+        clock.now = start.addingTimeInterval(6)
         fixture.store.refresh()
         XCTAssertEqual(fixture.store.phase, .paused)
 
         persistence.failCriticalSaves = true
-        clock.now = start.addingTimeInterval(2)
+        clock.now = start.addingTimeInterval(7)
         fixture.store.refresh()
         try await settle(fixture.store)
         XCTAssertEqual(fixture.store.phase, .paused)
@@ -1067,7 +1224,14 @@ final class SessionAutomationTests: XCTestCase {
             finishDelay: 2,
             minimumSavedDuration: 3
         )
-        shortClock.now = start.addingTimeInterval(2)
+        try short.inbox.write(event(
+            tool: .codex,
+            sessionID: "short",
+            type: .sessionIdle,
+            path: short.projectURL.path,
+            timestamp: start
+        ))
+        shortClock.now = start.addingTimeInterval(6)
         short.store.refresh()
         try await settle(short.store)
         XCTAssertEqual(short.store.phase, .idle)
@@ -1085,7 +1249,14 @@ final class SessionAutomationTests: XCTestCase {
             finishDelay: 3,
             minimumSavedDuration: 3
         )
-        exactClock.now = start.addingTimeInterval(3)
+        try exact.inbox.write(event(
+            tool: .codex,
+            sessionID: "exact",
+            type: .sessionIdle,
+            path: exact.projectURL.path,
+            timestamp: start
+        ))
+        exactClock.now = start.addingTimeInterval(6)
         exact.store.refresh()
         try await settle(exact.store)
         XCTAssertEqual(exactPersistence.state.completedSessions.count, 1)
@@ -1120,7 +1291,15 @@ final class SessionAutomationTests: XCTestCase {
         XCTAssertEqual(running.phase, .running)
         XCTAssertNotNil(running.activeSession?.automationMetadata)
 
-        clock.now = start.addingTimeInterval(10)
+        try fixture.inbox.write(event(
+            tool: .codex,
+            sessionID: "restore",
+            type: .sessionIdle,
+            path: fixture.projectURL.path,
+            timestamp: clock.now
+        ))
+        running.refresh()
+        clock.now = start.addingTimeInterval(15)
         running.refresh()
         XCTAssertEqual(running.phase, .paused)
         let paused = makeStore(state: persistence.state, clock: clock, persistence: persistence, inbox: fixture.inbox)

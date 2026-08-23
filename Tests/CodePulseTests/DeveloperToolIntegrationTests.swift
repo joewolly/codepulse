@@ -799,6 +799,8 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         let hooks = try XCTUnwrap(object["hooks"] as? [String: Any])
         let stopGroups = try XCTUnwrap(hooks["Stop"] as? [[String: Any]])
         XCTAssertEqual(stopGroups.count, 2)
+        let turnStartGroups = try XCTUnwrap(hooks["UserPromptSubmit"] as? [[String: Any]])
+        XCTAssertEqual(turnStartGroups.count, 1)
         XCTAssertEqual(object["other"] as? String, "preserve me")
         XCTAssertTrue(hooks["SessionStart"] != nil)
         XCTAssertTrue(hooks["SessionEnd"] != nil)
@@ -812,6 +814,7 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         let remainingStopGroups = try XCTUnwrap(disabledHooks["Stop"] as? [[String: Any]])
         XCTAssertEqual(remainingStopGroups.count, 1)
         XCTAssertNil(disabledHooks["SessionStart"])
+        XCTAssertNil(disabledHooks["UserPromptSubmit"])
         XCTAssertNil(disabledHooks["SessionEnd"])
         XCTAssertFalse(String(data: try Data(contentsOf: configURL), encoding: .utf8)?.contains("CodePulse managed") == true)
     }
@@ -859,6 +862,7 @@ final class DeveloperToolIntegrationTests: XCTestCase {
             } == true
         }.count, 1)
         XCTAssertNotNil(enabledHooks["SessionStart"])
+        XCTAssertNotNil(enabledHooks["UserPromptSubmit"])
         XCTAssertNotNil(enabledHooks["SessionEnd"])
 
         try installer.disable()
@@ -868,6 +872,7 @@ final class DeveloperToolIntegrationTests: XCTestCase {
         let disabledHooks = try XCTUnwrap(disabledObject["hooks"] as? [String: Any])
         let remainingStopGroups = try XCTUnwrap(disabledHooks["Stop"] as? [[String: Any]])
         XCTAssertEqual(remainingStopGroups.count, 1)
+        XCTAssertNil(disabledHooks["UserPromptSubmit"])
         XCTAssertFalse(String(data: try Data(contentsOf: configURL), encoding: .utf8)?.contains("CodePulse managed") == true)
     }
 

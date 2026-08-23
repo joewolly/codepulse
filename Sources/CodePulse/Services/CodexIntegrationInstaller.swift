@@ -66,6 +66,8 @@ struct CodexIntegrationInstaller: DeveloperToolIntegrationInstalling {
                 "matcher": "startup|resume|clear|compact",
                 "hooks": [backgroundHandler]
             ])
+            // Codex emits UserPromptSubmit once for each new user turn.
+            hooks["UserPromptSubmit", default: []].append(["hooks": [backgroundHandler]])
             hooks["Stop", default: []].append(["hooks": [backgroundHandler]])
             hooks["SessionEnd", default: []].append(["hooks": [handler]])
             root["hooks"] = hooks
