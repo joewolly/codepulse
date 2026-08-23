@@ -88,6 +88,22 @@ opt-in and disabled by default.
 
 ---
 
+## Multi-Project Workspaces
+
+Expand CodePulse from project-aware session tracking into a local workspace for
+following work across multiple projects without combining their context or
+history.
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Multi-Project Workspaces | Accepted | Track multiple projects as first-class workspaces, each with its own dashboard, current and recent activity, session history, and project-specific insights. This creates a foundation for future local intelligence such as cross-project focus trends, switching patterns, resume context, and suggested next steps. |
+
+The goal is a clear view of both an individual project's state and the broader
+portfolio of active work while preserving CodePulse's local-first privacy
+model.
+
+---
+
 ## Out of scope
 
 - **Apple Developer ID signing and notarization** — deliberately not pursued;
