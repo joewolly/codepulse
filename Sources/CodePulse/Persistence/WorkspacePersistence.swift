@@ -48,11 +48,10 @@ struct WorkspaceRecord: Codable, Equatable, Identifiable, Sendable {
 }
 
 /// Decode-only representation of a pre-workspace project. Keeping this DTO
-/// separate from ProjectRecord lets the canonical decoder remain strict about
-/// the required workspaceID field.
+/// separate from ProjectRecord keeps the historical schema free of any
+/// workspace relationship.
 struct LegacyProjectRecord: Decodable {
     let id: UUID
-    let workspaceID: UUID?
     let name: String
     let folderPath: String?
     let bookmarkData: Data?
@@ -150,14 +149,7 @@ enum AppStateLegacyMigration {
         controlProcessing: CodePulseControlProcessingState?,
         localInputAcceptanceDate: Date?
     ) -> AppState {
-        // A pre-workspace state has no relationship to preserve. The single
-        // existing ID case is retained only for compatibility with synthetic
-        // callers that encoded a workspaceID before the schema marker was
-        // introduced; real legacy installs take the fresh UUID path.
-        let existingIDs = Set(projects.compactMap(\.workspaceID))
-        let workspaceID = existingIDs.count == 1
-            ? existingIDs.first!
-            : UUID()
+        let workspaceID = UUID()
         let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
         let createdAt = projects.map(\.createdAt).min() ?? now
         let workspace = WorkspaceRecord(

@@ -12,8 +12,10 @@ final class SessionAutomationTests: XCTestCase {
         let project = ProjectRecord(name: "Legacy", folderPath: "/tmp/legacy", createdAt: start)
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded(active)) as? [String: Any])
         object.removeValue(forKey: "automationMetadata")
+        var legacyProject = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded(project)) as? [String: Any])
+        legacyProject.removeValue(forKey: "workspaceID")
         var stateObject: [String: Any] = [
-            "projects": [try JSONSerialization.jsonObject(with: encoded(project))],
+            "projects": [legacyProject],
             "completedSessions": [],
             "activeSession": object,
             "settings": [

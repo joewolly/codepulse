@@ -846,6 +846,51 @@ struct AppState: Codable, Equatable {
         case localInputAcceptanceDate
     }
 
+    private struct WorkspaceEraCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue: Int) {
+            return nil
+        }
+
+        static let workspaceID = Self(stringValue: "workspaceID")!
+        static let selectedWorkspaceID = Self(stringValue: "selectedWorkspaceID")!
+    }
+
+    private static func containsWorkspaceEraMarkers(
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> Bool {
+        guard !container.contains(.workspaces) else { return true }
+
+        if container.contains(.settings),
+           let settings = try? container.nestedContainer(
+               keyedBy: WorkspaceEraCodingKey.self,
+               forKey: .settings
+           ),
+           settings.contains(.selectedWorkspaceID) {
+            return true
+        }
+
+        if container.contains(.projects),
+           var projects = try? container.nestedUnkeyedContainer(forKey: .projects) {
+            while !projects.isAtEnd {
+                guard let project = try? projects.nestedContainer(keyedBy: WorkspaceEraCodingKey.self) else {
+                    break
+                }
+                if project.contains(.workspaceID) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
@@ -879,6 +924,12 @@ struct AppState: Codable, Equatable {
             ? try container.decode(Int.self, forKey: .schemaVersion)
             : nil
         if persistedSchemaVersion == nil || persistedSchemaVersion == CodePulseStateSchema.legacyVersion {
+            guard !(try Self.containsWorkspaceEraMarkers(in: container)) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Legacy state contains workspace-era metadata."
+                ))
+            }
             let legacyProjects = try container.decodeIfPresent(
                 [LegacyProjectRecord].self,
                 forKey: .projects

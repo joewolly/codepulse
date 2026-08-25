@@ -135,6 +135,9 @@ enum CodePulseBackupCodec {
 
         try requireHistoryArray("projects", in: state)
         try requireHistoryArray("completedSessions", in: state)
+        if version == 1 {
+            try rejectWorkspaceMetadataFromLegacyState(state)
+        }
         if version == CodePulseBackup.currentVersion {
             guard state["schemaVersion"] as? Int == CodePulseStateSchema.currentVersion else {
                 throw CodePulseBackupError.missingRequiredField("workspace schema")
@@ -174,6 +177,29 @@ enum CodePulseBackupCodec {
             throw CodePulseBackupError.invalidTimeline
         }
         return backup
+    }
+
+    private static func rejectWorkspaceMetadataFromLegacyState(_ state: [String: Any]) throws {
+        guard state["workspaces"] == nil else {
+            throw CodePulseBackupError.malformedConfiguration
+        }
+
+        if let rawSchemaVersion = state["schemaVersion"] {
+            guard let schemaVersion = rawSchemaVersion as? Int,
+                  schemaVersion == CodePulseStateSchema.legacyVersion else {
+                throw CodePulseBackupError.malformedConfiguration
+            }
+        }
+
+        if let projects = state["projects"] as? [[String: Any]],
+           projects.contains(where: { $0["workspaceID"] != nil }) {
+            throw CodePulseBackupError.malformedConfiguration
+        }
+
+        if let settings = state["settings"] as? [String: Any],
+           settings["selectedWorkspaceID"] != nil {
+            throw CodePulseBackupError.malformedConfiguration
+        }
     }
 
     static func portableState(from state: AppState) -> AppState {
