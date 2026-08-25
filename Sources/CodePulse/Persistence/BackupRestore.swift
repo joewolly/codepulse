@@ -2,6 +2,7 @@ import Foundation
 
 enum CodePulseBackupValidator {
     static func validate(_ state: AppState) throws {
+        try validateWorkspaceGraph(state)
         try validateUniqueIDs(state.projects.map(\.id), field: "project")
         try validateUniqueIDs(state.completedSessions.map(\.id), field: "session")
         try validateUniqueIDs(state.sessionPresets.map(\.id), field: "preset")
@@ -109,6 +110,20 @@ enum CodePulseBackupValidator {
             throw CodePulseBackupError.duplicateIdentifier(field)
         }
     }
+
+    private static func validateWorkspaceGraph(_ state: AppState) throws {
+        guard state.schemaVersion == CodePulseStateSchema.currentVersion,
+              !state.workspaces.isEmpty else {
+            throw CodePulseBackupError.invalidWorkspaceReference
+        }
+        try validateUniqueIDs(state.workspaces.map(\.id), field: "workspace")
+        let workspaceIDs = Set(state.workspaces.map(\.id))
+        for project in state.projects {
+            guard workspaceIDs.contains(project.workspaceID) else {
+                throw CodePulseBackupError.invalidWorkspaceReference
+            }
+        }
+    }
 }
 
 enum BackupRestoreNormalizer {
@@ -116,9 +131,9 @@ enum BackupRestoreNormalizer {
         _ state: AppState,
         preservingLaunchAtLogin launchAtLogin: Bool
     ) throws -> AppState {
-        try CodePulseBackupValidator.validate(state)
-
         var restored = state
+        AppStateIntegrityValidator.normalizeSelectedWorkspace(in: &restored)
+        try CodePulseBackupValidator.validate(restored)
         restored.settings.launchAtLogin = launchAtLogin
         restored.settings.automationEnabled = false
         // Onboarding is informational machine state. Restoring local data

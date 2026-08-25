@@ -9,6 +9,7 @@ enum CodePulseBackupError: LocalizedError, Equatable {
     case malformedHistoryField(String)
     case malformedConfiguration
     case invalidTimeline
+    case invalidWorkspaceReference
     case duplicateIdentifier(String)
     case inputTooLarge
 
@@ -32,6 +33,8 @@ enum CodePulseBackupError: LocalizedError, Equatable {
             return "This backup contains malformed configuration data and cannot be restored safely."
         case .invalidTimeline:
             return "This backup contains invalid session timeline data and cannot be restored safely."
+        case .invalidWorkspaceReference:
+            return "This backup contains a project that references a missing workspace and cannot be restored safely."
         case .duplicateIdentifier(let field):
             return "This backup contains duplicate \(field) identifiers and cannot be restored safely."
         case .inputTooLarge:
@@ -42,7 +45,7 @@ enum CodePulseBackupError: LocalizedError, Equatable {
 
 struct CodePulseBackup: Codable, Equatable {
     static let format = "codepulse-backup"
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     let format: String
     let version: Int
@@ -63,6 +66,7 @@ struct CodePulseBackupPreview: Equatable {
     let exportedAt: Date
     let projectCount: Int
     let completedSessionCount: Int
+    let workspaceCount: Int
     let presetCount: Int
     let automationRuleCount: Int
     let includesActiveSession: Bool
@@ -75,6 +79,7 @@ struct CodePulseBackupPreview: Equatable {
         self.version = backup.version
         self.exportedAt = backup.exportedAt
         self.projectCount = state.projects.count
+        self.workspaceCount = state.workspaces.count
         self.completedSessionCount = state.completedSessions.count
         self.presetCount = state.sessionPresets.count
         self.automationRuleCount = state.automationRules.count
@@ -121,7 +126,7 @@ enum CodePulseBackupCodec {
         guard let version = root["version"] as? Int else {
             throw CodePulseBackupError.malformedEnvelope
         }
-        guard version == CodePulseBackup.currentVersion else {
+        guard version == 1 || version == CodePulseBackup.currentVersion else {
             throw CodePulseBackupError.unsupportedVersion(version)
         }
         guard let state = root["state"] as? [String: Any] else {
@@ -130,6 +135,16 @@ enum CodePulseBackupCodec {
 
         try requireHistoryArray("projects", in: state)
         try requireHistoryArray("completedSessions", in: state)
+        if version == 1 {
+            try rejectWorkspaceMetadataFromLegacyState(state)
+        }
+        if version == CodePulseBackup.currentVersion {
+            guard state["schemaVersion"] as? Int == CodePulseStateSchema.currentVersion else {
+                throw CodePulseBackupError.missingRequiredField("workspace schema")
+            }
+            try requireHistoryArray("workspaces", in: state)
+            try validateUniqueIdentifiers("workspaces", label: "workspace", in: state)
+        }
         guard state["settings"] is [String: Any] else {
             throw CodePulseBackupError.missingRequiredField("settings")
         }
@@ -162,6 +177,29 @@ enum CodePulseBackupCodec {
             throw CodePulseBackupError.invalidTimeline
         }
         return backup
+    }
+
+    private static func rejectWorkspaceMetadataFromLegacyState(_ state: [String: Any]) throws {
+        guard state["workspaces"] == nil else {
+            throw CodePulseBackupError.malformedConfiguration
+        }
+
+        if let rawSchemaVersion = state["schemaVersion"] {
+            guard let schemaVersion = rawSchemaVersion as? Int,
+                  schemaVersion == CodePulseStateSchema.legacyVersion else {
+                throw CodePulseBackupError.malformedConfiguration
+            }
+        }
+
+        if let projects = state["projects"] as? [[String: Any]],
+           projects.contains(where: { $0["workspaceID"] != nil }) {
+            throw CodePulseBackupError.malformedConfiguration
+        }
+
+        if let settings = state["settings"] as? [String: Any],
+           settings["selectedWorkspaceID"] != nil {
+            throw CodePulseBackupError.malformedConfiguration
+        }
     }
 
     static func portableState(from state: AppState) -> AppState {

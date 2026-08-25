@@ -22,8 +22,10 @@ final class SessionPresetAutomationTests: XCTestCase {
             goal: "Migrate this rule"
         )
 
+        var legacyProject = try XCTUnwrap(try jsonObject(project) as? [String: Any])
+        legacyProject.removeValue(forKey: "workspaceID")
         let legacyObject: [String: Any] = [
-            "projects": [try jsonObject(project)],
+            "projects": [legacyProject],
             "completedSessions": [],
             "settings": ["automationEnabled": true],
             "automationRules": [try jsonObject(legacyRule)]

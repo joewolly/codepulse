@@ -969,6 +969,50 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(restoredStore.defaultProjectID, projectID)
     }
 
+    func testAddProjectUsesTheSelectedWorkspace() {
+        let firstID = UUID(uuidString: "B1000000-0000-0000-0000-000000000001")!
+        let secondID = UUID(uuidString: "B2000000-0000-0000-0000-000000000002")!
+        let persistence = InMemoryPersistence(AppState(
+            workspaces: [
+                WorkspaceRecord(id: firstID, name: "First", createdAt: start),
+                WorkspaceRecord(id: secondID, name: "Second", createdAt: start)
+            ],
+            settings: CodePulseSettings(selectedWorkspaceID: secondID)
+        ))
+        let store = makeStore(clock: TestClock(start), persistence: persistence)
+
+        let projectID = store.addProject(name: "Selected Workspace Project", folderURL: nil, at: start)
+
+        let project = store.state.projects.first(where: { $0.id == projectID })
+        XCTAssertNotNil(projectID)
+        XCTAssertEqual(project?.workspaceID, secondID)
+    }
+
+    func testAddProjectPropagatesCommitFailureAndSuccessfulBehaviorRemainsIntact() {
+        let failingPersistence = RecoveryReportingPersistence()
+        failingPersistence.failNonCriticalSaves = true
+        let failingStore = makeStore(
+            clock: TestClock(start),
+            persistence: failingPersistence
+        )
+
+        XCTAssertNil(failingStore.addProject(name: "Failed Project", folderURL: nil, at: start))
+        XCTAssertFalse(failingStore.state.projects.contains { $0.name == "Failed Project" })
+
+        let successfulStore = makeStore(
+            clock: TestClock(start),
+            persistence: InMemoryPersistence()
+        )
+        let projectID = successfulStore.addProject(
+            name: "Successful Project",
+            folderURL: nil,
+            at: start
+        )
+
+        XCTAssertNotNil(projectID)
+        XCTAssertEqual(successfulStore.state.projects.map(\.id), [projectID].compactMap { $0 })
+    }
+
     func testProjectMetadataAndDefaultSelectionAreOptional() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

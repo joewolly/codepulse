@@ -541,6 +541,7 @@ struct CompletedSession: Codable, Equatable, Identifiable {
 
 struct ProjectRecord: Codable, Equatable, Identifiable {
     let id: UUID
+    let workspaceID: UUID
     var name: String
     var folderPath: String?
     var bookmarkData: Data?
@@ -550,6 +551,7 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
 
     init(
         id: UUID = UUID(),
+        workspaceID: UUID = WorkspaceRecord.implicitDefaultID,
         name: String,
         folderPath: String? = nil,
         bookmarkData: Data? = nil,
@@ -558,12 +560,37 @@ struct ProjectRecord: Codable, Equatable, Identifiable {
         archivedAt: Date? = nil
     ) {
         self.id = id
+        self.workspaceID = workspaceID
         self.name = name
         self.folderPath = folderPath
         self.bookmarkData = bookmarkData
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.archivedAt = archivedAt
+    }
+
+    /// Source-compatible spelling for callers that append the new
+    /// relationship after the pre-workspace initializer's existing fields.
+    init(
+        id: UUID = UUID(),
+        name: String,
+        folderPath: String? = nil,
+        bookmarkData: Data? = nil,
+        createdAt: Date = Date(),
+        lastUsedAt: Date? = nil,
+        archivedAt: Date? = nil,
+        workspaceID: UUID
+    ) {
+        self.init(
+            id: id,
+            workspaceID: workspaceID,
+            name: name,
+            folderPath: folderPath,
+            bookmarkData: bookmarkData,
+            createdAt: createdAt,
+            lastUsedAt: lastUsedAt,
+            archivedAt: archivedAt
+        )
     }
 
     var isArchived: Bool {
@@ -687,6 +714,7 @@ struct CodePulseSettings: Codable, Equatable {
     var automationEnabled: Bool
     var hasCompletedOnboarding: Bool
     var digests: DigestSettings
+    var selectedWorkspaceID: UUID?
 
     init(
         launchAtLogin: Bool = false,
@@ -697,7 +725,8 @@ struct CodePulseSettings: Codable, Equatable {
         globalShortcutEnabled: Bool = true,
         automationEnabled: Bool = false,
         hasCompletedOnboarding: Bool = false,
-        digests: DigestSettings = DigestSettings()
+        digests: DigestSettings = DigestSettings(),
+        selectedWorkspaceID: UUID? = nil
     ) {
         self.launchAtLogin = launchAtLogin
         self.menuBarDisplay = menuBarDisplay
@@ -708,13 +737,14 @@ struct CodePulseSettings: Codable, Equatable {
         self.automationEnabled = automationEnabled
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.digests = digests
+        self.selectedWorkspaceID = selectedWorkspaceID
     }
 
     private enum CodingKeys: String, CodingKey {
         case launchAtLogin, menuBarDisplay, idleAppearance
         case defaultProjectBehavior, specificProjectID, globalShortcutEnabled, automationEnabled
         case hasCompletedOnboarding
-        case digests
+        case digests, selectedWorkspaceID
     }
 
     init(from decoder: Decoder) throws {
@@ -738,10 +768,18 @@ struct CodePulseSettings: Codable, Equatable {
         // malformed optional configuration decode to the safe default, which
         // keeps both digest kinds disabled.
         digests = (try? container.decodeIfPresent(DigestSettings.self, forKey: .digests)) ?? DigestSettings()
+        selectedWorkspaceID = try container.decodeIfPresent(UUID.self, forKey: .selectedWorkspaceID)
     }
 }
 
 struct AppState: Codable, Equatable {
+    /// Compatibility identity used by in-memory states assembled before a
+    /// persisted workspace graph exists. A fresh process gets a new UUID;
+    /// once written, the workspace identity is retained in state.json.
+    static let defaultWorkspaceID = UUID()
+
+    let schemaVersion: Int
+    var workspaces: [WorkspaceRecord]
     var projects: [ProjectRecord]
     var completedSessions: [CompletedSession]
     var activeSession: ActiveSession?
@@ -753,6 +791,8 @@ struct AppState: Codable, Equatable {
     var localInputAcceptanceDate: Date?
 
     init(
+        schemaVersion: Int = CodePulseStateSchema.currentVersion,
+        workspaces: [WorkspaceRecord]? = nil,
         projects: [ProjectRecord] = [],
         completedSessions: [CompletedSession] = [],
         activeSession: ActiveSession? = nil,
@@ -763,7 +803,32 @@ struct AppState: Codable, Equatable {
         controlProcessing: CodePulseControlProcessingState? = nil,
         localInputAcceptanceDate: Date? = nil
     ) {
-        self.projects = projects
+        let resolvedWorkspaces: [WorkspaceRecord]
+        let resolvedProjects: [ProjectRecord]
+
+        if let workspaces {
+            resolvedWorkspaces = workspaces
+            resolvedProjects = projects
+        } else {
+            let workspace = WorkspaceRecord.defaultWorkspace()
+            resolvedWorkspaces = [workspace]
+            resolvedProjects = projects.map { project in
+                ProjectRecord(
+                    id: project.id,
+                    workspaceID: workspace.id,
+                    name: project.name,
+                    folderPath: project.folderPath,
+                    bookmarkData: project.bookmarkData,
+                    createdAt: project.createdAt,
+                    lastUsedAt: project.lastUsedAt,
+                    archivedAt: project.archivedAt
+                )
+            }
+        }
+
+        self.schemaVersion = schemaVersion
+        self.workspaces = resolvedWorkspaces
+        self.projects = resolvedProjects
         self.completedSessions = completedSessions
         self.activeSession = activeSession
         self.settings = settings
@@ -772,17 +837,62 @@ struct AppState: Codable, Equatable {
         self.automationRules = automationRules.map { $0.canonicalized() }
         self.controlProcessing = Self.normalizedControlProcessing(controlProcessing)
         self.localInputAcceptanceDate = localInputAcceptanceDate
+        AppStateIntegrityValidator.normalizeSelectedWorkspace(in: &self)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case projects, completedSessions, activeSession, settings
+        case schemaVersion, workspaces, projects, completedSessions, activeSession, settings
         case sessionPresets, developerToolIntegration, automationRules, controlProcessing
         case localInputAcceptanceDate
     }
 
+    private struct WorkspaceEraCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue: Int) {
+            return nil
+        }
+
+        static let workspaceID = Self(stringValue: "workspaceID")!
+        static let selectedWorkspaceID = Self(stringValue: "selectedWorkspaceID")!
+    }
+
+    private static func containsWorkspaceEraMarkers(
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> Bool {
+        guard !container.contains(.workspaces) else { return true }
+
+        if container.contains(.settings),
+           let settings = try? container.nestedContainer(
+               keyedBy: WorkspaceEraCodingKey.self,
+               forKey: .settings
+           ),
+           settings.contains(.selectedWorkspaceID) {
+            return true
+        }
+
+        if container.contains(.projects),
+           var projects = try? container.nestedUnkeyedContainer(forKey: .projects) {
+            while !projects.isAtEnd {
+                guard let project = try? projects.nestedContainer(keyedBy: WorkspaceEraCodingKey.self) else {
+                    break
+                }
+                if project.contains(.workspaceID) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let projects = try container.decodeIfPresent([ProjectRecord].self, forKey: .projects) ?? []
         let completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
         let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
         let settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
@@ -809,11 +919,60 @@ struct AppState: Codable, Equatable {
             Date.self,
             forKey: .localInputAcceptanceDate
         )
+
+        let persistedSchemaVersion = container.contains(.schemaVersion)
+            ? try container.decode(Int.self, forKey: .schemaVersion)
+            : nil
+        if persistedSchemaVersion == nil || persistedSchemaVersion == CodePulseStateSchema.legacyVersion {
+            guard !(try Self.containsWorkspaceEraMarkers(in: container)) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Legacy state contains workspace-era metadata."
+                ))
+            }
+            let legacyProjects = try container.decodeIfPresent(
+                [LegacyProjectRecord].self,
+                forKey: .projects
+            ) ?? []
+            self = AppStateLegacyMigration.migrate(
+                projects: legacyProjects,
+                completedSessions: completedSessions,
+                activeSession: activeSession,
+                settings: settings,
+                sessionPresets: sessionPresets,
+                developerToolIntegration: developerToolIntegration,
+                automationRules: automationRules,
+                controlProcessing: controlProcessing,
+                localInputAcceptanceDate: localInputAcceptanceDate
+            )
+            return
+        }
+
+        guard persistedSchemaVersion == CodePulseStateSchema.currentVersion else {
+            throw AppStateIntegrityError.unsupportedSchemaVersion(persistedSchemaVersion ?? -1)
+        }
+
+        guard container.contains(.workspaces),
+              container.contains(.projects),
+              container.contains(.completedSessions),
+              container.contains(.settings) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: container.codingPath,
+                debugDescription: "Workspace-aware state is missing required core collections."
+            ))
+        }
+
+        let workspaces = try container.decode([WorkspaceRecord].self, forKey: .workspaces)
+        let projects = try container.decode([ProjectRecord].self, forKey: .projects)
+        let canonicalCompletedSessions = try container.decode([CompletedSession].self, forKey: .completedSessions)
+        let canonicalSettings = try container.decode(CodePulseSettings.self, forKey: .settings)
         self.init(
+            schemaVersion: persistedSchemaVersion!,
+            workspaces: workspaces,
             projects: projects,
-            completedSessions: completedSessions,
+            completedSessions: canonicalCompletedSessions,
             activeSession: activeSession,
-            settings: settings,
+            settings: canonicalSettings,
             sessionPresets: sessionPresets,
             developerToolIntegration: developerToolIntegration,
             automationRules: automationRules,
