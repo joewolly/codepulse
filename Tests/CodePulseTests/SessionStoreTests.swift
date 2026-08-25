@@ -988,6 +988,31 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(project?.workspaceID, secondID)
     }
 
+    func testAddProjectPropagatesCommitFailureAndSuccessfulBehaviorRemainsIntact() {
+        let failingPersistence = RecoveryReportingPersistence()
+        failingPersistence.failNonCriticalSaves = true
+        let failingStore = makeStore(
+            clock: TestClock(start),
+            persistence: failingPersistence
+        )
+
+        XCTAssertNil(failingStore.addProject(name: "Failed Project", folderURL: nil, at: start))
+        XCTAssertFalse(failingStore.state.projects.contains { $0.name == "Failed Project" })
+
+        let successfulStore = makeStore(
+            clock: TestClock(start),
+            persistence: InMemoryPersistence()
+        )
+        let projectID = successfulStore.addProject(
+            name: "Successful Project",
+            folderURL: nil,
+            at: start
+        )
+
+        XCTAssertNotNil(projectID)
+        XCTAssertEqual(successfulStore.state.projects.map(\.id), [projectID].compactMap { $0 })
+    }
+
     func testProjectMetadataAndDefaultSelectionAreOptional() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

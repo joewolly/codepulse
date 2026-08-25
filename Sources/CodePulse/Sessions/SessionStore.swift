@@ -1509,7 +1509,7 @@ final class SessionStore: ObservableObject {
         )
         var nextState = state
         nextState.projects.append(project)
-        commit(nextState)
+        guard commit(nextState) else { return nil }
         return project.id
     }
 
