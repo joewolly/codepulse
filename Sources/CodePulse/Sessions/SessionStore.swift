@@ -1495,7 +1495,13 @@ final class SessionStore: ObservableObject {
         #else
         let bookmarkData: Data? = nil
         #endif
+        guard let workspaceID = state.settings.selectedWorkspaceID
+            ?? state.workspaces.first?.id,
+              state.workspaces.contains(where: { $0.id == workspaceID }) else {
+            return nil
+        }
         let project = ProjectRecord(
+            workspaceID: workspaceID,
             name: cleanName,
             folderPath: folderURL?.path,
             bookmarkData: bookmarkData,
@@ -1942,6 +1948,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func normalizeProjectConfiguration(in state: inout AppState) {
+        AppStateIntegrityValidator.normalizeSelectedWorkspace(in: &state)
         switch state.settings.defaultProjectBehavior {
         case .specificProject:
             guard let specificProjectID = state.settings.specificProjectID,
@@ -1971,6 +1978,16 @@ final class SessionStore: ObservableObject {
         var normalizedState = nextState
         normalizeProjectConfiguration(in: &normalizedState)
         relinquishInvalidAutomation(in: &normalizedState)
+
+        do {
+            try AppStateIntegrityValidator.validate(normalizedState)
+        } catch {
+            lifecycleErrorMessage = "CodePulse could not save because its workspace/project relationships are invalid."
+            if critical {
+                lastCriticalCommitFailed = true
+            }
+            return false
+        }
 
         if critical {
             // Lifecycle authority is published only after the durable write;

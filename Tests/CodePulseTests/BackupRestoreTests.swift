@@ -64,7 +64,7 @@ final class BackupRestoreTests: XCTestCase {
         object["format"] = CodePulseBackup.format
         object["version"] = CodePulseBackup.currentVersion + 1
         XCTAssertThrowsError(try CodePulseBackupCodec.decode(try JSONSerialization.data(withJSONObject: object))) { error in
-            XCTAssertEqual(error as? CodePulseBackupError, .unsupportedVersion(2))
+            XCTAssertEqual(error as? CodePulseBackupError, .unsupportedVersion(3))
             XCTAssertEqual(error.localizedDescription, "This backup was created by a newer CodePulse version and cannot be restored safely.")
         }
 
@@ -203,7 +203,7 @@ final class BackupRestoreTests: XCTestCase {
         let preview = CodePulseBackupPreview(backup: backup, state: state)
 
         XCTAssertEqual(preview.format, CodePulseBackup.format)
-        XCTAssertEqual(preview.version, 1)
+        XCTAssertEqual(preview.version, CodePulseBackup.currentVersion)
         XCTAssertEqual(preview.projectCount, 2)
         XCTAssertEqual(preview.completedSessionCount, 1)
         XCTAssertEqual(preview.presetCount, 1)

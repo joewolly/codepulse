@@ -274,6 +274,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         do {
             data = try Data(contentsOf: fileURL)
             state = try decoder.decode(AppState.self, from: data)
+            try AppStateIntegrityValidator.validate(state)
         } catch {
             loadStatus = .unreadable
             NSLog("CodePulse could not decode its existing local state; the file was left unchanged.")
@@ -281,7 +282,21 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
 
         loadStatus = .loaded
-        if Self.requiresAutomationMigration(data) {
+        let requiresWorkspaceMigration = Self.requiresWorkspaceMigration(data)
+        let requiresSelectionNormalization = Self.requiresSelectionNormalization(data, state: state)
+        if requiresWorkspaceMigration || requiresSelectionNormalization {
+            do {
+                // A critical commit verifies the candidate, replaces the live
+                // file atomically, and restores the exact prior bytes on any
+                // post-replacement failure. The state is not published to a
+                // SessionStore until this method returns successfully.
+                try saveCritical(state)
+            } catch {
+                loadStatus = .unreadable
+                NSLog("CodePulse could not durably publish its workspace migration; the original state was left unchanged.")
+                return AppState()
+            }
+        } else if Self.requiresAutomationMigration(data) {
             // AppState has already normalized legacy rules into stable preset
             // references. Persist that canonical representation once so the
             // next launch does not need to revisit the compatibility path.
@@ -301,6 +316,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             return
         }
         do {
+            try AppStateIntegrityValidator.validate(state)
             let data = try encoder.encode(state)
             try writeStateDataAtomically(data)
             loadStatus = .loaded
@@ -319,6 +335,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
 
         do {
             try inject(.candidateEncoding)
+            try AppStateIntegrityValidator.validate(state)
             let data = try encoder.encode(state)
             try writeStateDataCritically(data, expectedState: state)
             loadStatus = .loaded
@@ -334,6 +351,8 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         recoverySnapshot: AppState,
         exportedAt: Date = Date()
     ) throws -> StateRestoreReceipt {
+        try AppStateIntegrityValidator.validate(state)
+
         let storageDirectory: URL
         do {
             storageDirectory = try CodePulseManagedStorage.validateStateFile(fileURL)
@@ -829,5 +848,24 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
         guard root["sessionPresets"] != nil else { return true }
         return rules.contains { $0["presetID"] == nil }
+    }
+
+    private static func requiresWorkspaceMigration(_ data: Data) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        guard let schemaVersion = root["schemaVersion"] as? Int else {
+            return true
+        }
+        return schemaVersion < CodePulseStateSchema.currentVersion
+    }
+
+    private static func requiresSelectionNormalization(_ data: Data, state: AppState) -> Bool {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let settings = root["settings"] as? [String: Any] else {
+            return false
+        }
+        let persistedSelection = (settings["selectedWorkspaceID"] as? String).flatMap(UUID.init(uuidString:))
+        return persistedSelection != state.settings.selectedWorkspaceID
     }
 }

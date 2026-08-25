@@ -29,7 +29,7 @@ final class BackupTests: XCTestCase {
         let data = try CodePulseBackupCodec.encode(state: state, exportedAt: exportedAt)
         let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         XCTAssertEqual(object["format"] as? String, "codepulse-backup")
-        XCTAssertEqual(object["version"] as? Int, 1)
+        XCTAssertEqual(object["version"] as? Int, CodePulseBackup.currentVersion)
 
         let backup = try CodePulseBackupCodec.decode(data)
         XCTAssertEqual(backup.format, CodePulseBackup.format)
