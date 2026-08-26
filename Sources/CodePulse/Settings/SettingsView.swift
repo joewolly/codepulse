@@ -75,6 +75,8 @@ struct SettingsView: View {
                 if !store.renameWorkspace(id: id, name: workspaceRenameText) {
                     workspaceError = store.lifecycleErrorMessage
                         ?? "CodePulse could not save this workspace change."
+                } else {
+                    workspaceError = nil
                 }
                 workspaceToRename = nil
             }
@@ -382,6 +384,7 @@ struct SettingsView: View {
                                 ?? "Enter a non-empty workspace name and try again."
                             return
                         }
+                        workspaceError = nil
                         newWorkspaceName = ""
                     }
                     .buttonStyle(.borderedProminent)
