@@ -21,6 +21,17 @@ struct MenuBarFooterView: View {
             Spacer(minLength: 4)
 
             HStack(spacing: 8) {
+                Button("Dashboard") {
+                    windowCoordinator.showWorkspaceDashboard()
+                    onDismiss()
+                    activateApp()
+                }
+                .buttonStyle(.link)
+                .accessibilityLabel("Workspace Dashboard")
+                .accessibilityValue("Workspace Dashboard")
+                .accessibilityHint("Opens a read-only summary of the selected Workspace")
+                .accessibilityIdentifier("workspace-dashboard-entry")
+
                 Button("History") {
                     windowCoordinator.showHistory()
                     onDismiss()

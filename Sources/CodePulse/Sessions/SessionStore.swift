@@ -276,23 +276,106 @@ final class SessionStore: ObservableObject {
     }
 
     var defaultProjectID: UUID? {
+        defaultProjectID(for: selectedWorkspaceID)
+    }
+
+    /// Resolves the configured default without changing it. When a specific
+    /// default belongs to another workspace, idle presentation returns No
+    /// Project until the user chooses a project; the saved preference remains
+    /// intact and is never silently reassigned.
+    func defaultProjectID(for workspaceID: UUID?) -> UUID? {
         switch state.settings.defaultProjectBehavior {
         case .noProject:
             return nil
         case .specificProject:
             guard let specificProjectID = state.settings.specificProjectID,
-                  state.projects.contains(where: { $0.id == specificProjectID && $0.isActive }) else {
+                  let project = state.projects.first(where: { $0.id == specificProjectID && $0.isActive }),
+                  workspaceID == nil || project.workspaceID == workspaceID else {
                 return nil
             }
             return specificProjectID
         case .lastUsed:
             return state.projects
-                .filter(\.isActive)
+                .filter { project in
+                    project.isActive && (workspaceID == nil || project.workspaceID == workspaceID)
+                }
                 .compactMap { project in
                     project.lastUsedAt.map { (project.id, $0) }
                 }
                 .max(by: { $0.1 < $1.1 })?.0
         }
+    }
+
+    var selectedWorkspaceID: UUID? {
+        guard let selected = state.settings.selectedWorkspaceID,
+              state.workspaces.contains(where: { $0.id == selected }) else {
+            return state.workspaces.first?.id
+        }
+        return selected
+    }
+
+    var selectedWorkspace: WorkspaceRecord? {
+        selectedWorkspaceID.flatMap { id in
+            state.workspaces.first(where: { $0.id == id })
+        }
+    }
+
+    var workspacesSorted: [WorkspaceRecord] {
+        state.workspaces.sorted { lhs, rhs in
+            let order = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if order != .orderedSame { return order == .orderedAscending }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    var workspaceScopeOptions: [WorkspaceScopeOption] {
+        [WorkspaceScopeOption(
+            id: "all-workspaces",
+            title: "All Workspaces",
+            scope: .allWorkspaces
+        )] + workspacesSorted.map { workspace in
+            WorkspaceScopeOption(
+                id: "workspace-\(workspace.id.uuidString)",
+                title: workspace.name,
+                scope: .workspaceID(workspace.id)
+            )
+        }
+    }
+
+    func projects(in workspaceID: UUID) -> [ProjectRecord] {
+        state.projects.filter { $0.workspaceID == workspaceID }
+    }
+
+    func selectableProjectsSortedByRecentUse(in workspaceID: UUID?) -> [ProjectRecord] {
+        let projects = state.projects.filter { project in
+            project.isActive && (workspaceID == nil || project.workspaceID == workspaceID)
+        }
+        return sortProjectsByRecentUse(projects)
+    }
+
+    func workspaceProjectIDs(for scope: WorkspaceScope) -> Set<UUID> {
+        switch scope {
+        case .allWorkspaces:
+            return Set(state.projects.map(\.id))
+        case .workspaceID(let workspaceID):
+            return Set(state.projects.filter { $0.workspaceID == workspaceID }.map(\.id))
+        }
+    }
+
+    /// Changes only presentation/navigation state. This is intentionally
+    /// unavailable while a session is active so the existing session context
+    /// cannot become ambiguous.
+    @discardableResult
+    func selectWorkspace(id: UUID) -> Bool {
+        guard !isInRecoveryMode,
+              phase == .idle,
+              state.workspaces.contains(where: { $0.id == id }) else {
+            return false
+        }
+        guard state.settings.selectedWorkspaceID != id else { return true }
+        var nextState = state
+        nextState.settings.selectedWorkspaceID = id
+        return commit(nextState)
     }
 
     var projectsSortedByRecentUse: [ProjectRecord] {
@@ -1361,9 +1444,15 @@ final class SessionStore: ObservableObject {
         referenceDate: Date? = nil
     ) -> [CompletedSession] {
         let referenceDate = referenceDate ?? clock.now
+        let workspaceProjectIDs = workspaceProjectIDs(for: query.workspace)
         return state.completedSessions
             .filter { session in
-                query.matches(session, calendar: calendar, referenceDate: referenceDate)
+                query.matches(
+                    session,
+                    calendar: calendar,
+                    referenceDate: referenceDate,
+                    workspaceProjectIDs: workspaceProjectIDs
+                )
             }
             .sorted { lhs, rhs in
                 if lhs.startedAt != rhs.startedAt {
@@ -1397,13 +1486,21 @@ final class SessionStore: ObservableObject {
     }
 
     var historyProjectOptions: [HistoryProjectOption] {
-        let currentOptions = projectsSortedByRecentUse.map { project in
+        historyProjectOptions(for: .allWorkspaces)
+    }
+
+    func historyProjectOptions(for workspace: WorkspaceScope) -> [HistoryProjectOption] {
+        let workspaceProjectIDs = workspaceProjectIDs(for: workspace)
+        let currentOptions = projectsSortedByRecentUse
+            .filter { workspace == .allWorkspaces || workspaceProjectIDs.contains($0.id) }
+            .map { project in
             HistoryProjectOption(
                 id: "project-\(project.id.uuidString)",
                 title: project.name,
                 filter: .projectID(project.id)
             )
         }
+        guard workspace == .allWorkspaces else { return currentOptions }
         let currentNames = Set(state.projects.map(\.name))
         let historicalNames = Set(state.completedSessions.compactMap(\.projectName))
             .subtracting(currentNames)
@@ -1419,13 +1516,21 @@ final class SessionStore: ObservableObject {
     }
 
     var insightsProjectOptions: [InsightsProjectOption] {
-        let currentProjects = projectsSortedByRecentUse.map { project in
+        insightsProjectOptions(for: .allWorkspaces)
+    }
+
+    func insightsProjectOptions(for workspace: WorkspaceScope) -> [InsightsProjectOption] {
+        let workspaceProjectIDs = workspaceProjectIDs(for: workspace)
+        let currentProjects = projectsSortedByRecentUse
+            .filter { workspace == .allWorkspaces || workspaceProjectIDs.contains($0.id) }
+            .map { project in
             InsightsProjectOption(
                 id: "project-\(project.id.uuidString)",
                 title: project.name,
                 filter: .projectID(project.id)
             )
         }
+        guard workspace == .allWorkspaces else { return currentProjects }
         let currentIDs = Set(state.projects.map(\.id))
         let currentNames = Set(state.projects.map(\.name))
         var historicalByID: [UUID: (name: String, startedAt: Date)] = [:]
@@ -1511,6 +1616,73 @@ final class SessionStore: ObservableObject {
         nextState.projects.append(project)
         guard commit(nextState) else { return nil }
         return project.id
+    }
+
+    /// Creates a workspace and selects it as the current presentation scope.
+    /// The workspace graph and selection are committed atomically so a failed
+    /// save cannot report a created workspace or leave a stale selection.
+    @discardableResult
+    func createWorkspace(name: String, at date: Date? = nil) -> UUID? {
+        guard !isInRecoveryMode else { return nil }
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return nil }
+
+        let timestamp = date ?? clock.now
+        let workspace = WorkspaceRecord(
+            name: cleanName,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        var nextState = state
+        nextState.workspaces.append(workspace)
+        if phase == .idle {
+            nextState.settings.selectedWorkspaceID = workspace.id
+        }
+        guard commit(nextState) else { return nil }
+        return workspace.id
+    }
+
+    @discardableResult
+    func renameWorkspace(id: UUID, name: String, at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode else { return false }
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty,
+              let index = state.workspaces.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        var nextState = state
+        nextState.workspaces[index].name = cleanName
+        nextState.workspaces[index].updatedAt = date ?? clock.now
+        return commit(nextState)
+    }
+
+    /// Moves a project by changing only its workspace relationship. Archived
+    /// projects may be moved, but the project owning the active session may
+    /// not be moved while that session is in progress.
+    @discardableResult
+    func moveProject(id: UUID, to workspaceID: UUID) -> Bool {
+        guard !isInRecoveryMode,
+              state.workspaces.contains(where: { $0.id == workspaceID }),
+              let index = state.projects.firstIndex(where: { $0.id == id }),
+              state.activeSession?.projectID != id else {
+            return false
+        }
+        guard state.projects[index].workspaceID != workspaceID else { return true }
+
+        let project = state.projects[index]
+        var nextState = state
+        nextState.projects[index] = ProjectRecord(
+            id: project.id,
+            workspaceID: workspaceID,
+            name: project.name,
+            folderPath: project.folderPath,
+            bookmarkData: project.bookmarkData,
+            createdAt: project.createdAt,
+            lastUsedAt: project.lastUsedAt,
+            archivedAt: project.archivedAt
+        )
+        return commit(nextState)
     }
 
     func renameProject(id: UUID, name: String) {

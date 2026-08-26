@@ -140,6 +140,7 @@ struct HistoryQuery: Equatable {
     var git: HistoryGitFilter = .allSessions
     var developerTool: HistoryDeveloperToolFilter = .anyTool
     var goalOutcome: HistoryGoalOutcomeFilter = .allSessions
+    var workspace: WorkspaceScope = .allWorkspaces
 
     var normalizedSearchText: String {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -147,6 +148,7 @@ struct HistoryQuery: Equatable {
 
     var hasRestrictions: Bool {
         !normalizedSearchText.isEmpty ||
+        workspace != .allWorkspaces ||
         project != .allProjects ||
         date != .allTime ||
         type != .allTypes ||
@@ -158,9 +160,15 @@ struct HistoryQuery: Equatable {
     func matches(
         _ session: CompletedSession,
         calendar: Calendar,
-        referenceDate: Date
+        referenceDate: Date,
+        workspaceProjectIDs: Set<UUID> = []
     ) -> Bool {
         guard matchesDate(session, calendar: calendar, referenceDate: referenceDate) else { return false }
+
+        if workspace != .allWorkspaces {
+            guard let projectID = session.projectID,
+                  workspaceProjectIDs.contains(projectID) else { return false }
+        }
 
         switch project {
         case .allProjects:

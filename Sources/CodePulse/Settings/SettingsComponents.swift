@@ -2,6 +2,7 @@ import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
+    case workspaces
     case projects
     case automation
     case data
@@ -11,6 +12,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "General"
+        case .workspaces: return "Workspaces"
         case .projects: return "Projects"
         case .automation: return "Automation"
         case .data: return "Data"
@@ -20,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .general: return "gearshape"
+        case .workspaces: return "square.grid.2x2"
         case .projects: return "folder"
         case .automation: return "bolt.circle"
         case .data: return "externaldrive"

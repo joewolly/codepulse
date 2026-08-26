@@ -12,6 +12,10 @@ struct SettingsView: View {
     @EnvironmentObject private var digestCoordinator: DigestNotificationCoordinator
     @State private var projectToRename: ProjectRecord?
     @State private var renameText = ""
+    @State private var workspaceToRename: WorkspaceRecord?
+    @State private var workspaceRenameText = ""
+    @State private var newWorkspaceName = ""
+    @State private var workspaceError: String?
     @State private var projectToArchive: ProjectRecord?
     @State private var projectToDelete: ProjectRecord?
     @State private var projectArchiveError: String?
@@ -37,7 +41,7 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
-                .frame(width: 260)
+                .frame(width: 360)
                 .accessibilityLabel("Settings category")
             }
         }
@@ -60,6 +64,27 @@ struct SettingsView: View {
             }
         } message: {
             Text("Choose the name shown in CodePulse sessions.")
+        }
+        .alert("Rename Workspace", isPresented: Binding(
+            get: { workspaceToRename != nil },
+            set: { if !$0 { workspaceToRename = nil } }
+        )) {
+            TextField("Workspace name", text: $workspaceRenameText)
+            Button("Save") {
+                guard let id = workspaceToRename?.id else { return }
+                if !store.renameWorkspace(id: id, name: workspaceRenameText) {
+                    workspaceError = store.lifecycleErrorMessage
+                        ?? "CodePulse could not save this workspace change."
+                } else {
+                    workspaceError = nil
+                }
+                workspaceToRename = nil
+            }
+            Button("Cancel", role: .cancel) {
+                workspaceToRename = nil
+            }
+        } message: {
+            Text("Workspace identity is preserved by its identifier.")
         }
         .alert("Delete Project?", isPresented: Binding(
             get: { projectToDelete != nil },
@@ -164,6 +189,8 @@ struct SettingsView: View {
         switch selectedTab {
         case .general:
             generalSettingsTab
+        case .workspaces:
+            workspacesSettingsTab
         case .projects:
             projectsSettingsTab
         case .automation:
@@ -316,6 +343,71 @@ struct SettingsView: View {
             }
 
             SessionPresetSettingsView()
+        }
+        .formStyle(.grouped)
+    }
+
+    private var workspacesSettingsTab: some View {
+        Form {
+            Section("Workspaces") {
+                Text("Workspaces organize Projects. History and Insights use each Project's current membership, so moving a Project changes those aggregates without rewriting saved sessions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let workspaceError {
+                    Text(workspaceError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                ForEach(store.workspacesSorted) { workspace in
+                    WorkspaceSettingsRow(
+                        workspace: workspace,
+                        projectCount: store.projects(in: workspace.id).count,
+                        isSelected: store.selectedWorkspaceID == workspace.id,
+                        rename: {
+                            workspaceToRename = workspace
+                            workspaceRenameText = workspace.name
+                        }
+                    )
+                }
+
+                HStack(spacing: 8) {
+                    TextField("New workspace name", text: $newWorkspaceName)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("New Workspace Name")
+                        .accessibilityIdentifier("workspace-name-field")
+                    Button("Create") {
+                        guard store.createWorkspace(name: newWorkspaceName) != nil else {
+                            workspaceError = store.lifecycleErrorMessage
+                                ?? "Enter a non-empty workspace name and try again."
+                            return
+                        }
+                        workspaceError = nil
+                        newWorkspaceName = ""
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityLabel("Create Workspace")
+                    .accessibilityIdentifier("create-workspace-button")
+                }
+            }
+
+            Section("Project Assignment") {
+                Text("Move active or archived Projects between Workspaces. The Project owning the active session is locked until that session finishes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if store.state.projects.isEmpty {
+                    Text("Add a Project to assign it to a Workspace.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.projectsSortedByRecentUse) { project in
+                        ProjectWorkspaceAssignmentRow(project: project)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
     }
@@ -598,6 +690,92 @@ private struct ProjectSettingsRow: View {
         if project.isArchived { parts.append("Archived") }
         if project.requiresRelink { parts.append("Needs Relink") }
         return parts.joined(separator: ", ")
+    }
+}
+
+private struct WorkspaceSettingsRow: View {
+    let workspace: WorkspaceRecord
+    let projectCount: Int
+    let isSelected: Bool
+    let rename: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.grid.2x2")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(workspace.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+                Text("\(projectCount) \(projectCount == 1 ? "Project" : "Projects")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if isSelected {
+                SettingsStatusBadge("Selected", style: .success, systemImage: "checkmark.circle")
+            }
+            Button("Rename…", action: rename)
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Rename Workspace \(workspace.name)")
+                .accessibilityIdentifier("rename-workspace-\(workspace.id.uuidString)")
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Workspace \(workspace.name), \(projectCount) \(projectCount == 1 ? "Project" : "Projects")\(isSelected ? ", Selected" : "")")
+    }
+}
+
+private struct ProjectWorkspaceAssignmentRow: View {
+    @EnvironmentObject private var store: SessionStore
+    let project: ProjectRecord
+
+    private var ownsActiveSession: Bool {
+        store.state.activeSession?.projectID == project.id
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.name)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                HStack(spacing: 5) {
+                    if project.isArchived {
+                        SettingsStatusBadge("Archived", style: .neutral, systemImage: "archivebox")
+                    }
+                    if ownsActiveSession {
+                        SettingsStatusBadge("Active Session", style: .warning, systemImage: "lock")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Picker("Workspace", selection: workspaceSelection) {
+                ForEach(store.workspacesSorted) { workspace in
+                    Text(workspace.name).tag(workspace.id)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 190, alignment: .trailing)
+            .disabled(ownsActiveSession)
+            .accessibilityLabel("Workspace for \(project.name)")
+            .accessibilityIdentifier("project-workspace-picker-\(project.id.uuidString)")
+            .help(ownsActiveSession ? "Finish the active session before moving this Project" : "Move this Project to another Workspace")
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var workspaceSelection: Binding<UUID> {
+        Binding(
+            get: {
+                store.state.projects.first(where: { $0.id == project.id })?.workspaceID ?? project.workspaceID
+            },
+            set: { newWorkspaceID in
+                _ = store.moveProject(id: project.id, to: newWorkspaceID)
+            }
+        )
     }
 }
 
