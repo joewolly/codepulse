@@ -11,6 +11,7 @@ final class AppWindowCoordinator: ObservableObject {
     private let store: SessionStore
     private var historyWindow: NSWindow?
     private var insightsWindow: NSWindow?
+    private var workspaceDashboardWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var recoveryWindow: NSWindow?
@@ -80,6 +81,34 @@ final class AppWindowCoordinator: ObservableObject {
         window.makeKeyAndOrderFront(nil)
         // Reapply the minimum for reused or pre-existing Insights windows.
         window.contentMinSize = Self.insightsMinimumContentSize
+    }
+
+    func showWorkspaceDashboard() {
+        let window: NSWindow
+        if let workspaceDashboardWindow {
+            window = workspaceDashboardWindow
+        } else if let existingWindow = NSApp.windows.first(where: { $0.title == "Workspace Dashboard" }) {
+            workspaceDashboardWindow = existingWindow
+            window = existingWindow
+        } else {
+            let content = WorkspaceDashboardView()
+                .environmentObject(store)
+            let hostingController = NSHostingController(rootView: content)
+            let newWindow = NSWindow(contentViewController: hostingController)
+            newWindow.title = "Workspace Dashboard"
+            newWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            newWindow.toolbarStyle = .unified
+            newWindow.setContentSize(NSSize(width: 760, height: 620))
+            newWindow.contentMinSize = NSSize(width: 620, height: 520)
+            newWindow.isReleasedWhenClosed = false
+            newWindow.isRestorable = false
+            newWindow.center()
+            workspaceDashboardWindow = newWindow
+            window = newWindow
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     func showSettings() {

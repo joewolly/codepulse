@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct InsightsView: View {
     @EnvironmentObject private var store: SessionStore
     @State private var timeframe: InsightsTimeframe = .thisWeek
+    @State private var workspace: WorkspaceScope = .allWorkspaces
     @State private var project: InsightsProjectFilter = .allProjects
     @State private var reportExportError = false
     @State private var calculatedProjectOptions: [InsightsProjectOption] = []
@@ -83,6 +84,30 @@ struct InsightsView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 HStack(spacing: 6) {
+                    Text("Workspace:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Picker(selection: $workspace) {
+                        ForEach(store.workspaceScopeOptions) { option in
+                            Text(option.title).tag(option.scope)
+                        }
+                    } label: {
+                        Text(workspace.title(options: store.workspaceScopeOptions))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 152, alignment: .leading)
+                    .accessibilityLabel("Insights Workspace scope")
+                    .accessibilityIdentifier("insights-workspace-scope")
+                }
+                .padding(.leading, 8)
+            }
+
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 6) {
                     Text("Timeframe:")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -149,19 +174,36 @@ struct InsightsView: View {
         }
         .onAppear(perform: refreshInsights)
         .onChange(of: timeframe) { _ in refreshInsights() }
+        .onChange(of: workspace) { _ in
+            let options = store.insightsProjectOptions(for: workspace)
+            if project != .allProjects,
+               !options.contains(where: { $0.filter == project }) {
+                project = .allProjects
+            }
+            refreshInsights()
+        }
         .onChange(of: project) { _ in refreshInsights() }
         .onChange(of: store.stateRevision) { _ in refreshInsights() }
         .onChange(of: insightsReferenceMinute) { _ in refreshInsights() }
     }
 
     private func refreshInsights() {
-        calculatedProjectOptions = store.insightsProjectOptions
+        calculatedProjectOptions = store.insightsProjectOptions(for: workspace)
+        let effectiveProject: InsightsProjectFilter
+        if project != .allProjects,
+           !calculatedProjectOptions.contains(where: { $0.filter == project }) {
+            project = .allProjects
+            effectiveProject = .allProjects
+        } else {
+            effectiveProject = project
+        }
         calculatedSummary = InsightsCalculator.summary(
             state: store.state,
             calendar: store.calendar,
             referenceDate: store.now,
             timeframe: timeframe,
-            project: project
+            project: effectiveProject,
+            workspace: workspace
         )
     }
 
@@ -178,7 +220,8 @@ struct InsightsView: View {
             calendar: calendar,
             referenceDate: referenceDate,
             timeframe: timeframe,
-            project: project
+            project: project,
+            workspace: workspace
         )
         let filenameProject = project == .allProjects ? nil : selectedProjectTitle
         let markdownType = UTType(importedAs: "net.daringfireball.markdown")
@@ -221,6 +264,12 @@ private extension InsightsProjectFilter {
         case .historicalName(let name):
             return name
         }
+    }
+}
+
+private extension WorkspaceScope {
+    func title(options: [WorkspaceScopeOption]) -> String {
+        options.first(where: { $0.scope == self })?.title ?? "All Workspaces"
     }
 }
 

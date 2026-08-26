@@ -5,6 +5,7 @@ struct MenuBarIdleView: View {
     @EnvironmentObject private var store: SessionStore
 
     @State private var selectedPresetID: UUID?
+    @State private var selectedWorkspaceID: UUID?
     @State private var selectedProjectID: UUID?
     @State private var selectedType: SessionType = .coding
     @State private var goal = ""
@@ -30,6 +31,7 @@ struct MenuBarIdleView: View {
 
             Divider()
 
+            MenuBarWorkspacePicker(selectedWorkspaceID: $selectedWorkspaceID)
             MenuBarProjectPicker(selectedProjectID: $selectedProjectID)
             MenuBarSessionTypePicker(selectedType: $selectedType)
 
@@ -64,12 +66,79 @@ struct MenuBarIdleView: View {
             .accessibilityIdentifier("start-session-button")
         }
         .onAppear {
-            selectedProjectID = store.defaultProjectID
+            selectedWorkspaceID = store.selectedWorkspaceID
+            selectedProjectID = store.defaultProjectID(for: selectedWorkspaceID)
+        }
+        .onChange(of: selectedWorkspaceID) { workspaceID in
+            guard let workspaceID else { return }
+            guard store.selectWorkspace(id: workspaceID) else {
+                selectedWorkspaceID = store.selectedWorkspaceID
+                return
+            }
+            selectedProjectID = store.defaultProjectID(for: workspaceID)
+        }
+        .onChange(of: store.state.settings.selectedWorkspaceID) { workspaceID in
+            guard let workspaceID, workspaceID != selectedWorkspaceID else { return }
+            selectedWorkspaceID = workspaceID
+            selectedProjectID = store.defaultProjectID(for: workspaceID)
         }
         .onChange(of: store.state.projects) { _ in
-            guard !store.isProjectAvailableForManualStart(selectedProjectID) else { return }
-            selectedProjectID = nil
+            guard let selectedProjectID,
+                  store.selectableProjectsSortedByRecentUse(in: store.selectedWorkspaceID)
+                    .contains(where: { $0.id == selectedProjectID }) else {
+                self.selectedProjectID = nil
+                return
+            }
         }
+    }
+}
+
+struct MenuBarWorkspacePicker: View {
+    @EnvironmentObject private var store: SessionStore
+    @Binding var selectedWorkspaceID: UUID?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Workspace")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 8)
+
+            Menu {
+                ForEach(store.workspacesSorted) { workspace in
+                    Button {
+                        selectedWorkspaceID = workspace.id
+                    } label: {
+                        Label(
+                            workspace.name,
+                            systemImage: selectedWorkspaceID == workspace.id ? "checkmark" : "square.grid.2x2"
+                        )
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(.secondary)
+                    Text(selectedWorkspaceName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: 215, alignment: .trailing)
+            }
+            .menuStyle(.borderlessButton)
+            .accessibilityLabel("Workspace, \(selectedWorkspaceName)")
+            .accessibilityIdentifier("workspace-picker")
+        }
+    }
+
+    private var selectedWorkspaceName: String {
+        selectedWorkspaceID.flatMap { id in
+            store.state.workspaces.first(where: { $0.id == id })?.name
+        } ?? "Workspace"
     }
 }
 
@@ -157,10 +226,10 @@ struct MenuBarProjectPicker: View {
                     Label("No Project", systemImage: selectedProjectID == nil ? "checkmark" : "circle")
                 }
 
-                if !store.state.projects.isEmpty {
+                if !store.selectableProjectsSortedByRecentUse(in: store.selectedWorkspaceID).isEmpty {
                     Divider()
 
-                    ForEach(store.selectableProjectsSortedByRecentUse) { project in
+                    ForEach(store.selectableProjectsSortedByRecentUse(in: store.selectedWorkspaceID)) { project in
                         Button {
                             selectedProjectID = project.id
                         } label: {

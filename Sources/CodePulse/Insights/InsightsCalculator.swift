@@ -304,7 +304,8 @@ enum InsightsCalculator {
         calendar: Calendar,
         referenceDate: Date,
         timeframe: InsightsTimeframe = .thisWeek,
-        project: InsightsProjectFilter = .allProjects
+        project: InsightsProjectFilter = .allProjects,
+        workspace: WorkspaceScope = .allWorkspaces
     ) -> InsightsSummary {
         let interval = interval(
             for: timeframe,
@@ -324,7 +325,8 @@ enum InsightsCalculator {
             interval: interval,
             comparisonInterval: comparisonInterval,
             timeframe: timeframe,
-            project: project
+            project: project,
+            workspace: workspace
         )
     }
 
@@ -338,12 +340,14 @@ enum InsightsCalculator {
         interval: DateInterval,
         comparisonInterval: DateInterval?,
         timeframe: InsightsTimeframe,
-        project: InsightsProjectFilter = .allProjects
+        project: InsightsProjectFilter = .allProjects,
+        workspace: WorkspaceScope = .allWorkspaces
     ) -> InsightsSummary {
         let sources = sources(
             state: state,
             project: project,
-            referenceDate: referenceDate
+            referenceDate: referenceDate,
+            workspace: workspace
         )
         let primaryRecords = records(
             from: sources,
@@ -401,9 +405,15 @@ enum InsightsCalculator {
         state: AppState,
         in interval: DateInterval,
         referenceDate: Date,
-        project: InsightsProjectFilter = .allProjects
+        project: InsightsProjectFilter = .allProjects,
+        workspace: WorkspaceScope = .allWorkspaces
     ) -> TimeInterval {
-        let sources = sources(state: state, project: project, referenceDate: referenceDate)
+        let sources = sources(
+            state: state,
+            project: project,
+            referenceDate: referenceDate,
+            workspace: workspace
+        )
         return records(from: sources, in: interval, referenceDate: referenceDate)
             .reduce(into: 0) { total, record in total += record.duration }
     }
@@ -698,8 +708,21 @@ enum InsightsCalculator {
     private static func sources(
         state: AppState,
         project: InsightsProjectFilter,
-        referenceDate: Date
+        referenceDate: Date,
+        workspace: WorkspaceScope
     ) -> [SessionSource] {
+        let workspaceProjectIDs: Set<UUID>?
+        switch workspace {
+        case .allWorkspaces:
+            workspaceProjectIDs = nil
+        case .workspaceID(let workspaceID):
+            workspaceProjectIDs = Set(
+                state.projects
+                    .filter { $0.workspaceID == workspaceID }
+                    .map(\.id)
+            )
+        }
+
         let completed = state.completedSessions.map { session in
             SessionSource(
                 id: session.id,
@@ -734,7 +757,12 @@ enum InsightsCalculator {
                 developerToolContexts: session.developerToolContexts
             )
         }
-        return (completed + [active].compactMap { $0 }).filter { $0.matches(project) }
+        return (completed + [active].compactMap { $0 }).filter { source in
+            guard source.matches(project) else { return false }
+            guard let workspaceProjectIDs else { return true }
+            guard let projectID = source.projectID else { return false }
+            return workspaceProjectIDs.contains(projectID)
+        }
     }
 
     private static func records(

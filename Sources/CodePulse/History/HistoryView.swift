@@ -13,6 +13,7 @@ struct HistoryView: View {
     @State private var query = HistoryQuery()
     @State private var filteredGroups: [DaySessionGroup] = []
     @State private var projectOptions: [HistoryProjectOption] = []
+    @State private var workspaceOptions: [WorkspaceScopeOption] = []
 
     private var historyReferenceDay: Date {
         store.calendar.startOfDay(for: store.now)
@@ -59,7 +60,11 @@ struct HistoryView: View {
         )
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                HistoryFilterMenu(query: $query, projectOptions: projectOptions)
+                HistoryFilterMenu(
+                    query: $query,
+                    workspaceOptions: workspaceOptions,
+                    projectOptions: projectOptions
+                )
 
                 Button(action: exportCSV) {
                     if exportActivity.isActive {
@@ -123,9 +128,14 @@ struct HistoryView: View {
     private func refreshDerivedData(preferredSelectionID: UUID? = nil) {
         let currentSelectionID = selectedSessionID
         let referenceDate = store.now
+        projectOptions = store.historyProjectOptions(for: query.workspace)
+        if query.workspace != .allWorkspaces,
+           query.project != .allProjects,
+           !projectOptions.contains(where: { $0.filter == query.project }) {
+            query.project = .allProjects
+        }
+        workspaceOptions = store.workspaceScopeOptions
         let groups = store.historyGroups(for: query, referenceDate: referenceDate)
-
-        projectOptions = store.historyProjectOptions
         filteredGroups = groups
         selectedSessionID = HistorySelectionResolver.resolve(
             currentID: currentSelectionID,
@@ -205,10 +215,20 @@ struct HistoryView: View {
 
 private struct HistoryFilterMenu: View {
     @Binding var query: HistoryQuery
+    let workspaceOptions: [WorkspaceScopeOption]
     let projectOptions: [HistoryProjectOption]
 
     var body: some View {
         Menu {
+            Menu("Workspace") {
+                ForEach(workspaceOptions) { option in
+                    filterButton(option.title, selected: query.workspace == option.scope) {
+                        query.workspace = option.scope
+                    }
+                }
+            }
+            .accessibilityIdentifier("history-workspace-scope")
+
             Menu("Project") {
                 filterButton("All Projects", selected: query.project == .allProjects) {
                     query.project = .allProjects
@@ -284,6 +304,7 @@ private struct HistoryFilterMenu: View {
         guard query.hasRestrictions else { return "No filters" }
         var values: [String] = []
         if !query.normalizedSearchText.isEmpty { values.append("Search") }
+        if query.workspace != .allWorkspaces { values.append("Workspace") }
         if query.project != .allProjects { values.append("Project") }
         if query.date != .allTime { values.append(query.date.title) }
         if query.type != .allTypes { values.append(query.type.title) }
