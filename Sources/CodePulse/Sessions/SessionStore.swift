@@ -1635,7 +1635,9 @@ final class SessionStore: ObservableObject {
         )
         var nextState = state
         nextState.workspaces.append(workspace)
-        nextState.settings.selectedWorkspaceID = workspace.id
+        if phase == .idle {
+            nextState.settings.selectedWorkspaceID = workspace.id
+        }
         guard commit(nextState) else { return nil }
         return workspace.id
     }

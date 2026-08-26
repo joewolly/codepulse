@@ -167,6 +167,62 @@ final class WorkspaceExperienceTests: XCTestCase {
         XCTAssertTrue(failingStore.isInRecoveryMode)
     }
 
+    func testCreateWorkspaceSelectsNewWorkspaceWhenIdle() throws {
+        let first = WorkspaceRecord(id: UUID(), name: "First", createdAt: now)
+        let store = makeStore(state: AppState(
+            workspaces: [first],
+            settings: CodePulseSettings(selectedWorkspaceID: first.id)
+        ))
+
+        let createdID = try XCTUnwrap(store.createWorkspace(name: "Second", at: now.addingTimeInterval(1)))
+
+        XCTAssertEqual(store.selectedWorkspaceID, createdID)
+    }
+
+    func testCreateWorkspacePreservesSelectionAndOwnershipDuringRunningSession() throws {
+        let first = WorkspaceRecord(id: UUID(), name: "First", createdAt: now)
+        let project = ProjectRecord(workspaceID: first.id, name: "Active", createdAt: now)
+        let store = makeStore(state: AppState(
+            workspaces: [first],
+            projects: [project],
+            settings: CodePulseSettings(selectedWorkspaceID: first.id)
+        ))
+
+        XCTAssertTrue(store.startSession(projectID: project.id, goal: nil, at: now))
+        let activeSessionBeforeCreate = try XCTUnwrap(store.activeSession)
+        let projectsBeforeCreate = store.state.projects
+
+        let createdID = try XCTUnwrap(store.createWorkspace(name: "Second", at: now.addingTimeInterval(1)))
+
+        XCTAssertTrue(store.state.workspaces.contains(where: { $0.id == createdID }))
+        XCTAssertEqual(store.selectedWorkspaceID, first.id)
+        XCTAssertEqual(store.activeSession, activeSessionBeforeCreate)
+        XCTAssertEqual(store.activeSession?.projectID, project.id)
+        XCTAssertEqual(store.state.projects, projectsBeforeCreate)
+        XCTAssertEqual(store.state.projects.first(where: { $0.id == project.id })?.workspaceID, first.id)
+    }
+
+    func testCreateWorkspacePreservesSelectionDuringPausedSession() throws {
+        let first = WorkspaceRecord(id: UUID(), name: "First", createdAt: now)
+        let project = ProjectRecord(workspaceID: first.id, name: "Active", createdAt: now)
+        let store = makeStore(state: AppState(
+            workspaces: [first],
+            projects: [project],
+            settings: CodePulseSettings(selectedWorkspaceID: first.id)
+        ))
+
+        XCTAssertTrue(store.startSession(projectID: project.id, goal: nil, at: now))
+        XCTAssertTrue(store.pause(at: now.addingTimeInterval(1)))
+        let activeSessionBeforeCreate = try XCTUnwrap(store.activeSession)
+
+        let createdID = try XCTUnwrap(store.createWorkspace(name: "Second", at: now.addingTimeInterval(2)))
+
+        XCTAssertTrue(store.state.workspaces.contains(where: { $0.id == createdID }))
+        XCTAssertEqual(store.phase, .paused)
+        XCTAssertEqual(store.selectedWorkspaceID, first.id)
+        XCTAssertEqual(store.activeSession, activeSessionBeforeCreate)
+    }
+
     func testWorkspaceScopedHistoryTracksCurrentMembershipAndExcludesGlobalOrphanedSessions() {
         let first = WorkspaceRecord(id: UUID(), name: "First", createdAt: now)
         let second = WorkspaceRecord(id: UUID(), name: "Second", createdAt: now)
