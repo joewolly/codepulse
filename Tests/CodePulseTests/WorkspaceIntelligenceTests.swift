@@ -200,6 +200,53 @@ final class WorkspaceIntelligenceTests: XCTestCase {
         XCTAssertTrue(intelligence.continuationHints.first?.message.contains("without a recorded outcome") == true)
         XCTAssertTrue(intelligence.continuationHints.last?.message.contains("PR #42") == true)
         XCTAssertFalse(intelligence.continuationHints.contains { $0.message.contains("should work") })
+        let resumeHint = try XCTUnwrap(intelligence.continuationHints.first { $0.kind == .resumeRecentProject })
+        XCTAssertEqual(resumeHint.projectID, outcomeOnlyProject.id)
+        XCTAssertEqual(resumeHint.message, "\(outcomeOnlyProject.name) was the most recently active Project in this Workspace.")
+    }
+
+    func testMostRecentFollowUpDoesNotFallThroughToOlderResumeProject() throws {
+        let workspace = workspace(80, name: "Ordering")
+        let recentProject = project(80, workspaceID: workspace.id, name: "Recent Project")
+        let olderProject = project(81, workspaceID: workspace.id, name: "Older Project")
+        let recentSession = session(
+            80,
+            project: recentProject,
+            startedAt: now.addingTimeInterval(-120),
+            duration: 60,
+            goal: "Review workspace intelligence",
+            gitContext: GitSessionContext(
+                repositoryRoot: "/tmp/codepulse",
+                branchAtStart: "feature/phase3"
+            )
+        )
+        let olderSession = session(
+            81,
+            project: olderProject,
+            startedAt: now.addingTimeInterval(-420),
+            duration: 60
+        )
+        let state = AppState(
+            workspaces: [workspace],
+            projects: [recentProject, olderProject],
+            completedSessions: [recentSession, olderSession]
+        )
+
+        let intelligence = try XCTUnwrap(WorkspaceIntelligenceCalculator.snapshot(
+            state: state, calendar: calendar, referenceDate: now, workspaceID: workspace.id, timeframe: .allTime
+        ))
+        XCTAssertEqual(intelligence.resumeItems.map(\.projectID), [recentProject.id, olderProject.id])
+
+        let followUpHint = try XCTUnwrap(intelligence.continuationHints.first { $0.kind == .outcomeFollowUp })
+        XCTAssertEqual(followUpHint.projectID, recentProject.id)
+        XCTAssertFalse(intelligence.continuationHints.contains { $0.kind == .resumeRecentProject })
+        XCTAssertFalse(intelligence.continuationHints.contains {
+            $0.projectID == olderProject.id && $0.message.contains("most recently active")
+        })
+        XCTAssertEqual(
+            intelligence.continuationHints.first { $0.kind == .recentCodeContext }?.projectID,
+            recentProject.id
+        )
     }
 
     func testActiveWorkspaceSessionSuppressesGenericResumeHintButDoesNotMutateActiveSession() throws {

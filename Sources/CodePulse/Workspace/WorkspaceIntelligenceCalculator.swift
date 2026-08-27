@@ -313,11 +313,12 @@ enum WorkspaceIntelligenceCalculator {
         // Priority 2: only when no Project in this Workspace owns the active
         // session. Suppress a duplicate based on the same latest session.
         if !hasActiveWorkspaceSession,
-           let recent = resumeItems.first(where: { !usedEvidence.contains(evidenceKey(for: $0)) }) {
+           let recent = resumeItems.first,
+           !usedEvidence.contains(evidenceKey(for: recent)) {
             hints.append(
                 WorkspaceContinuationHint(
                     kind: .resumeRecentProject,
-                    message: "CodePulse was the most recently active Project in this Workspace: \(recent.projectName).",
+                    message: "\(recent.projectName) was the most recently active Project in this Workspace.",
                     projectID: recent.projectID,
                     sessionID: recent.latestSessionID
                 )
