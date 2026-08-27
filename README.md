@@ -16,11 +16,15 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.3.0 (build 1300)**. It continues
-the local Actionable Insights experience while shipping a broad native-macOS UI
-modernization across the Menu Bar, History, Insights, Settings, and related
-secondary surfaces. Goal vs Actual tracking, deterministic Focus Patterns,
-Project Outcomes, and local follow-up signals remain local and deterministic.
+The current release candidate is CodePulse **1.4.0 (build 1400)**. It introduces
+Multi-Project Workspaces with a Workspace foundation and persistence, workspace
+switching, workspace-scoped History and Insights, and a Workspace Dashboard.
+Workspace Intelligence adds deterministic cross-project activity patterns,
+Resume Context, and local continuation suggestions. Projects remain the
+ownership and identity boundary; Workspaces are an organizational aggregate
+scope. These capabilities, like the existing Actionable Insights experience,
+remain native macOS, local-first, privacy-conscious, and free of telemetry or
+cloud analytics; all intelligence is deterministic and local.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -76,6 +80,10 @@ Project Outcomes, and local follow-up signals remain local and deterministic.
   the previous completed day or week, computed entirely on this Mac.
 - Archives projects that are no longer active without deleting their saved
   sessions, Insights, exports, presets, or automation rules.
+- Organizes projects into persisted Multi-Project Workspaces with workspace
+  switching, scoped History and Insights, a Workspace Dashboard, and deterministic
+  Workspace Intelligence for cross-project patterns, Resume Context, and local
+  continuation suggestions.
 - Exports and restores a versioned JSON backup of local CodePulse state.
 
 ## Download and install
@@ -135,10 +143,10 @@ the introduction later from **Settings → General → Show Introduction…**.
 Use **Settings → Data → Backup & Restore** and choose **Export Backup…** to save
 a portable, pretty-printed JSON backup of local CodePulse projects, settings,
 presets, automation rules, saved sessions, captured Git/GitHub context,
-developer-tool session context, and any active-session timeline. The backup
-format remains `codepulse-backup` version 1. CodePulse 1.3.0 continues to read
-and restore version-1 backups; future format changes will be called out in the
-release documentation.
+developer-tool session context, and any active-session timeline. The current
+format is `codepulse-backup` version 2. CodePulse 1.4.0 imports and restores
+legacy version-1 backups for compatibility; future format changes will be
+called out in the release documentation.
 
 Use **Settings → Data → Backup & Restore** and choose **Restore Backup…** to
 inspect the selected backup before confirming. Restore replaces the current
