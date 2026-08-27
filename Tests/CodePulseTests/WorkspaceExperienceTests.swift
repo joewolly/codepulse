@@ -355,6 +355,8 @@ final class WorkspaceExperienceTests: XCTestCase {
         XCTAssertEqual(snapshot?.recentSessions.map(\.id), [session.id])
         XCTAssertEqual(snapshot?.totalTrackedDuration ?? -1, 60, accuracy: 0.001)
         XCTAssertEqual(snapshot?.projectBreakdown.map(\.label), [active.name])
+        XCTAssertEqual(snapshot?.intelligence.patterns.projectsTouched, 1)
+        XCTAssertEqual(snapshot?.intelligence.resumeItems.map(\.projectID), [active.id])
     }
 
     private func makeStore(

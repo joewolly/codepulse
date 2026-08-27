@@ -4,12 +4,15 @@ struct WorkspaceDashboardSnapshot: Equatable {
     let workspace: WorkspaceRecord
     let activeProjectCount: Int
     let archivedProjectCount: Int
+    /// Kept as a derived compatibility value for existing callers. The
+    /// Dashboard renders `intelligence.resumeItems` instead.
     let recentProjects: [ProjectRecord]
     let recentSessions: [CompletedSession]
     let activeSession: ActiveSession?
     let totalTrackedDuration: TimeInterval
     let sessionCount: Int
     let projectBreakdown: [InsightsBreakdown]
+    let intelligence: WorkspaceIntelligenceSnapshot
 }
 
 enum WorkspaceDashboardCalculator {
@@ -54,6 +57,14 @@ enum WorkspaceDashboardCalculator {
             timeframe: timeframe,
             workspace: .workspaceID(workspaceID)
         )
+        guard let intelligence = WorkspaceIntelligenceCalculator.snapshot(
+            state: state,
+            workspaceID: workspaceID,
+            summary: summary,
+            referenceDate: referenceDate
+        ) else {
+            return nil
+        }
         return WorkspaceDashboardSnapshot(
             workspace: workspace,
             activeProjectCount: projects.filter(\.isActive).count,
@@ -63,7 +74,8 @@ enum WorkspaceDashboardCalculator {
             activeSession: activeSession,
             totalTrackedDuration: summary.totalDuration,
             sessionCount: summary.sessionCount,
-            projectBreakdown: summary.projectBreakdown
+            projectBreakdown: summary.projectBreakdown,
+            intelligence: intelligence
         )
     }
 }
@@ -83,12 +95,13 @@ struct WorkspaceDashboardView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         header(snapshot)
                         overview(snapshot)
-                        recentProjects(snapshot)
-                        recentSessions(snapshot)
                         if let activeSession = snapshot.activeSession {
                             activeSessionContext(activeSession)
                         }
-                        distribution(snapshot)
+                        resumeContext(snapshot)
+                        continuationHints(snapshot)
+                        patterns(snapshot)
+                        recentSessions(snapshot)
                     }
                     .padding(24)
                     .frame(maxWidth: 820, alignment: .topLeading)
@@ -138,16 +151,27 @@ struct WorkspaceDashboardView: View {
 
     @ViewBuilder
     private func overview(_ snapshot: WorkspaceDashboardSnapshot) -> some View {
-        HStack(spacing: 12) {
-            dashboardMetric("Active Projects", value: snapshot.activeProjectCount.formatted())
-            dashboardMetric("Archived Projects", value: snapshot.archivedProjectCount.formatted())
-            dashboardMetric("Tracked Time", value: CodePulseFormatting.duration(snapshot.totalTrackedDuration))
-            dashboardMetric("Sessions", value: snapshot.sessionCount.formatted())
+        Group {
+            if snapshot.activeProjectCount == 0,
+               snapshot.archivedProjectCount == 0,
+               snapshot.sessionCount == 0,
+               snapshot.activeSession == nil {
+                Text("No recorded Workspace activity yet.")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("workspace-empty-state")
+            } else {
+                HStack(spacing: 12) {
+                    dashboardMetric("Active Projects", value: snapshot.activeProjectCount.formatted(), identifier: "active-projects")
+                    dashboardMetric("Archived Projects", value: snapshot.archivedProjectCount.formatted(), identifier: "archived-projects")
+                    dashboardMetric("Tracked Time", value: CodePulseFormatting.duration(snapshot.totalTrackedDuration), identifier: "tracked-time")
+                    dashboardMetric("Sessions", value: snapshot.sessionCount.formatted(), identifier: "sessions")
+                }
+            }
         }
     }
 
     @ViewBuilder
-    private func dashboardMetric(_ title: String, value: String) -> some View {
+    private func dashboardMetric(_ title: String, value: String, identifier: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption)
@@ -159,30 +183,79 @@ struct WorkspaceDashboardView: View {
         .padding(12)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(identifier.map { "workspace-metric-\($0)" } ?? "workspace-metric")
     }
 
     @ViewBuilder
-    private func recentProjects(_ snapshot: WorkspaceDashboardSnapshot) -> some View {
+    private func resumeContext(_ snapshot: WorkspaceDashboardSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recent Projects")
+            Text("Resume Context")
                 .font(.headline)
-            if snapshot.recentProjects.isEmpty {
-                Text("No Projects in this Workspace yet.")
-                    .foregroundStyle(.secondary)
+                .accessibilityIdentifier("workspace-resume-context")
+            if snapshot.intelligence.resumeItems.isEmpty {
+                if snapshot.activeProjectCount > 0 {
+                    Text("Finish a Project session to build local resume context.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No active Projects with completed history yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             } else {
-                ForEach(snapshot.recentProjects) { project in
-                    HStack(spacing: 8) {
-                        Image(systemName: project.isArchived ? "archivebox" : "folder")
+                ForEach(snapshot.intelligence.resumeItems) { item in
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "folder")
                             .foregroundStyle(.secondary)
-                        Text(project.name)
-                            .lineLimit(1)
-                        Spacer()
-                        if project.isArchived {
-                            Text("Archived")
+                            Text(item.projectName)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                            Spacer()
+                            Text("Last worked \(CodePulseFormatting.day(item.lastActivityAt, calendar: store.calendar)) · \(CodePulseFormatting.time(item.lastActivityAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 8) {
+                            Label(item.latestSessionType.title, systemImage: item.latestSessionType.systemImage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let branch = item.gitBranch {
+                                Label(branch, systemImage: "arrow.triangle.branch")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if let pullRequest = item.githubPullRequest {
+                                Label("PR #\(pullRequest.number)", systemImage: "arrow.triangle.pull")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        if let goal = item.goal {
+                            Text("Goal: \(goal)")
+                                .lineLimit(2)
+                        }
+                        if let outcome = item.outcome {
+                            Text("Last recorded outcome: \(outcome)")
+                                .lineLimit(2)
+                                .foregroundStyle(.secondary)
+                        } else if item.goal != nil {
+                            Text("Outcome not recorded")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let developerTool = item.developerToolContext {
+                            Text(developerTool)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    .padding(12)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("workspace-resume-card-\(item.projectID.uuidString)")
                 }
             }
         }
@@ -215,15 +288,50 @@ struct WorkspaceDashboardView: View {
     }
 
     @ViewBuilder
-    private func distribution(_ snapshot: WorkspaceDashboardSnapshot) -> some View {
+    private func continuationHints(_ snapshot: WorkspaceDashboardSnapshot) -> some View {
+        if !snapshot.intelligence.continuationHints.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Continuation Hints")
+                    .font(.headline)
+                    .accessibilityIdentifier("workspace-continuation-hints")
+                ForEach(snapshot.intelligence.continuationHints) { hint in
+                    Label(hint.message, systemImage: hint.kind.systemImage)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("workspace-continuation-hint-\(hint.id)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func patterns(_ snapshot: WorkspaceDashboardSnapshot) -> some View {
+        let patterns = snapshot.intelligence.patterns
         VStack(alignment: .leading, spacing: 8) {
-            Text("Project Distribution")
+            Text("Workspace Patterns")
                 .font(.headline)
-            if snapshot.projectBreakdown.isEmpty {
+                .accessibilityIdentifier("workspace-patterns")
+            if patterns.projectBreakdown.isEmpty {
                 Text("No tracked activity in the last 30 days.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(snapshot.projectBreakdown.prefix(8)) { item in
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    dashboardMetric("Projects Touched", value: patterns.projectsTouched.formatted(), identifier: "projects-touched")
+                    dashboardMetric(
+                        "Largest Time Share",
+                        value: patterns.largestProjectTimeShare.map { Self.percent($0) } ?? "Unavailable",
+                        identifier: "largest-time-share"
+                    )
+                    dashboardMetric("Rapid Project Switches", value: patterns.rapidProjectSwitches.formatted(), identifier: "rapid-project-switches")
+                    if let sustained = patterns.sustainedFocusShare {
+                        dashboardMetric("Sustained Focus", value: Self.percent(sustained), identifier: "sustained-focus")
+                    } else {
+                        dashboardMetric("Sustained Focus", value: "Unavailable", identifier: "sustained-focus")
+                    }
+                }
+                ForEach(patterns.projectBreakdown.prefix(8)) { item in
                     HStack(spacing: 8) {
                         Text(item.label)
                             .lineLimit(1)
@@ -242,6 +350,7 @@ struct WorkspaceDashboardView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Active Session")
                 .font(.headline)
+                .accessibilityIdentifier("workspace-active-session")
             HStack(spacing: 8) {
                 Image(systemName: "play.circle.fill")
                     .foregroundStyle(.green)
@@ -258,4 +367,18 @@ struct WorkspaceDashboardView: View {
         }
     }
 
+    private static func percent(_ value: Double) -> String {
+        String(format: "%.0f%%", max(0, min(value, 1)) * 100)
+    }
+
+}
+
+private extension WorkspaceContinuationHint.Kind {
+    var systemImage: String {
+        switch self {
+        case .outcomeFollowUp: return "text.badge.checkmark"
+        case .resumeRecentProject: return "clock.arrow.circlepath"
+        case .recentCodeContext: return "arrow.triangle.branch"
+        }
+    }
 }

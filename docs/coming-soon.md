@@ -97,12 +97,12 @@ session context. Existing project behavior remains unchanged.
 
 | Feature                         | Status      | Notes                                                                                                                                                                                                                    |
 | ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Workspace foundation            | Accepted    | Introduce a workspace container that can own one or more projects while preserving existing project-level sessions, insights, and history. Existing installs migrate into a default workspace without changing behavior. |
-| Workspace switching             | Accepted    | Allow users to switch between active workspaces and quickly resume different areas of work without losing context.                                                                                                       |
-| Workspace dashboards            | Accepted    | Provide workspace-level views combining project activity, recent sessions, and aggregate activity while keeping project data separated.                                                                                  |
-| Cross-project activity insights | Considering | Show local patterns across projects, including focus distribution, switching patterns, and time allocation without creating productivity scores or cloud analysis.                                                       |
-| Resume context                  | Considering | Provide local context for returning to work, including recent projects, unfinished sessions, and relevant previous activity.                                                                                             |
-| Workspace intelligence          | Considering | Future local intelligence features built on workspace history, such as suggested next steps and continuation hints.                                                                                                      |
+| Workspace foundation            | Implemented | Introduce a workspace container that can own one or more projects while preserving existing project-level sessions, insights, and history. Existing installs migrate into a default workspace without changing behavior. |
+| Workspace switching             | Implemented | Allow users to switch between active workspaces and quickly resume different areas of work without losing context.                                                                                                       |
+| Workspace dashboards            | Implemented | Provide workspace-level views combining project activity, recent sessions, and aggregate activity while keeping project data separated.                                                                                  |
+| Cross-project activity insights | Implemented | Show deterministic local patterns across current Workspace Projects, including focus distribution, switching patterns, and time allocation without productivity scoring or cloud analysis. |
+| Resume context                  | Implemented | Provide deterministic local context for returning to active Projects, including recent recorded sessions, Goal/Outcome state, and available Git/GitHub/developer-tool context. |
+| Workspace intelligence          | Implemented | Workspace Intelligence v1 derives local Resume Context and continuation hints from recorded state. It uses no AI interpretation, productivity scoring, or cloud analysis. |
 
 Implementation should happen incrementally:
 
@@ -122,11 +122,13 @@ Implementation should happen incrementally:
 
    - Cross-project patterns
    - Resume context
-   - Local suggestions
+   - Local continuation hints
 
 The goal is a clear view of both an individual project's state and the broader
 portfolio of active work while preserving CodePulse's local-first privacy
-model.
+model. The three-phase Workspace sequence is implemented. Workspace
+Intelligence v1 is deterministic and local: it does not interpret work with AI,
+assign productivity scores, or analyze data in the cloud.
 
 ---
 
