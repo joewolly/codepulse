@@ -163,6 +163,44 @@ The `GitHub Release` workflow then:
 Do not manually replace release assets after a successful automated release;
 the appcast signature and published archive are expected to stay in sync.
 
+## Planned v1.5.0 release gates (future requirements)
+
+These are release-blocking requirements for the future v1.5.0 implementation.
+They are not claims that the current 1.4-era branch has passed them. The
+release candidate may not be tagged or published until the exact v1.5 commit
+has independently demonstrated:
+
+- schema 3 migration validation for legacy/schema-1, schema-2 states with no
+  active Session, schema-2 states with one active Session, and canonical
+  schema-3 state;
+- backup v1, v2, and v3 import, preview, validation, and transactional restore;
+- relaunch recovery of multiple active, paused, and finishing Sessions with
+  stable UUIDs and independent automation metadata;
+- a concurrent Codex same-Project smoke test;
+- a concurrent Codex/OpenCode same-Project smoke test;
+- a cross-Workspace concurrency smoke test;
+- independent pause, resume, finish, outcome, save, discard, and automatic-save
+  behavior;
+- concurrent per-Session Git capture, including two simultaneous captures and
+  same-repository ambiguity handling;
+- the multi-session menu-bar Active Sessions hub, one-session compatibility
+  presentation, and zero-session idle behavior;
+- accessibility output for aggregate counts and individually selectable
+  Sessions;
+- ambiguous `codepulsectl` lifecycle rejection without a Session ID, plus
+  explicit `--session-id` targeting and all-active status/reporting;
+- overlap-safe Insights calculations for Active Time, Session Activity, daily
+  aggregation, Focus Patterns, digests, and Workspace Dashboard views;
+- packaged Universal 2 app validation from outside the source checkout,
+  including the normal signing, launch, and Sparkle packaging checks; and
+- regression coverage proving existing single-session behavior remains intact
+  when exactly one active Session exists.
+
+The gates must include the acceptance matrix in
+[`docs/v1.5-concurrent-sessions.md`](v1.5-concurrent-sessions.md), with
+evidence tied to the exact release commit. A successful local build or current
+1.4 test run alone is not v1.5 release evidence.
+
 ## Installation and Gatekeeper
 
 The DMG is ad-hoc signed locally, but is not Developer ID signed and is not

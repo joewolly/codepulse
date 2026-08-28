@@ -37,8 +37,10 @@ CodePulse is a local-first macOS application:
   selected repository.
 - Exported backups are user-controlled JSON files. They can contain project
   names and paths, settings, session goals and outcomes, Git metadata,
-  developer-tool lifecycle metadata, and an active session. Treat backup files
-  as potentially sensitive.
+  developer-tool lifecycle metadata, and the current active session. Treat
+  backup files as potentially sensitive. The accepted v1.5 backup-v3 contract
+  extends this to a bounded collection of active sessions without changing
+  the local-only trust model.
 
 ### Developer integration boundary
 
@@ -65,6 +67,39 @@ configured preset/project. Manual sessions have no automation ownership, and
 manual lifecycle actions disable control for an automatically started session.
 Automation never executes event content, invokes a developer tool, runs a path
 from an event, changes repository files, or performs GitHub mutations.
+
+### Accepted v1.5 concurrency boundary (planned, not shipped)
+
+The current 1.4-era implementation has one optional active Session. The
+accepted v1.5 contract moves to a bounded collection and requires these
+additional integrity boundaries:
+
+- Stable Developer-Tool Thread ownership is `(tool, externalSessionID)`;
+  Project names, Project IDs, selected Workspaces, and frontmost applications
+  cannot substitute for that identity.
+- A Thread can own at most one active automated Session. Duplicate ownership,
+  duplicate active UUIDs, and equally valid manual targets fail closed rather
+  than selecting an arbitrary Session.
+- Every lifecycle mutation resolves one Session UUID. A failure affecting one
+  Session cannot bleed into another Session’s phase, outcome, automation
+  deadline, save, or history record.
+- Active state is bounded (planned maximum: 16 Sessions) before durable
+  publication and after decode, migration, backup import, or restore. Malformed
+  or replayed events cannot create an unbounded number of Sessions.
+- Working-directory ownership continues to use canonical, validated Project
+  folder containment. Workspace selection and app focus are navigation/context
+  only; they never rescue an unknown path or establish ownership.
+- Restore validates every active identifier, timeline, ownership key, and
+  Project/Workspace reference before replacement, while preserving the
+  existing recovery backup, atomic write/readback, rollback, and unreadable
+  state protections.
+- Git capture is isolated per Session UUID. Concurrent captures cannot block or
+  mutate another Session, and same-repository mutation statistics are
+  suppressed or explicitly marked ambiguous rather than silently attributed to
+  multiple Threads.
+- Existing symlink/path validation, inbox bounds, permissions, event-size and
+  timestamp checks, and transactional persistence guarantees remain mandatory;
+  concurrency is not a reason to weaken any of them.
 
 ### External control boundary
 

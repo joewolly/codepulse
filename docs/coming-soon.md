@@ -57,8 +57,9 @@ a period after relaunch.
 
 ## Data portability
 
-Continuation of the v0.9 data-portability thread. The backup format remains
-`codepulse-backup` version 1 unless noted otherwise.
+Continuation of the v0.9 data-portability thread. The current 1.4-era backup
+format is `codepulse-backup` version 2; the planned concurrent-session
+milestone adds version 3 as described above.
 
 | Feature | Status | Notes |
 | --- | --- | --- |
@@ -129,6 +130,33 @@ portfolio of active work while preserving CodePulse's local-first privacy
 model. The three-phase Workspace sequence is implemented. Workspace
 Intelligence v1 is deterministic and local: it does not interpret work with AI,
 assign productivity scores, or analyze data in the cloud.
+
+---
+
+## Concurrent Sessions & Thread-Native Tracking
+
+**Status:** Accepted
+**Target:** v1.5.0
+**Normative specification:** [`docs/v1.5-concurrent-sessions.md`](v1.5-concurrent-sessions.md)
+
+CodePulse currently has a single globally active Session even though Projects
+can be organized into multiple Workspaces. The accepted v1.5 direction makes
+active Sessions first-class and independent:
+
+- multiple concurrent active Sessions, including same-Project work;
+- thread-native Developer-Tool identity using `(tool, externalSessionID)`;
+- independent Codex/OpenCode, cross-Project, and cross-Workspace tracking;
+- independent manual and automated lifecycle, save, and per-Session Git
+  capture;
+- a multi-session menu-bar Active Sessions hub with per-Session accessibility;
+- overlap-safe Insights that distinguish wall-clock **Active Time** from
+  summed **Session Activity**;
+- schema-3 and backup-v3 migration with lossless v1/v2 compatibility; and
+- local, bounded, metadata-only privacy with no prompt, transcript, command,
+  source, cloud, or telemetry collection.
+
+The linked document is the reviewed product and technical contract for a later
+implementation branch. v1.5 is not implemented by this roadmap entry.
 
 ---
 

@@ -7,6 +7,12 @@ local workflow detection only when the user enables it: it reacts to supported
 developer-tool lifecycle metadata and, when explicitly configured, the current
 frontmost application's bundle identifier.
 
+The current 1.4-era implementation has one optional active Session. The
+accepted v1.5 architecture (specified in
+[`docs/v1.5-concurrent-sessions.md`](docs/v1.5-concurrent-sessions.md)) allows
+multiple local active Sessions, but concurrency does not expand data collection
+or introduce a cloud service.
+
 ## Data stored on the Mac
 
 CodePulse stores its JSON state under
@@ -22,12 +28,16 @@ that state can include:
 - Optional GitHub snapshots such as the normalized repository identity and
   lightweight pull request metadata (number, title, state, draft status, URL,
   and branch names).
-- App settings and any active session needed for relaunch recovery.
+- App settings and the active-session timeline needed for current 1.4 relaunch
+  recovery. Planned v1.5 state may contain a bounded collection of such local
+  timelines.
 - Session Presets, optional Session Automation rules, configured application
   bundle identifiers/display names, the global automation setting, and the
   bounded ownership/timing metadata needed to recover an automatically started
-  active session. Raw developer-tool event files and an unbounded application
-  activation history are not stored in backups.
+  active Session. In planned v1.5 backups, the same bounded ownership/timing
+  metadata may exist for multiple active Sessions. Raw developer-tool event
+  files and an unbounded application activation history are not stored in
+  backups.
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
   prunes entries older than 30 days during event processing. It is machine-local
@@ -67,6 +77,15 @@ an inbox file locally; valid events remain in the bounded ledger to prevent
 duplicate attachment. No Project sessions and wrong-project events are not
 attached.
 
+Under the planned v1.5 model, metadata for several simultaneous local
+Developer-Tool Threads may exist at once. External session IDs are lifecycle
+routing metadata, not message content or Project identity. The canonical
+working-directory metadata is used only to resolve the owning local Project;
+the selected Workspace and frontmost application do not establish ownership.
+The same privacy limits apply to every concurrent Thread: no prompt,
+transcript, message, command text, command output, source-code contents, or
+secret is collected.
+
 CodePulse does **not** persist or inspect prompts, user messages, assistant
 messages, conversation transcripts, source-file contents, terminal command
 contents, command output, tool-call arguments, tool-call results, permission
@@ -103,6 +122,12 @@ unchanged, disables normal writes, and offers a local recovery window instead
 of showing fresh-install onboarding. An explicit restore preserves those
 unreadable bytes in a private local recovery copy; that copy is not treated as
 a portable backup and is not uploaded.
+
+The current 1.4 restore path is guarded by its single active-session state. The
+planned v1.5 path retains the same transactional guard for any running,
+paused, or finishing Session and for any in-progress per-Session Git capture;
+its backup-v3 preview reports an active-session count rather than only a
+boolean. These changes affect local state shape, not the privacy boundary.
 
 ## CSV and Markdown exports
 
