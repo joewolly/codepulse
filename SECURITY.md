@@ -56,8 +56,9 @@ The OpenCode plugin invokes the absolute helper path directly and passes only
 the validated structured envelope. Neither adapter reads conversation stores or
 content-bearing events. CodePulse only associates an event with an active
 session whose selected project's canonical folder contains the event working
-directory; timestamps alone are never sufficient, and No Project sessions are
-excluded.
+directory in the current 1.4 implementation; timestamps alone are never
+sufficient, and No Project sessions are excluded. The planned v1.5 routing
+contract is defined below and revalidates the resolved Project for every event.
 
 When Session Automation is enabled, a validated event can influence only the
 CodePulse session lifecycle when it matches a user-created Codex/OpenCode rule
@@ -77,9 +78,24 @@ additional integrity boundaries:
 - Stable Developer-Tool Thread ownership is `(tool, externalSessionID)`;
   Project names, Project IDs, selected Workspaces, and frontmost applications
   cannot substitute for that identity.
+- Every validated Developer-Tool event first canonicalizes and validates its
+  working directory, then resolves exactly one eligible active Project with the
+  deterministic Project path resolver, before resolving any Thread owner. If
+  an active owner for `(tool, externalSessionID)` exists, the resolved Project
+  ID must equal that Session’s `projectID` and the Session must be eligible for
+  the event timeline before mutation. A mismatch fails closed: CodePulse never
+  rebinds the owner, attaches to another Session, or creates a second owner.
 - A Thread can own at most one active automated Session. Duplicate ownership,
   duplicate active UUIDs, and equally valid manual targets fail closed rather
   than selecting an arbitrary Session.
+- When an automated Developer-Tool Session is completed or discarded, its
+  Thread ownership key enters a persisted machine-local retired-Thread ledger.
+  Matching events cannot create a replacement owner for 7 days, even with a new
+  event UUID. The ledger is metadata-only, bounded to 2,048 entries, prunes
+  expired entries before oldest-first count handling, and fails closed rather
+  than evicting a still-protected entry or growing without bound. It is omitted
+  and reset by portable backup restore, like replay/control ledgers; it is not
+  historical user data.
 - Every lifecycle mutation resolves one Session UUID. A failure affecting one
   Session cannot bleed into another Session’s phase, outcome, automation
   deadline, save, or history record.
@@ -96,7 +112,16 @@ additional integrity boundaries:
 - Git capture is isolated per Session UUID. Concurrent captures cannot block or
   mutate another Session, and same-repository mutation statistics are
   suppressed for affected Sessions (an explicit ambiguity marker may be shown)
-  rather than silently attributed to multiple Threads.
+  rather than silently attributed to multiple Threads. Ambiguity uses the
+  overlap of successful start-to-final Git observation windows for the same
+  canonical repository identity/root, not merely visible Session timers; a
+  missing or failed boundary is conservatively ambiguous where same-repository
+  non-overlap cannot be proved.
+- v1.5 permits at most one application-trigger-owned automated Session at a
+  time. It may coexist with manual and Developer-Tool Sessions and counts
+  toward the 16-session bound; application matching/deactivation is isolated to
+  that Session, and never suppresses Developer-Tool concurrency. A second
+  simultaneous application trigger cannot create another application owner.
 - Existing symlink/path validation, inbox bounds, permissions, event-size and
   timestamp checks, and transactional persistence guarantees remain mandatory;
   concurrency is not a reason to weaken any of them.

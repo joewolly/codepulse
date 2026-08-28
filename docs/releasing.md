@@ -179,16 +179,24 @@ has independently demonstrated:
 - a concurrent Codex same-Project smoke test;
 - a concurrent Codex/OpenCode same-Project smoke test;
 - a cross-Workspace concurrency smoke test;
-- independent pause, resume, finish, outcome, save, discard, and automatic-save
-  behavior;
+- independent pause, resume, and finish control plus per-Session outcome
+  editing, save/discard, and automatic-save behavior; outcome/save/discard are
+  in-app SessionStore/UI operations, not new `codepulsectl` verbs;
 - concurrent per-Session Git capture, including two simultaneous captures and
-  same-repository ambiguity handling;
+  same-repository observation-window ambiguity handling;
+- retired Developer-Tool Thread protection across completion/discard, relaunch,
+  and the defined seven-day bounded retention window;
+- at most one application-trigger-owned automated Session, coexisting with
+  multiple Developer-Tool/manual Sessions, plus rejection of a second
+  simultaneous application-owned Session;
 - the multi-session menu-bar Active Sessions hub, one-session compatibility
   presentation, and zero-session idle behavior;
 - accessibility output for aggregate counts and individually selectable
   Sessions;
-- ambiguous `codepulsectl` lifecycle rejection without a Session ID, plus
-  explicit `--session-id` targeting and all-active status/reporting;
+- the v1.5 `codepulsectl` scope of status, preset/manual start, and targeted
+  pause/resume/finish; ambiguous no-ID lifecycle rejection, explicit
+  `--session-id` targeting, created-UUID start output, and all-active
+  status/reporting;
 - overlap-safe Insights calculations for Active Time, Session Activity, daily
   aggregation, Focus Patterns, digests, and Workspace Dashboard views;
 - packaged Universal 2 app validation from outside the source checkout,

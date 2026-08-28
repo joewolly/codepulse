@@ -42,6 +42,13 @@ that state can include:
   local deduplication; this bounded ledger retains at most 2,048 entries and
   prunes entries older than 30 days during event processing. It is machine-local
   replay bookkeeping and is omitted from portable backups.
+- Planned v1.5 may also retain a separate retired Developer-Tool Thread ledger
+  containing only `(tool, externalSessionID)`, `retiredAt`, and
+  `lastAcceptedEventAt`. It is bounded to 2,048 entries, protects a retired
+  identity for 7 days, prunes expired entries before oldest-first count
+  handling, and fails closed rather than evicting a still-protected entry. This
+  machine-local metadata is not user-authored history, a transcript, or content,
+  and is omitted/reset in portable backups and restore.
 - A separate bounded internal ledger of processed `codepulsectl` mutation UUIDs
   and privacy-minimal responses may be kept in the live state for exactly-once
   relaunch recovery. It is not a permanent command history and is omitted from
@@ -71,20 +78,21 @@ The integration helper accepts one structured event at a time and atomically
 writes it to the local inbox at
 `~/Library/Application Support/CodePulse/Integrations/Inbox/`. CodePulse does
 not need to be running for an event to wait there. Events are validated,
-matched to a selected project by canonical folder hierarchy, deduplicated, and
-removed on a best-effort basis after processing. A filesystem failure may leave
-an inbox file locally; valid events remain in the bounded ledger to prevent
-duplicate attachment. No Project sessions and wrong-project events are not
-attached.
+matched to a selected project by canonical folder hierarchy in the current 1.4
+implementation, deduplicated, and removed on a best-effort basis after
+processing. A filesystem failure may leave an inbox file locally; valid events
+remain in the bounded ledger to prevent duplicate attachment. No Project
+sessions and wrong-project events are not attached. The planned v1.5 routing
+contract is defined below and revalidates the resolved Project for every event.
 
 Under the planned v1.5 model, metadata for several simultaneous local
 Developer-Tool Threads may exist at once. External session IDs are lifecycle
-routing metadata, not message content or Project identity. The canonical
-working-directory metadata is used only to resolve the owning local Project;
-the selected Workspace and frontmost application do not establish ownership.
-The same privacy limits apply to every concurrent Thread: no prompt,
-transcript, message, command text, command output, source-code contents, or
-secret is collected.
+routing metadata, not message content or Project identity. Every event’s
+canonical working directory is resolved and revalidated against the owning
+local Project before a Thread-owned Session is mutated; the selected Workspace
+and frontmost application do not establish ownership. The same privacy limits
+apply to every concurrent Thread: no prompt, transcript, message, command
+text, command output, source-code contents, or secret is collected.
 
 CodePulse does **not** persist or inspect prompts, user messages, assistant
 messages, conversation transcripts, source-file contents, terminal command
@@ -93,20 +101,21 @@ decisions, reasoning, conversation summaries, credentials, or API keys. The
 Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
-The live CodePulse state can contain developer-tool metadata and the
-processed-event ledger. Portable backups retain only developer-tool contexts
-already attached to saved or active sessions; they omit the live processed-event
-ledger and the separate control ledger. Restoring a backup resets both ledgers,
-preserves the current Mac's launch-at-login setting, and leaves Session
-Automation disabled until the user reviews it. Automation rules and active-session
-ownership are local configuration/recovery state; imported active-session
-timelines are retained while stale automation claims and pending automatic-save
-ownership are cleared. When an application rule is enabled, CodePulse observes
-the current frontmost application through native workspace activation
-notifications and compares its bundle identifier against configured rules. It
-does not inspect windows or persist activation/deactivation history. Disabling
-an integration removes only the CodePulse-owned hook or plugin configuration;
-it does not delete user-owned tool configuration.
+The live CodePulse state can contain developer-tool metadata, the
+processed-event ledger, and (planned v1.5) the bounded retired-Thread ledger.
+Portable backups retain only developer-tool contexts already attached to saved
+or active sessions; they omit the live processed-event, retired-Thread, and
+separate control ledgers. Restoring a backup resets all three machine-local
+ledgers, preserves the current Mac's launch-at-login setting, and leaves
+Session Automation disabled until the user reviews it. Automation rules and
+active-session ownership are local configuration/recovery state; imported
+active-session timelines are retained while stale automation claims and pending
+automatic-save ownership are cleared. When an application rule is enabled,
+CodePulse observes the current frontmost application through native workspace
+activation notifications and compares its bundle identifier against configured
+rules. It does not inspect windows or persist activation/deactivation history.
+Disabling an integration removes only the CodePulse-owned hook or plugin
+configuration; it does not delete user-owned tool configuration.
 
 ## Backup restore
 

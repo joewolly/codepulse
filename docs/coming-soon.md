@@ -148,6 +148,10 @@ active Sessions first-class and independent:
 - independent Codex/OpenCode, cross-Project, and cross-Workspace tracking;
 - independent manual and automated lifecycle, save, and per-Session Git
   capture;
+- at most one application-trigger-owned automated Session, coexisting with
+  manual and Developer-Tool Sessions;
+- Session-ID-targeted `pause`, `resume`, and `finish` plus zero/one/many
+  `codepulsectl` status, while save/discard/outcome remain in-app operations;
 - a multi-session menu-bar Active Sessions hub with per-Session accessibility;
 - overlap-safe Insights that distinguish wall-clock **Active Time** from
   summed **Session Activity**;

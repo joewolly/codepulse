@@ -34,8 +34,13 @@ It plans first-class concurrent CodePulse Sessions, thread-native Codex/OpenCode
 ownership by `(tool, externalSessionID)`, same-Project and cross-Workspace
 tracking, independent manual/automated lifecycle and Git capture, a multi-session
 menu-bar hub, overlap-safe Insights, schema/backup migration, and local
-metadata-only privacy. This is a future direction; it is not implemented or
-shipped in the current 1.4-era release.
+metadata-only privacy. Its planned `codepulsectl` additions are Session-ID
+targeted pause/resume/finish and all-active status; save, discard, and outcome
+editing remain in-app lifecycle operations rather than new CLI verbs. v1.5 also
+freezes application-trigger automation at one application-owned Session while
+allowing it to coexist with manual and Developer-Tool Sessions. This is a
+future direction; it is not implemented or shipped in the current 1.4-era
+release.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -271,8 +276,9 @@ The preferred form starts a configured Session Preset by its unique name:
 These no-ID lifecycle examples document the current 1.4-era compatibility
 surface, where at most one active Session exists. The planned v1.5 control
 surface adds explicit `--session-id <uuid>` targeting and rejects an otherwise
-ambiguous no-ID mutation when more than one Session is eligible; see the
-normative specification.
+ambiguous no-ID mutation when more than one Session is eligible. It does not add
+`codepulsectl` save, discard, or outcome commands; those remain in-app
+SessionStore/UI operations. See the normative specification.
 
 Direct manual start is also available when the project already exists in
 CodePulse:
@@ -321,7 +327,10 @@ prompts, messages, responses, transcripts, source code, terminal command
 contents, command output, tool-call arguments or results, permission decisions,
 reasoning, conversation summaries, or credentials. Application automation, when
 explicitly enabled, observes only which application is frontmost and compares
-its bundle identifier with local rules. CodePulse does not collect or retain
+its bundle identifier with local rules. In planned v1.5, a separate bounded
+retired-Thread ledger protects recently completed/discarded Developer-Tool
+identities for seven days; it is local processing metadata, omitted from
+portable backups, and reset on restore. CodePulse does not collect or retain
 application usage history, unrelated-app durations, window titles, document or
 file names, browser URLs, screen contents, keystrokes, mouse input, clipboard
 contents, or accessibility element contents.
