@@ -91,11 +91,16 @@ additional integrity boundaries:
 - When an automated Developer-Tool Session is completed or discarded, its
   Thread ownership key enters a persisted machine-local retired-Thread ledger.
   Matching events cannot create a replacement owner for 7 days, even with a new
-  event UUID. The ledger is metadata-only, bounded to 2,048 entries, prunes
-  expired entries before oldest-first count handling, and fails closed rather
-  than evicting a still-protected entry or growing without bound. It is omitted
-  and reset by portable backup restore, like replay/control ledgers; it is not
-  historical user data.
+  event UUID. The metadata-only ledger shares an effective 2,048-identity bound
+  with active Developer-Tool ownership keys whose retirement slots are reserved:
+  capacity is reserved before a new automated Session is admitted, and a
+  protected retired identity plus all reserved active identities must remain at
+  or below 2,048. If admitting a new owner would exceed that bound, the start is
+  rejected before Session creation; no protected identity is evicted. An already
+  admitted Session's reservation converts to its protected tombstone on
+  completion/discard, so retirement cannot fail solely because the ledger is
+  full. Expired entries are pruned first. It is omitted and reset by portable
+  backup restore, like replay/control ledgers; it is not historical user data.
 - Every lifecycle mutation resolves one Session UUID. A failure affecting one
   Session cannot bleed into another Session’s phase, outcome, automation
   deadline, save, or history record.

@@ -44,11 +44,16 @@ that state can include:
   replay bookkeeping and is omitted from portable backups.
 - Planned v1.5 may also retain a separate retired Developer-Tool Thread ledger
   containing only `(tool, externalSessionID)`, `retiredAt`, and
-  `lastAcceptedEventAt`. It is bounded to 2,048 entries, protects a retired
-  identity for 7 days, prunes expired entries before oldest-first count
-  handling, and fails closed rather than evicting a still-protected entry. This
-  machine-local metadata is not user-authored history, a transcript, or content,
-  and is omitted/reset in portable backups and restore.
+  `lastAcceptedEventAt`. Its effective protection capacity is 2,048 Thread
+  identities shared by protected retired entries and active automated
+  Developer-Tool owners with reserved retirement slots. Each new owner reserves
+  capacity before Session admission; an admitted owner converts its reservation
+  into a seven-day retired identity on completion/discard, and expired entries
+  are pruned first. Capacity exhaustion rejects only a new owner before Session
+  creation; it never evicts a still-protected entry or prevents an admitted
+  Session from retiring. This machine-local metadata is not user-authored
+  history, a transcript, or content, and is omitted/reset in portable backups
+  and restore.
 - A separate bounded internal ledger of processed `codepulsectl` mutation UUIDs
   and privacy-minimal responses may be kept in the live state for exactly-once
   relaunch recovery. It is not a permanent command history and is omitted from
