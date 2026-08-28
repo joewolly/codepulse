@@ -476,6 +476,7 @@ final class WorkspacePersistenceTests: XCTestCase {
         var object = try XCTUnwrap(try jsonObject(state))
         object.removeValue(forKey: "schemaVersion")
         object.removeValue(forKey: "workspaces")
+        object.removeValue(forKey: "activeSessions")
         var settings = try XCTUnwrap(object["settings"] as? [String: Any])
         settings.removeValue(forKey: "selectedWorkspaceID")
         object["settings"] = settings
@@ -526,6 +527,7 @@ final class WorkspacePersistenceTests: XCTestCase {
         var stateObject = try XCTUnwrap(object["state"] as? [String: Any])
         stateObject.removeValue(forKey: "schemaVersion")
         stateObject.removeValue(forKey: "workspaces")
+        stateObject.removeValue(forKey: "activeSessions")
         var settings = try XCTUnwrap(stateObject["settings"] as? [String: Any])
         settings.removeValue(forKey: "selectedWorkspaceID")
         stateObject["settings"] = settings

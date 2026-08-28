@@ -26,7 +26,7 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
 
     @discardableResult
     func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool {
-        guard var session = state.activeSession,
+        guard var session = state.soleActiveSession,
               session.projectID != nil,
               let resolvedProjectID = DeveloperToolProjectResolver.projectID(
                   for: event.workingDirectory,
@@ -79,7 +79,15 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
             session.developerToolContexts.append(context)
         }
 
-        state.activeSession = session
+        guard let index = state.activeSessionIndex(id: session.id) else { return false }
+        var candidate = state
+        candidate.activeSessions[index] = session
+        do {
+            try AppStateIntegrityValidator.validate(candidate)
+        } catch {
+            return false
+        }
+        state = candidate
         return true
     }
 

@@ -14,6 +14,10 @@ final class DeveloperToolEventReader {
     }
 
     func drainPending(state: inout AppState, now: Date) -> [ValidatedDeveloperToolEvent] {
+        // Retired-thread protection is maintenance state rather than event
+        // content. Prune expired identities before inspecting/admitting any
+        // new inbox work so a relaunch cannot retain stale capacity.
+        state.pruneExpiredRetiredDeveloperToolThreads(at: now)
         var processing = state.developerToolIntegration ?? DeveloperToolIntegrationProcessingState()
         pruneProcessedEvents(&processing, now: now)
 
@@ -49,7 +53,7 @@ final class DeveloperToolEventReader {
             surfacedIDs.insert(event.id)
         }
 
-        if processing.processedEvents.isEmpty {
+        if processing.isEmpty {
             state.developerToolIntegration = nil
         } else {
             state.developerToolIntegration = processing

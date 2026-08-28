@@ -489,7 +489,7 @@ enum InsightsCalculator {
         referenceDate: Date
     ) -> DateInterval {
         let referenceDay = calendar.startOfDay(for: referenceDate)
-        let earliestSessionDate = (state.completedSessions.map(\.startedAt) + [state.activeSession?.startedAt].compactMap { $0 })
+        let earliestSessionDate = (state.completedSessions.map(\.startedAt) + [state.soleActiveSession?.startedAt].compactMap { $0 })
             .min()
         let start = min(referenceDay, calendar.startOfDay(for: earliestSessionDate ?? referenceDate))
         let end = calendar.date(byAdding: .day, value: 1, to: referenceDay) ?? referenceDate
@@ -740,8 +740,8 @@ enum InsightsCalculator {
                 developerToolContexts: session.developerToolContexts
             )
         }
-        let active = state.activeSession.map { session in
-            SessionSource(
+        let active: [SessionSource] = state.soleActiveSession.map { session in
+            [SessionSource(
                 id: session.id,
                 projectID: session.projectID,
                 projectName: session.projectName,
@@ -755,9 +755,9 @@ enum InsightsCalculator {
                 gitContext: session.gitContext,
                 githubContext: session.githubContext,
                 developerToolContexts: session.developerToolContexts
-            )
-        }
-        return (completed + [active].compactMap { $0 }).filter { source in
+            )]
+        } ?? []
+        return (completed + active).filter { source in
             guard source.matches(project) else { return false }
             guard let workspaceProjectIDs else { return true }
             guard let projectID = source.projectID else { return false }

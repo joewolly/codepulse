@@ -731,7 +731,7 @@ private struct ProjectWorkspaceAssignmentRow: View {
     let project: ProjectRecord
 
     private var ownsActiveSession: Bool {
-        store.state.activeSession?.projectID == project.id
+        store.state.activeSessions.contains { $0.projectID == project.id }
     }
 
     var body: some View {

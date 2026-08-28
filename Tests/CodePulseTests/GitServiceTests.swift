@@ -398,9 +398,11 @@ final class GitServiceTests: XCTestCase {
         var sessions = try XCTUnwrap(object["completedSessions"] as? [[String: Any]])
         sessions[0].removeValue(forKey: "gitContext")
         object["completedSessions"] = sessions
-        var activeSession = try XCTUnwrap(object["activeSession"] as? [String: Any])
+        var activeSessions = try XCTUnwrap(object["activeSessions"] as? [[String: Any]])
+        var activeSession = try XCTUnwrap(activeSessions.first)
         activeSession.removeValue(forKey: "gitContext")
-        object["activeSession"] = activeSession
+        activeSessions[0] = activeSession
+        object["activeSessions"] = activeSessions
         try JSONSerialization.data(withJSONObject: object).write(to: fileURL)
 
         let loaded = persistence.load()

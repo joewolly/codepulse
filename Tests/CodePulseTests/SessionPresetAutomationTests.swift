@@ -629,7 +629,7 @@ final class SessionPresetAutomationTests: XCTestCase {
         )
 
         XCTAssertFalse(store.activeSession?.automationMetadata?.controlEnabled ?? true)
-        XCTAssertTrue(store.activeSession?.automationMetadata?.claims.isEmpty == true)
+        XCTAssertEqual(store.activeSession?.automationMetadata?.claims.map(\.isActive), [false])
         XCTAssertNil(SessionAutomationCoordinator().action(for: codex, in: store.state, now: start))
     }
 

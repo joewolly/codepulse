@@ -573,10 +573,18 @@ struct SessionAutomationMetadata: Codable, Equatable, Sendable {
         minimumSavedDuration: TimeInterval,
         claims: [SessionAutomationClaim] = []
     ) {
+        let externalSessionID = claims.compactMap { claim -> String? in
+            guard case .developerTool(let tool, let externalSessionID) = claim.source,
+                  tool == startedByTool,
+                  !externalSessionID.isEmpty else {
+                return nil
+            }
+            return externalSessionID
+        }.first ?? ""
         self.init(
             startedByRuleID: startedByRuleID,
             startedByRuleName: startedByRuleName,
-            startedBySource: .developerTool(tool: startedByTool, externalSessionID: ""),
+            startedBySource: .developerTool(tool: startedByTool, externalSessionID: externalSessionID),
             controlEnabled: controlEnabled,
             lastMatchingSignalAt: lastMatchingSignalAt,
             pauseEligibleAt: pauseEligibleAt,

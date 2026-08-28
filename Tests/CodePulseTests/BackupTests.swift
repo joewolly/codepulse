@@ -30,6 +30,11 @@ final class BackupTests: XCTestCase {
         let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         XCTAssertEqual(object["format"] as? String, "codepulse-backup")
         XCTAssertEqual(object["version"] as? Int, CodePulseBackup.currentVersion)
+        let wireState = try XCTUnwrap(object["state"] as? [String: Any])
+        XCTAssertEqual(wireState["schemaVersion"] as? Int, 2)
+        XCTAssertTrue(wireState.keys.contains("activeSession"))
+        XCTAssertTrue(wireState["activeSession"] is NSNull)
+        XCTAssertNil(wireState["activeSessions"])
 
         let backup = try CodePulseBackupCodec.decode(data)
         XCTAssertEqual(backup.format, CodePulseBackup.format)
@@ -89,6 +94,88 @@ final class BackupTests: XCTestCase {
         XCTAssertTrue(backup.state.settings.automationEnabled)
         XCTAssertEqual(backup.state.automationRules, [rule])
         XCTAssertEqual(backup.state.activeSession?.automationMetadata, metadata)
+    }
+
+    func testBackupV2OneActiveSessionUsesSingularWireFieldAndPreservesIdentity() throws {
+        let activeID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let active = ActiveSession(id: activeID, startedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let state = AppState(activeSession: active)
+
+        let data = try CodePulseBackupCodec.encode(
+            state: state,
+            exportedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let wireState = try XCTUnwrap(root["state"] as? [String: Any])
+        XCTAssertEqual(root["version"] as? Int, 2)
+        XCTAssertEqual(wireState["schemaVersion"] as? Int, 2)
+        XCTAssertNil(wireState["activeSessions"])
+        let wireActive = try XCTUnwrap(wireState["activeSession"] as? [String: Any])
+        XCTAssertEqual(wireActive["id"] as? String, activeID.uuidString)
+
+        let imported = try CodePulseBackupCodec.decode(data)
+        XCTAssertEqual(imported.state.schemaVersion, CodePulseStateSchema.currentVersion)
+        XCTAssertEqual(imported.state.activeSessions, [active])
+    }
+
+    func testBackupV2RejectsMultipleActiveSessionsBeforeWritingAFile() throws {
+        let state = AppState(activeSessions: [
+            ActiveSession(startedAt: Date(timeIntervalSince1970: 1_700_000_000)),
+            ActiveSession(startedAt: Date(timeIntervalSince1970: 1_700_000_001))
+        ])
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulse-v2-multiple-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        XCTAssertThrowsError(try CodePulseBackupCodec.encode(
+            state: state,
+            exportedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )) { error in
+            XCTAssertEqual(error as? CodePulseBackupError, .multipleActiveSessionsUnsupported)
+            XCTAssertTrue(error.localizedDescription.contains("cannot represent multiple active Sessions"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path))
+    }
+
+    func testBackupV2RejectsActiveSessionsPortableHybrid() throws {
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: CodePulseBackupCodec.encode(
+                state: AppState(),
+                exportedAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        ) as? [String: Any])
+        root["version"] = CodePulseBackup.currentVersion
+        var state = try XCTUnwrap(root["state"] as? [String: Any])
+        state["activeSessions"] = []
+        state["schemaVersion"] = 2
+        root["state"] = state
+
+        XCTAssertThrowsError(try CodePulseBackupCodec.decode(
+            try JSONSerialization.data(withJSONObject: root)
+        )) { error in
+            XCTAssertEqual(error as? CodePulseBackupError, .malformedConfiguration)
+        }
+    }
+
+    func testBackupV2RejectsSchemaThreePortableState() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var root = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: CodePulseBackupCodec.encode(
+                state: AppState(),
+                exportedAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        ) as? [String: Any])
+        root["version"] = CodePulseBackup.currentVersion
+        root["state"] = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: encoder.encode(AppState())
+        ) as? [String: Any])
+
+        XCTAssertThrowsError(try CodePulseBackupCodec.decode(
+            try JSONSerialization.data(withJSONObject: root)
+        )) { error in
+            XCTAssertEqual(error as? CodePulseBackupError, .missingRequiredField("workspace schema"))
+        }
     }
 
     func testPresetBackedApplicationAutomationAndMixedClaimBackupRoundTrip() throws {
