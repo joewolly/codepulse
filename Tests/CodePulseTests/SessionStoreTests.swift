@@ -832,6 +832,34 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.todayTotal(), 5_400, accuracy: 0.001)
     }
 
+    func testTodayTotalDoesNotSumLiveDurationsAcrossConcurrentSessions() {
+        let first = ActiveSession(startedAt: start)
+        let second = ActiveSession(startedAt: start)
+        let completed = CompletedSession(
+            id: UUID(),
+            projectID: nil,
+            projectName: nil,
+            goal: nil,
+            outcome: nil,
+            startedAt: start,
+            endedAt: start.addingTimeInterval(600),
+            pauseIntervals: []
+        )
+        let persistence = InMemoryPersistence(AppState(
+            completedSessions: [completed],
+            activeSessions: [first, second]
+        ))
+        let store = makeStore(
+            clock: TestClock(start.addingTimeInterval(3_600)),
+            persistence: persistence
+        )
+
+        // Completed history remains included, but two overlapping live
+        // sessions contribute no summed wall-clock duration in this Phase 1
+        // compatibility metric.
+        XCTAssertEqual(store.todayTotal(), 600, accuracy: 0.001)
+    }
+
     func testWallClockJumpUsesDatesInsteadOfTickCount() {
         let clock = TestClock(start)
         let store = makeStore(clock: clock)

@@ -1103,6 +1103,7 @@ struct AppState: Codable, Equatable {
                 controlProcessing: controlProcessing,
                 localInputAcceptanceDate: localInputAcceptanceDate
             )
+            seedDeveloperToolReservationsFromActiveOwnership()
             try AppStateIntegrityValidator.validate(self)
             return
         }

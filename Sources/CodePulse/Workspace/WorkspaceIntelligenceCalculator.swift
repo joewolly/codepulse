@@ -140,27 +140,29 @@ enum WorkspaceIntelligenceCalculator {
             sustainedFocusShare: summary.focusInsights.sustainedFocusShare
         )
 
-        let activeProjectID: UUID? = state.soleActiveSession.flatMap { active in
-            guard let projectID = active.projectID, projectIDs.contains(projectID) else {
-                return nil
+        let activeProjectIDs = Set<UUID>(
+            state.activeSessions.compactMap { active in
+                guard let projectID = active.projectID, projectIDs.contains(projectID) else {
+                    return nil
+                }
+                return projectID
             }
-            return projectID
-        }
+        )
         let allResumeItems = resumeItems(
             state: state,
             projects: projects,
-            excluding: activeProjectID
+            excluding: activeProjectIDs
         )
         let resumeItems = Array(allResumeItems.prefix(resumeItemLimit))
         let followUpCandidate = followUpCandidate(
             state: state,
             projects: projects,
-            excluding: activeProjectID
+            excluding: activeProjectIDs
         )
         let continuationHints = continuationHints(
             resumeItems: allResumeItems,
             followUpCandidate: followUpCandidate,
-            hasActiveWorkspaceSession: activeProjectID != nil
+            hasActiveWorkspaceSession: !activeProjectIDs.isEmpty
         )
 
         return WorkspaceIntelligenceSnapshot(
@@ -187,10 +189,10 @@ enum WorkspaceIntelligenceCalculator {
     private static func resumeItems(
         state: AppState,
         projects: [ProjectRecord],
-        excluding activeProjectID: UUID?
+        excluding activeProjectIDs: Set<UUID>
     ) -> [WorkspaceResumeItem] {
         let activeProjects = projects.filter { project in
-            project.isActive && project.id != activeProjectID
+            project.isActive && !activeProjectIDs.contains(project.id)
         }
 
         return activeProjects.compactMap { project in
@@ -259,10 +261,10 @@ enum WorkspaceIntelligenceCalculator {
     private static func followUpCandidate(
         state: AppState,
         projects: [ProjectRecord],
-        excluding activeProjectID: UUID?
+        excluding activeProjectIDs: Set<UUID>
     ) -> FollowUpCandidate? {
         let candidates = projects.filter { project in
-            project.isActive && project.id != activeProjectID
+            project.isActive && !activeProjectIDs.contains(project.id)
         }
         let projectsByID = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })
         return state.completedSessions

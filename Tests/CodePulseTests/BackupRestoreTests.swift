@@ -31,7 +31,10 @@ final class BackupRestoreTests: XCTestCase {
         )
         XCTAssertFalse(restored.settings.automationEnabled)
         XCTAssertFalse(restored.settings.launchAtLogin)
-        XCTAssertNil(restored.developerToolIntegration)
+        XCTAssertEqual(
+            restored.developerToolIntegration?.reservedDeveloperToolThreads,
+            [DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "fixture-thread")]
+        )
         XCTAssertNil(restored.controlProcessing)
         XCTAssertNil(restored.localInputAcceptanceDate)
         XCTAssertEqual(restored.projects.map(\.name), ["Fixture Main", "Fixture Docs"])
@@ -39,7 +42,10 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertEqual(restored.activeSession?.developerToolContexts.count, 1)
         XCTAssertEqual(restored.activeSession?.pauseIntervals.count, 1)
         XCTAssertNil(restored.activeSession?.pauseIntervals.first?.endedAt)
-        XCTAssertEqual(restored.activeSession?.automationMetadata?.claims, [])
+        XCTAssertEqual(
+            restored.activeSession?.automationMetadata?.claims.map(\.isActive),
+            [false]
+        )
         XCTAssertFalse(restored.activeSession?.automationMetadata?.controlEnabled ?? true)
         XCTAssertFalse(restored.activeSession?.automationMetadata?.pendingAutomaticSave ?? true)
         XCTAssertTrue(restored.automationRules.allSatisfy { !$0.isEnabled })
@@ -272,12 +278,15 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertEqual(normalized.settings.specificProjectID, project.id)
         XCTAssertEqual(normalized.automationRules, [rule])
         XCTAssertTrue(normalized.automationRules[0].isEnabled)
-        XCTAssertNil(normalized.developerToolIntegration)
+        XCTAssertEqual(
+            normalized.developerToolIntegration?.reservedDeveloperToolThreads,
+            [DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "old-machine")]
+        )
         XCTAssertNil(normalized.controlProcessing)
         XCTAssertEqual(normalized.activeSession?.pauseIntervals, [])
         XCTAssertFalse(normalized.activeSession?.automationMetadata?.controlEnabled ?? true)
         XCTAssertFalse(normalized.activeSession?.automationMetadata?.pendingAutomaticSave ?? true)
-        XCTAssertTrue(normalized.activeSession?.automationMetadata?.claims.isEmpty == true)
+        XCTAssertEqual(normalized.activeSession?.automationMetadata?.claims.map(\.isActive), [false])
     }
 
     func testSessionStoreUsesCurrentMachineLoginItemStateDuringRestoreInspection() throws {

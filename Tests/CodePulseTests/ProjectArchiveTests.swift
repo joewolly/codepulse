@@ -388,7 +388,7 @@ final class ProjectArchiveTests: XCTestCase {
 
         XCTAssertEqual(store.activeSession?.projectID, project.id)
         XCTAssertFalse(store.activeSession?.automationMetadata?.controlEnabled ?? true)
-        XCTAssertTrue(store.activeSession?.automationMetadata?.claims.isEmpty ?? false)
+        XCTAssertEqual(store.activeSession?.automationMetadata?.claims.map(\.isActive), [false])
     }
 
     func testControlStartRejectsArchivedProjectAndPresetThenSucceedsAfterRestore() throws {

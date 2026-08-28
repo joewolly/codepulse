@@ -92,6 +92,8 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
     case malformedDeveloperToolOwnership
     case duplicateRetiredDeveloperToolThread(DeveloperTool, String)
     case duplicateReservedDeveloperToolThread(DeveloperTool, String)
+    case orphanedDeveloperToolReservation(DeveloperTool, String)
+    case missingDeveloperToolReservation(DeveloperTool, String)
     case retiredDeveloperToolCapacityExceeded
 
     var errorDescription: String? {
@@ -128,6 +130,10 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
             return "Retired developer-tool identity \(tool.rawValue):\(externalSessionID) is duplicated."
         case .duplicateReservedDeveloperToolThread(let tool, let externalSessionID):
             return "Reserved developer-tool identity \(tool.rawValue):\(externalSessionID) is duplicated."
+        case .orphanedDeveloperToolReservation(let tool, let externalSessionID):
+            return "Reserved developer-tool identity \(tool.rawValue):\(externalSessionID) has no active owning Session."
+        case .missingDeveloperToolReservation(let tool, let externalSessionID):
+            return "Active developer-tool identity \(tool.rawValue):\(externalSessionID) has no retirement reservation."
         case .retiredDeveloperToolCapacityExceeded:
             return "CodePulse state exceeds the retired/reserved developer-tool capacity."
         }
@@ -210,7 +216,7 @@ enum AppStateIntegrityValidator {
                     }
                 }
             }
-            for identity in session.activeDeveloperToolOwnershipIdentities {
+            for identity in session.developerToolOwnershipIdentities {
                 guard identity.isValid else {
                     throw AppStateIntegrityError.malformedDeveloperToolOwnership
                 }
@@ -259,6 +265,27 @@ enum AppStateIntegrityValidator {
                   protectedRetiredIDs.isDisjoint(with: reservedIDs) else {
                 throw AppStateIntegrityError.malformedDeveloperToolOwnership
             }
+
+            for identity in reservedIDs.subtracting(ownershipIDs) {
+                throw AppStateIntegrityError.orphanedDeveloperToolReservation(
+                    identity.tool,
+                    identity.externalSessionID
+                )
+            }
+            for identity in ownershipIDs.subtracting(reservedIDs) {
+                throw AppStateIntegrityError.missingDeveloperToolReservation(
+                    identity.tool,
+                    identity.externalSessionID
+                )
+            }
+        } else if let identity = state.developerToolOwnershipIdentities.sorted(by: {
+            if $0.tool != $1.tool { return $0.tool.rawValue < $1.tool.rawValue }
+            return $0.externalSessionID < $1.externalSessionID
+        }).first {
+            throw AppStateIntegrityError.missingDeveloperToolReservation(
+                identity.tool,
+                identity.externalSessionID
+            )
         }
 
         guard state.developerToolThreadCapacityUsed(at: date) <= ConcurrentSessionLimits.maximumProtectedDeveloperToolThreads else {
@@ -304,7 +331,7 @@ enum AppStateLegacyMigration {
         var migratedSettings = settings
         migratedSettings.selectedWorkspaceID = workspace.id
 
-        return AppState(
+        var migrated = AppState(
             schemaVersion: CodePulseStateSchema.currentVersion,
             workspaces: [workspace],
             projects: projects.map { $0.migrated(to: workspace.id) },
@@ -317,5 +344,7 @@ enum AppStateLegacyMigration {
             controlProcessing: controlProcessing,
             localInputAcceptanceDate: localInputAcceptanceDate
         )
+        migrated.seedDeveloperToolReservationsFromActiveOwnership(at: now)
+        return migrated
     }
 }

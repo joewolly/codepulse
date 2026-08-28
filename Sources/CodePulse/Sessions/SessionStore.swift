@@ -833,14 +833,23 @@ final class SessionStore: ObservableObject {
         )
 
         var nextState = state
-        if let automationMetadata,
-           let identity = automationMetadata.startedBySource.developerToolThreadIdentity {
+        if automationMetadata != nil {
+            // Reserve every ownership identity represented by the candidate
+            // metadata before publishing the new Session. This also handles a
+            // valid multi-claim migration payload without dropping a
+            // secondary Thread reservation.
+            let identities = session.developerToolOwnershipIdentities.sorted {
+                if $0.tool != $1.tool { return $0.tool.rawValue < $1.tool.rawValue }
+                return $0.externalSessionID < $1.externalSessionID
+            }
             do {
-                try nextState.admitDeveloperToolOwner(
-                    tool: identity.tool,
-                    externalSessionID: identity.externalSessionID,
-                    at: startDate
-                )
+                for identity in identities {
+                    try nextState.admitDeveloperToolOwner(
+                        tool: identity.tool,
+                        externalSessionID: identity.externalSessionID,
+                        at: startDate
+                    )
+                }
             } catch {
                 return nil
             }
@@ -1453,8 +1462,15 @@ final class SessionStore: ObservableObject {
         let completedTotal = state.completedSessions.reduce(into: 0) { total, session in
             total += session.activeDuration(in: day)
         }
-        let activeTotal = state.activeSessions.reduce(into: 0) { total, session in
-            total += session.activeDuration(in: day, referenceDate: referenceDate)
+        // This compatibility metric is intentionally fail-closed while the
+        // later overlap-safe Active Time engine is out of scope. Preserve the
+        // existing one-session value, but never sum concurrent live durations
+        // into a misleading wall-clock total.
+        let activeTotal: TimeInterval
+        if state.activeSessions.count == 1, let session = state.soleActiveSession {
+            activeTotal = session.activeDuration(in: day, referenceDate: referenceDate)
+        } else {
+            activeTotal = 0
         }
         return max(0, completedTotal + activeTotal)
     }
@@ -2453,7 +2469,42 @@ final class SessionStore: ObservableObject {
         }
 
         let signalDate = max(metadata.lastMatchingSignalAt, eventDate)
-        if let index = metadata.claims.firstIndex(where: { $0.source == source }) {
+        let existingClaimIndex = metadata.claims.firstIndex(where: { $0.source == source })
+
+        // A previously unseen Developer-Tool claim is an ownership change,
+        // not just a lifecycle signal. Reserve its retirement slot in the
+        // same candidate transaction, before the claim is appended. A Thread
+        // already owned by another active Session is rejected rather than
+        // being silently shared or rebound.
+        var nextState = state
+        if let identity = source.developerToolThreadIdentity {
+            let sessionOwnership = session.developerToolOwnershipIdentities
+            guard !state.developerToolOwnershipIdentities.contains(identity)
+                    || sessionOwnership.contains(identity) else {
+                return false
+            }
+            if !nextState.reservedDeveloperToolOwnershipIdentities.contains(identity) {
+                do {
+                    try nextState.admitDeveloperToolOwner(
+                        tool: identity.tool,
+                        externalSessionID: identity.externalSessionID,
+                        at: date
+                    )
+                } catch {
+                    return false
+                }
+            }
+        }
+
+        if existingClaimIndex == nil, !isActive {
+            return true
+        }
+        if existingClaimIndex == nil,
+           metadata.claims.count >= DeveloperToolIntegrationLimits.maximumContextsPerSession {
+            return true
+        }
+
+        if let index = existingClaimIndex {
             metadata.claims[index].isActive = isActive
             metadata.claims[index].lastSignalAt = max(metadata.claims[index].lastSignalAt, signalDate)
         } else if isActive, metadata.claims.count < DeveloperToolIntegrationLimits.maximumContextsPerSession {
@@ -2482,7 +2533,6 @@ final class SessionStore: ObservableObject {
         }
         session.automationMetadata = metadata
 
-        var nextState = state
         guard replaceActiveSession(session, in: &nextState) else { return false }
         return commit(nextState, critical: true)
     }
@@ -2723,11 +2773,21 @@ final class SessionStore: ObservableObject {
                 )
             }
 
-            metadata.claims = metadata.claims.filter { supportedSources.contains($0.source) }
+            // Claims are both lifecycle state and historical ownership
+            // metadata. When a rule is disabled, deleted, or becomes invalid,
+            // relinquish lifecycle control by marking its claim inactive, but
+            // retain the entry so its Developer-Tool identity remains owned
+            // until this Session is finally saved or discarded.
+            metadata.claims = metadata.claims.map { claim in
+                var claim = claim
+                if !supportedSources.contains(claim.source) {
+                    claim.isActive = false
+                }
+                return claim
+            }
             if supportedSources.isEmpty {
                 metadata.controlEnabled = false
                 metadata.pendingAutomaticSave = false
-                metadata.claims = []
             }
             session.automationMetadata = metadata
             state.activeSessions[index] = session

@@ -863,6 +863,182 @@ final class SessionAutomationTests: XCTestCase {
         )
     }
 
+    func testSecondaryDeveloperToolClaimAdmissionIsAtomicAtCapacityAndRetirementProtection() throws {
+        struct AdmissionCase {
+            let sessionID: String
+            let retired: [RetiredDeveloperToolThread]
+        }
+        let protectedIdentity = DeveloperToolThreadIdentity(tool: .opencode, externalSessionID: "protected-secondary")
+        let cases = [
+            AdmissionCase(
+                sessionID: "capacity-secondary",
+                retired: (0..<2_047).map { index in
+                    RetiredDeveloperToolThread(
+                        tool: .codex,
+                        externalSessionID: "retained-" + String(index),
+                        retiredAt: start.addingTimeInterval(-1),
+                        lastAcceptedEventAt: start.addingTimeInterval(-1)
+                    )
+                }
+            ),
+            AdmissionCase(
+                sessionID: protectedIdentity.externalSessionID,
+                retired: [RetiredDeveloperToolThread(
+                    tool: protectedIdentity.tool,
+                    externalSessionID: protectedIdentity.externalSessionID,
+                    retiredAt: start,
+                    lastAcceptedEventAt: start
+                )]
+            )
+        ]
+
+        for admissionCase in cases {
+            let fixture = try makeFixture(
+                tool: .codex,
+                enabled: true,
+                seedEvent: nil,
+                includeOpenCodeRule: true,
+                minimumSavedDuration: 0
+            )
+            let primaryIdentity = DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "primary-owner")
+            let metadata = SessionAutomationMetadata(
+                startedByRuleID: fixture.rule.id,
+                startedByRuleName: fixture.rule.name,
+                startedBySource: .developerTool(
+                    tool: primaryIdentity.tool,
+                    externalSessionID: primaryIdentity.externalSessionID
+                ),
+                lastMatchingSignalAt: start,
+                pauseDelay: 60,
+                finishDelay: 300,
+                minimumSavedDuration: 0,
+                claims: [SessionAutomationClaim(
+                    source: .developerTool(
+                        tool: primaryIdentity.tool,
+                        externalSessionID: primaryIdentity.externalSessionID
+                    ),
+                    isActive: true,
+                    lastSignalAt: start
+                )]
+            )
+            var state = fixture.state
+            state.activeSession = ActiveSession(
+                projectID: fixture.project.id,
+                projectName: fixture.project.name,
+                startedAt: start,
+                automationMetadata: metadata
+            )
+            state.developerToolIntegration = DeveloperToolIntegrationProcessingState(
+                retiredDeveloperToolThreads: admissionCase.retired,
+                reservedDeveloperToolThreads: [primaryIdentity]
+            )
+            let persistence = AutomationTestPersistence(state)
+            let clock = AutomationTestClock(start)
+            let inbox = DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+                applicationSupportDirectory: fixture.root.appendingPathComponent("atomic-" + admissionCase.sessionID)
+            ))
+            let store = makeStore(
+                state: state,
+                clock: clock,
+                persistence: persistence,
+                inbox: inbox
+            )
+
+            if admissionCase.sessionID == "capacity-secondary" {
+                XCTAssertEqual(store.state.developerToolIntegration?.retiredDeveloperToolThreads.count, 2_047)
+            }
+            clock.now = start.addingTimeInterval(5)
+            try inbox.write(event(
+                tool: .opencode,
+                sessionID: admissionCase.sessionID,
+                type: .activity,
+                path: fixture.projectURL.path,
+                timestamp: clock.now
+            ))
+            store.refresh()
+
+            let claims = store.activeSession?.automationMetadata?.claims ?? []
+            XCTAssertEqual(claims.map(\.externalSessionID), [primaryIdentity.externalSessionID])
+            XCTAssertFalse(store.state.developerToolOwnershipIdentities.contains(
+                DeveloperToolThreadIdentity(tool: .opencode, externalSessionID: admissionCase.sessionID)
+            ))
+            XCTAssertEqual(store.state.reservedDeveloperToolOwnershipIdentities, Set([primaryIdentity]))
+            if admissionCase.sessionID == protectedIdentity.externalSessionID {
+                XCTAssertTrue(store.state.developerToolIntegration?.retiredDeveloperToolThreads.contains {
+                    $0.identity == protectedIdentity
+                } == true)
+            } else {
+                XCTAssertEqual(store.state.developerToolIntegration?.retiredDeveloperToolThreads.count, 2_047)
+                XCTAssertTrue(store.state.developerToolIntegration?.retiredDeveloperToolThreads.first?.isProtected(at: clock.now) == true)
+                XCTAssertEqual(store.state.protectedRetiredDeveloperToolThreadCount(at: clock.now), 2_047)
+                XCTAssertEqual(store.state.developerToolThreadCapacityUsed(at: clock.now), 2_048)
+            }
+        }
+    }
+
+    func testAutomationRelinquishmentPreservesInactiveDeveloperToolOwnershipUntilRetirement() throws {
+        for automationEnabled in [false, true] {
+            let fixture = try makeFixture(
+                tool: .codex,
+                enabled: automationEnabled,
+                seedEvent: nil,
+                ruleEnabled: !automationEnabled,
+                minimumSavedDuration: 0
+            )
+            let identity = DeveloperToolThreadIdentity(
+                tool: .codex,
+                externalSessionID: "retained-owner-" + String(automationEnabled)
+            )
+            let metadata = SessionAutomationMetadata(
+                startedByRuleID: fixture.rule.id,
+                startedByRuleName: fixture.rule.name,
+                startedBySource: .developerTool(tool: identity.tool, externalSessionID: identity.externalSessionID),
+                lastMatchingSignalAt: start,
+                pauseDelay: 1,
+                finishDelay: 2,
+                minimumSavedDuration: 0,
+                claims: [SessionAutomationClaim(
+                    source: .developerTool(tool: identity.tool, externalSessionID: identity.externalSessionID),
+                    isActive: true,
+                    lastSignalAt: start
+                )]
+            )
+            var state = fixture.state
+            state.activeSession = ActiveSession(
+                projectID: fixture.project.id,
+                projectName: fixture.project.name,
+                startedAt: start,
+                automationMetadata: metadata
+            )
+            state.developerToolIntegration = DeveloperToolIntegrationProcessingState(
+                reservedDeveloperToolThreads: [identity]
+            )
+            let persistence = AutomationTestPersistence(state)
+            let store = makeStore(
+                state: state,
+                clock: AutomationTestClock(start),
+                persistence: persistence,
+                inbox: DeveloperToolInbox(paths: DeveloperToolIntegrationPaths(
+                    applicationSupportDirectory: fixture.root.appendingPathComponent(
+                        "relinquish-" + String(automationEnabled)
+                    )
+                ))
+            )
+
+            XCTAssertFalse(store.activeSession?.automationMetadata?.controlEnabled ?? true)
+            XCTAssertEqual(store.activeSession?.automationMetadata?.claims.map(\.isActive), [false])
+            XCTAssertTrue(store.state.developerToolOwnershipIdentities.contains(identity))
+            XCTAssertTrue(store.state.reservedDeveloperToolOwnershipIdentities.contains(identity))
+
+            XCTAssertTrue(store.finish(at: start.addingTimeInterval(1)))
+            XCTAssertTrue(store.discardSession())
+            XCTAssertNil(store.activeSession)
+            XCTAssertTrue(store.state.developerToolIntegration?.retiredDeveloperToolThreads.contains {
+                $0.identity == identity
+            } == true)
+        }
+    }
+
     func testAutomaticCodexTurnDoesNotPauseWithoutIdleSignal() throws {
         let clock = AutomationTestClock(start)
         let fixture = try makeFixture(

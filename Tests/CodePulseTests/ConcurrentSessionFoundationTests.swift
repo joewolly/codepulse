@@ -218,19 +218,139 @@ final class ConcurrentSessionFoundationTests: XCTestCase {
             ]
         )
         let session = ActiveSession(startedAt: date, automationMetadata: metadata)
-        let state = AppState(activeSessions: [session])
+        var state = AppState(activeSessions: [session])
+        state.seedDeveloperToolReservationsFromActiveOwnership(at: date)
 
-        XCTAssertEqual(state.activeDeveloperToolOwnedThreadCount, 2)
-        XCTAssertTrue(state.activeDeveloperToolOwnershipIdentities.contains(
+        XCTAssertEqual(state.activeDeveloperToolOwnedThreadCount, 3)
+        XCTAssertTrue(state.developerToolOwnershipIdentities.contains(
             DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "thread-a")
         ))
-        XCTAssertTrue(state.activeDeveloperToolOwnershipIdentities.contains(
+        XCTAssertTrue(state.developerToolOwnershipIdentities.contains(
             DeveloperToolThreadIdentity(tool: .opencode, externalSessionID: "thread-b")
         ))
-        XCTAssertFalse(state.activeDeveloperToolOwnershipIdentities.contains(
+        XCTAssertTrue(state.developerToolOwnershipIdentities.contains(
+            DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "inactive")
+        ))
+        XCTAssertFalse(state.activeDeveloperToolClaimIdentities.contains(
             DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "inactive")
         ))
         XCTAssertNoThrow(try AppStateIntegrityValidator.validate(state))
+    }
+
+    func testInactiveDeveloperToolClaimRemainsOwnedAndConsumesReservation() throws {
+        let identity = DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "inactive-owner")
+        let metadata = SessionAutomationMetadata(
+            startedByRuleID: UUID(),
+            startedByRuleName: "Application with history",
+            startedBySource: .application(bundleIdentifier: "com.example.editor"),
+            lastMatchingSignalAt: date,
+            pauseDelay: 1,
+            finishDelay: 2,
+            minimumSavedDuration: 0,
+            claims: [SessionAutomationClaim(
+                source: .developerTool(tool: identity.tool, externalSessionID: identity.externalSessionID),
+                isActive: false,
+                lastSignalAt: date
+            )]
+        )
+        let state = AppState(
+            activeSessions: [ActiveSession(startedAt: date, automationMetadata: metadata)],
+            developerToolIntegration: DeveloperToolIntegrationProcessingState(
+                reservedDeveloperToolThreads: [identity]
+            )
+        )
+
+        XCTAssertTrue(state.developerToolOwnershipIdentities.contains(identity))
+        XCTAssertFalse(state.activeDeveloperToolClaimIdentities.contains(identity))
+        XCTAssertEqual(state.activeDeveloperToolOwnedThreadCount, 1)
+        XCTAssertEqual(state.developerToolThreadCapacityUsed(at: date), 1)
+        XCTAssertNoThrow(try AppStateIntegrityValidator.validate(state))
+
+        var competing = state
+        competing.activeSessions.append(ActiveSession(
+            startedAt: date.addingTimeInterval(1),
+            automationMetadata: automationMetadata(tool: identity.tool, externalSessionID: identity.externalSessionID)
+        ))
+        XCTAssertThrowsError(try AppStateIntegrityValidator.validate(competing)) { error in
+            XCTAssertEqual(
+                error as? AppStateIntegrityError,
+                .duplicateDeveloperToolOwnership(identity.tool, identity.externalSessionID)
+            )
+        }
+    }
+
+    func testCanonicalIntegrityRejectsOrphanAndMissingDeveloperToolReservations() throws {
+        let identity = DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "integrity-owner")
+        let metadata = automationMetadata(tool: identity.tool, externalSessionID: identity.externalSessionID)
+        let activeSession = ActiveSession(startedAt: date, automationMetadata: metadata)
+
+        let orphan = AppState(developerToolIntegration: DeveloperToolIntegrationProcessingState(
+            reservedDeveloperToolThreads: [identity]
+        ))
+        XCTAssertThrowsError(try AppStateIntegrityValidator.validate(orphan)) { error in
+            XCTAssertEqual(
+                error as? AppStateIntegrityError,
+                .orphanedDeveloperToolReservation(identity.tool, identity.externalSessionID)
+            )
+        }
+
+        let missing = AppState(activeSessions: [activeSession])
+        XCTAssertThrowsError(try AppStateIntegrityValidator.validate(missing)) { error in
+            XCTAssertEqual(
+                error as? AppStateIntegrityError,
+                .missingDeveloperToolReservation(identity.tool, identity.externalSessionID)
+            )
+        }
+
+        var protectedCollision = AppState(
+            activeSessions: [activeSession],
+            developerToolIntegration: DeveloperToolIntegrationProcessingState(
+                retiredDeveloperToolThreads: [RetiredDeveloperToolThread(
+                    tool: identity.tool,
+                    externalSessionID: identity.externalSessionID,
+                    retiredAt: date,
+                    lastAcceptedEventAt: date
+                )],
+                reservedDeveloperToolThreads: [identity]
+            )
+        )
+        XCTAssertThrowsError(try AppStateIntegrityValidator.validate(protectedCollision, at: date))
+        protectedCollision.developerToolIntegration?.retiredDeveloperToolThreads.removeAll()
+        XCTAssertNoThrow(try AppStateIntegrityValidator.validate(protectedCollision, at: date))
+    }
+
+    func testLegacySchemaMigrationSeedsReservationsForEveryAutomatedOwnership() throws {
+        let active = ActiveSession(
+            id: UUID(uuidString: "12121212-1212-1212-1212-121212121212")!,
+            startedAt: date,
+            automationMetadata: SessionAutomationMetadata(
+                startedByRuleID: UUID(),
+                startedByRuleName: "Legacy automation",
+                startedBySource: .developerTool(tool: .codex, externalSessionID: "legacy-primary"),
+                lastMatchingSignalAt: date,
+                pauseDelay: 1,
+                finishDelay: 2,
+                minimumSavedDuration: 0,
+                claims: [SessionAutomationClaim(
+                    source: .developerTool(tool: .opencode, externalSessionID: "legacy-secondary"),
+                    isActive: false,
+                    lastSignalAt: date
+                )]
+            )
+        )
+
+        for data in [try schemaTwoData(active: active), try schemaOneData(project: ProjectRecord(name: "Legacy", createdAt: date), active: active)] {
+            let state = try decodeState(data)
+            XCTAssertEqual(state.activeSessions.map(\.id), [active.id])
+            XCTAssertEqual(
+                state.reservedDeveloperToolOwnershipIdentities,
+                Set([
+                    DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "legacy-primary"),
+                    DeveloperToolThreadIdentity(tool: .opencode, externalSessionID: "legacy-secondary")
+                ])
+            )
+            XCTAssertNoThrow(try AppStateIntegrityValidator.validate(state))
+        }
     }
 
     func testAdmissionReservesDistinctOwnershipIdentitiesIdempotently() throws {
@@ -297,7 +417,8 @@ final class ConcurrentSessionFoundationTests: XCTestCase {
             at: date
         ))
         XCTAssertEqual(state.protectedRetiredDeveloperToolThreadCount(at: date), 0)
-        XCTAssertEqual(state.activeDeveloperToolOwnedThreadCount, 1)
+        XCTAssertEqual(state.activeDeveloperToolOwnedThreadCount, 0)
+        XCTAssertEqual(state.developerToolThreadCapacityUsed(at: date), 1)
     }
 
     func testRetiredThreadCapacityCountsDistinctActiveOwners() throws {
@@ -380,14 +501,16 @@ final class ConcurrentSessionFoundationTests: XCTestCase {
             claims: [SessionAutomationClaim(
                 tool: .opencode,
                 externalSessionID: "owner-b",
-                isActive: true,
+                isActive: false,
                 lastSignalAt: date
             )]
         )
         let session = ActiveSession(startedAt: date, automationMetadata: metadata)
+        let unrelatedMetadata = automationMetadata(tool: .codex, externalSessionID: "unrelated")
+        let unrelatedSession = ActiveSession(startedAt: date, automationMetadata: unrelatedMetadata)
         let unrelated = DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "unrelated")
         var state = AppState(
-            activeSessions: [session],
+            activeSessions: [session, unrelatedSession],
             developerToolIntegration: DeveloperToolIntegrationProcessingState(
                 reservedDeveloperToolThreads: [
                     DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "owner-a"),
@@ -397,8 +520,8 @@ final class ConcurrentSessionFoundationTests: XCTestCase {
             )
         )
 
-        _ = try state.removeActiveSession(id: session.id)
         XCTAssertNoThrow(try state.retireDeveloperToolOwnership(for: session, retiredAt: date))
+        _ = try state.removeActiveSession(id: session.id)
         XCTAssertEqual(state.reservedDeveloperToolOwnershipIdentities, Set([unrelated]))
         XCTAssertEqual(
             Set(state.developerToolIntegration?.retiredDeveloperToolThreads.map(\.identity) ?? []),
@@ -459,24 +582,42 @@ final class ConcurrentSessionFoundationTests: XCTestCase {
     }
 
     func testPortableBackupOmitsRetiredAndReservedProcessingMetadata() throws {
-        let state = AppState(developerToolIntegration: DeveloperToolIntegrationProcessingState(
-            retiredDeveloperToolThreads: [RetiredDeveloperToolThread(
-                tool: .codex,
-                externalSessionID: "portable-reset",
-                retiredAt: date,
-                lastAcceptedEventAt: date
-            )],
-            reservedDeveloperToolThreads: [DeveloperToolThreadIdentity(
-                tool: .opencode,
-                externalSessionID: "portable-reservation"
-            )]
-        ))
+        let reservedIdentity = DeveloperToolThreadIdentity(
+            tool: .opencode,
+            externalSessionID: "portable-reservation"
+        )
+        let active = ActiveSession(
+            startedAt: date,
+            automationMetadata: automationMetadata(
+                tool: reservedIdentity.tool,
+                externalSessionID: reservedIdentity.externalSessionID
+            )
+        )
+        let state = AppState(
+            activeSessions: [active],
+            developerToolIntegration: DeveloperToolIntegrationProcessingState(
+                retiredDeveloperToolThreads: [RetiredDeveloperToolThread(
+                    tool: .codex,
+                    externalSessionID: "portable-reset",
+                    retiredAt: date,
+                    lastAcceptedEventAt: date
+                )],
+                reservedDeveloperToolThreads: [reservedIdentity]
+            )
+        )
 
         let data = try CodePulseBackupCodec.encode(state: state, exportedAt: date)
+        let wire = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let wireState = try XCTUnwrap(wire["state"] as? [String: Any])
         let decoded = try CodePulseBackupCodec.decode(data)
-        XCTAssertNil(decoded.state.developerToolIntegration)
+        XCTAssertNil(wireState["developerToolIntegration"])
+        XCTAssertNil(wireState["retiredDeveloperToolThreads"])
+        XCTAssertNil(wireState["reservedDeveloperToolThreads"])
+        XCTAssertEqual(
+            decoded.state.developerToolIntegration?.reservedDeveloperToolThreads,
+            [reservedIdentity]
+        )
         XCTAssertFalse(String(data: data, encoding: .utf8)?.contains("portable-reset") == true)
-        XCTAssertFalse(String(data: data, encoding: .utf8)?.contains("portable-reservation") == true)
     }
 
     private func automationMetadata(tool: DeveloperTool, externalSessionID: String) -> SessionAutomationMetadata {

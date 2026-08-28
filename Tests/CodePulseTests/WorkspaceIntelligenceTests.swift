@@ -267,6 +267,75 @@ final class WorkspaceIntelligenceTests: XCTestCase {
         XCTAssertEqual(state.activeSession, active)
     }
 
+    func testAllActiveProjectsInWorkspaceAreExcludedButOtherWorkspaceRemainsIndependent() throws {
+        let workspaceA = workspace(90, name: "Target")
+        let workspaceB = workspace(91, name: "Other")
+        let activeA = project(90, workspaceID: workspaceA.id, name: "Active A")
+        let activeA2 = project(91, workspaceID: workspaceA.id, name: "Active A2")
+        let eligibleA = project(92, workspaceID: workspaceA.id, name: "Eligible A")
+        let activeB = project(93, workspaceID: workspaceB.id, name: "Active B")
+        let completedA = session(90, project: activeA, startedAt: now.addingTimeInterval(-400), duration: 60)
+        let completedA2 = session(91, project: activeA2, startedAt: now.addingTimeInterval(-300), duration: 60)
+        let completedEligibleA = session(92, project: eligibleA, startedAt: now.addingTimeInterval(-200), duration: 60)
+        let completedB = session(93, project: activeB, startedAt: now.addingTimeInterval(-100), duration: 60)
+        let state = AppState(
+            workspaces: [workspaceA, workspaceB],
+            projects: [activeA, activeA2, eligibleA, activeB],
+            completedSessions: [completedA, completedA2, completedEligibleA, completedB],
+            activeSessions: [
+                ActiveSession(id: uuid(190), projectID: activeA.id, projectName: activeA.name, startedAt: now.addingTimeInterval(-30)),
+                ActiveSession(id: uuid(191), projectID: activeA2.id, projectName: activeA2.name, startedAt: now.addingTimeInterval(-20)),
+                ActiveSession(id: uuid(192), projectID: activeB.id, projectName: activeB.name, startedAt: now.addingTimeInterval(-10))
+            ]
+        )
+
+        let target = try XCTUnwrap(WorkspaceIntelligenceCalculator.snapshot(
+            state: state,
+            calendar: calendar,
+            referenceDate: now,
+            workspaceID: workspaceA.id,
+            timeframe: .allTime
+        ))
+        XCTAssertFalse(target.resumeItems.contains { $0.projectID == activeA.id })
+        XCTAssertFalse(target.resumeItems.contains { $0.projectID == activeA2.id })
+        XCTAssertTrue(target.resumeItems.contains { $0.projectID == eligibleA.id })
+        XCTAssertFalse(target.continuationHints.contains { hint in
+            [activeA.id, activeA2.id].contains(hint.projectID)
+        })
+
+        // An active Session in another Workspace must not suppress the target
+        // Workspace's continuation guidance.
+        var onlyOtherWorkspaceActive = state
+        onlyOtherWorkspaceActive.activeSessions = [
+            ActiveSession(
+                id: uuid(193),
+                projectID: activeB.id,
+                projectName: activeB.name,
+                startedAt: now.addingTimeInterval(-10)
+            )
+        ]
+        let targetWithoutLocalActive = try XCTUnwrap(WorkspaceIntelligenceCalculator.snapshot(
+            state: onlyOtherWorkspaceActive,
+            calendar: calendar,
+            referenceDate: now,
+            workspaceID: workspaceA.id,
+            timeframe: .allTime
+        ))
+        XCTAssertTrue(targetWithoutLocalActive.resumeItems.contains { $0.projectID == eligibleA.id })
+        XCTAssertTrue(targetWithoutLocalActive.continuationHints.contains {
+            $0.kind == .resumeRecentProject && $0.projectID == eligibleA.id
+        })
+
+        let otherWorkspace = try XCTUnwrap(WorkspaceIntelligenceCalculator.snapshot(
+            state: state,
+            calendar: calendar,
+            referenceDate: now,
+            workspaceID: workspaceB.id,
+            timeframe: .allTime
+        ))
+        XCTAssertFalse(otherWorkspace.resumeItems.contains { $0.projectID == activeB.id })
+    }
+
     func testEmptyWorkspaceHasStableEmptyIntelligence() throws {
         let workspace = workspace(70, name: "Empty")
         let state = AppState(workspaces: [workspace])

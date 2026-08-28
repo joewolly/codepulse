@@ -39,7 +39,13 @@ enum CodePulseBackupValidator {
                  .invalidActiveSession,
                  .danglingActiveSessionProject,
                  .archivedActiveSessionProject,
-                 .invalidActiveSessionProjectWorkspace:
+                 .invalidActiveSessionProjectWorkspace,
+                 .duplicateDeveloperToolOwnership,
+                 .malformedDeveloperToolOwnership,
+                 .duplicateRetiredDeveloperToolThread,
+                 .duplicateReservedDeveloperToolThread,
+                 .missingDeveloperToolReservation,
+                 .orphanedDeveloperToolReservation:
                 throw CodePulseBackupError.invalidTimeline
             default:
                 throw CodePulseBackupError.invalidWorkspaceReference
@@ -158,6 +164,10 @@ enum BackupRestoreNormalizer {
         preservingLaunchAtLogin launchAtLogin: Bool
     ) throws -> AppState {
         var restored = state
+        // A portable backup intentionally omits machine-local reservations.
+        // Recreate them from the persisted active ownership metadata at this
+        // controlled restore boundary before validating the candidate.
+        restored.seedDeveloperToolReservationsFromActiveOwnership()
         AppStateIntegrityValidator.normalizeSelectedWorkspace(in: &restored)
         try CodePulseBackupValidator.validate(restored)
         restored.settings.launchAtLogin = launchAtLogin
@@ -174,13 +184,24 @@ enum BackupRestoreNormalizer {
             var activeSession = restored.activeSessions[index]
             guard var metadata = activeSession.automationMetadata else { continue }
             // The timeline and captured contexts are portable. Claims and
-            // pending lifecycle work belong to the machine that created them.
+            // pending lifecycle work belong to the machine that created them,
+            // but ownership-bearing claims remain as inactive metadata so a
+            // restored active Session cannot silently release a Thread.
             metadata.controlEnabled = false
             metadata.pendingAutomaticSave = false
-            metadata.claims = []
+            metadata.claims = metadata.claims.map { claim in
+                var claim = claim
+                claim.isActive = false
+                return claim
+            }
             activeSession.automationMetadata = metadata
             restored.activeSessions[index] = activeSession
         }
+
+        // Reset local ledgers, then immediately account for any ownership that
+        // remains on imported active Sessions. This keeps the candidate valid
+        // for the transactional replacement below.
+        restored.seedDeveloperToolReservationsFromActiveOwnership()
 
         restored.automationRules = restored.automationRules.map { rule in
             var normalized = rule.canonicalized()
@@ -198,18 +219,23 @@ enum BackupRestoreNormalizer {
 
         switch restored.settings.defaultProjectBehavior {
         case .specificProject:
-            guard let projectID = restored.settings.specificProjectID,
-                  let project = restored.projects.first(where: { $0.id == projectID }),
-                  project.isActive,
-                  !project.requiresRelink else {
+            let selectedProjectIsValid: Bool = {
+                guard let projectID = restored.settings.specificProjectID,
+                      let project = restored.projects.first(where: { $0.id == projectID }) else {
+                    return false
+                }
+                return project.isActive && !project.requiresRelink
+            }()
+            guard selectedProjectIsValid else {
                 restored.settings.defaultProjectBehavior = .lastUsed
                 restored.settings.specificProjectID = nil
-                return restored
+                break
             }
         case .lastUsed, .noProject:
             restored.settings.specificProjectID = nil
         }
 
+        try AppStateIntegrityValidator.validate(restored)
         return restored
     }
 }

@@ -113,21 +113,31 @@ extension ActiveSession {
         return identities
     }
 
-    /// The ownership keys currently active for admission-capacity purposes.
-    /// Historical/inactive claims remain associated with the Session for
-    /// retirement conversion, but do not create a second active reservation.
-    var activeDeveloperToolOwnershipIdentities: Set<DeveloperToolThreadIdentity> {
+    /// Developer-tool identities whose lifecycle claim is currently active.
+    /// This is a lifecycle-signal helper only. It is deliberately not the
+    /// ownership, uniqueness, capacity, or retirement set: an inactive claim
+    /// still belongs to this active Session until the Session retires.
+    var activeDeveloperToolClaimIdentities: Set<DeveloperToolThreadIdentity> {
         var identities = Set<DeveloperToolThreadIdentity>()
         guard let metadata = automationMetadata else { return identities }
-        if let identity = metadata.startedBySource.developerToolThreadIdentity,
-           identity.isValid {
-            identities.insert(identity)
-        }
         for claim in metadata.claims where claim.isActive {
             if let identity = claim.source.developerToolThreadIdentity,
                identity.isValid {
                 identities.insert(identity)
             }
+        }
+        return identities
+    }
+
+    /// Source-compatible lifecycle helper retained for older callers. The
+    /// original helper also includes the Session's starting Developer-Tool
+    /// source, so preserve that behavior while keeping it out of all
+    /// ownership/capacity decisions.
+    var activeDeveloperToolOwnershipIdentities: Set<DeveloperToolThreadIdentity> {
+        var identities = activeDeveloperToolClaimIdentities
+        if let identity = automationMetadata?.startedBySource.developerToolThreadIdentity,
+           identity.isValid {
+            identities.insert(identity)
         }
         return identities
     }
@@ -258,6 +268,26 @@ extension AppState {
         return removed
     }
 
+    /// The authoritative ownership set for all active Sessions. Inactive
+    /// claims remain owners until their Session is completed or discarded.
+    var developerToolOwnershipIdentities: Set<DeveloperToolThreadIdentity> {
+        activeSessions.reduce(into: Set<DeveloperToolThreadIdentity>()) { result, session in
+            result.formUnion(session.developerToolOwnershipIdentities)
+        }
+    }
+
+    /// Lifecycle-signal helper. This excludes inactive claims and is never
+    /// used for uniqueness, capacity, admission, or retirement accounting.
+    var activeDeveloperToolClaimIdentities: Set<DeveloperToolThreadIdentity> {
+        activeSessions.reduce(into: Set<DeveloperToolThreadIdentity>()) { result, session in
+            result.formUnion(session.activeDeveloperToolClaimIdentities)
+        }
+    }
+
+    /// Compatibility alias for older callers. It remains a lifecycle helper
+    /// (including each Session's starting source) and is never authoritative
+    /// for ownership, uniqueness, capacity, admission, or retirement.
+    @available(*, deprecated, message: "Use activeDeveloperToolClaimIdentities for lifecycle activity or developerToolOwnershipIdentities for ownership.")
     var activeDeveloperToolOwnershipIdentities: Set<DeveloperToolThreadIdentity> {
         activeSessions.reduce(into: Set<DeveloperToolThreadIdentity>()) { result, session in
             result.formUnion(session.activeDeveloperToolOwnershipIdentities)
@@ -269,9 +299,30 @@ extension AppState {
     }
 
     var activeDeveloperToolOwnedThreadCount: Int {
-        activeDeveloperToolOwnershipIdentities
-            .union(reservedDeveloperToolOwnershipIdentities)
-            .count
+        // This is intentionally the ownership count, not the lifecycle-claim
+        // count. A canonical state has one matching reservation per identity;
+        // the broader capacity helper below also includes a staged reservation
+        // during reserve-before-append admission.
+        developerToolOwnershipIdentities.count
+    }
+
+    /// Repairs the one migration-only gap between legacy active automation
+    /// metadata and schema-3 machine-local reservations. It never removes an
+    /// existing reservation, so an orphan remains visible to integrity
+    /// validation instead of being silently accepted or discarded.
+    mutating func seedDeveloperToolReservationsFromActiveOwnership(at date: Date = Date()) {
+        pruneExpiredRetiredDeveloperToolThreads(at: date)
+        let ownership = developerToolOwnershipIdentities
+        guard !ownership.isEmpty else { return }
+
+        var processing = developerToolIntegration ?? DeveloperToolIntegrationProcessingState()
+        let reserved = Set(processing.reservedDeveloperToolThreads)
+        let missing = ownership.subtracting(reserved).sorted {
+            if $0.tool != $1.tool { return $0.tool.rawValue < $1.tool.rawValue }
+            return $0.externalSessionID < $1.externalSessionID
+        }
+        processing.reservedDeveloperToolThreads.append(contentsOf: missing)
+        developerToolIntegration = processing
     }
 
     func protectedRetiredDeveloperToolThreadCount(at date: Date = Date()) -> Int {
@@ -282,7 +333,14 @@ extension AppState {
     }
 
     func developerToolThreadCapacityUsed(at date: Date = Date()) -> Int {
-        protectedRetiredDeveloperToolThreadCount(at: date) + activeDeveloperToolOwnedThreadCount
+        // Reservations are normally equal to active ownership. Including the
+        // union here keeps the admission transaction safe while a new owner is
+        // reserved immediately before its claim is appended. Canonical
+        // validation rejects any orphan that would make this differ from the
+        // active ownership count after publication.
+        let accountedActiveIDs = developerToolOwnershipIdentities
+            .union(reservedDeveloperToolOwnershipIdentities)
+        return protectedRetiredDeveloperToolThreadCount(at: date) + accountedActiveIDs.count
     }
 
     mutating func pruneExpiredRetiredDeveloperToolThreads(at date: Date) {
@@ -321,7 +379,7 @@ extension AppState {
         if developerToolIntegration?.retiredDeveloperToolThreads.contains(where: { $0.identity == identity }) == true {
             return false
         }
-        let existing = activeDeveloperToolOwnershipIdentities.union(reservedDeveloperToolOwnershipIdentities)
+        let existing = developerToolOwnershipIdentities.union(reservedDeveloperToolOwnershipIdentities)
         guard existing.contains(identity) else {
             return developerToolThreadCapacityUsed(at: date) + 1 <=
                 ConcurrentSessionLimits.maximumProtectedDeveloperToolThreads
@@ -344,7 +402,7 @@ extension AppState {
             throw DeveloperToolThreadAdmissionError.identityStillProtected
         }
 
-        let existing = activeDeveloperToolOwnershipIdentities.union(reservedDeveloperToolOwnershipIdentities)
+        let existing = developerToolOwnershipIdentities.union(reservedDeveloperToolOwnershipIdentities)
         if !existing.contains(identity) {
             guard developerToolThreadCapacityUsed(at: date) + 1 <=
                 ConcurrentSessionLimits.maximumProtectedDeveloperToolThreads else {
@@ -427,7 +485,7 @@ extension AppState {
             if $0.tool != $1.tool { return $0.tool.rawValue < $1.tool.rawValue }
             return $0.externalSessionID < $1.externalSessionID
         }
-        let activeOwnersBeingRetired = candidate.activeDeveloperToolOwnershipIdentities
+        let activeOwnersBeingRetired = candidate.developerToolOwnershipIdentities
             .intersection(identities)
         let capacityAfterOwnerRemoval = candidate.developerToolThreadCapacityUsed(at: retiredAt)
             - activeOwnersBeingRetired.count
