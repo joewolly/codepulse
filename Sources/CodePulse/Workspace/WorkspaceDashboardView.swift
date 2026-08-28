@@ -46,7 +46,7 @@ enum WorkspaceDashboardCalculator {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
             .prefix(5)
-        let activeSession: ActiveSession? = state.activeSession.flatMap { session in
+        let activeSession: ActiveSession? = state.soleActiveSession.flatMap { session in
             guard let projectID = session.projectID, projectIDs.contains(projectID) else { return nil }
             return session
         }

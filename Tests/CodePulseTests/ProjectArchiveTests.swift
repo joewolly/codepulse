@@ -125,6 +125,61 @@ final class ProjectArchiveTests: XCTestCase {
         }
     }
 
+    func testProjectGuardsInspectEveryActiveSessionAndLeaveUnrelatedProjectOperable() throws {
+        let firstWorkspace = WorkspaceRecord(name: "First", createdAt: start)
+        let secondWorkspace = WorkspaceRecord(name: "Second", createdAt: start)
+        let guarded = ProjectRecord(
+            workspaceID: firstWorkspace.id,
+            name: "Guarded",
+            createdAt: start
+        )
+        let secondGuarded = ProjectRecord(
+            workspaceID: firstWorkspace.id,
+            name: "Second Guarded",
+            createdAt: start
+        )
+        let unrelated = ProjectRecord(
+            workspaceID: firstWorkspace.id,
+            name: "Unrelated",
+            createdAt: start
+        )
+
+        for phase in [SessionPhase.running, .paused, .finishing] {
+            var firstSession = ActiveSession(
+                projectID: guarded.id,
+                projectName: guarded.name,
+                startedAt: start,
+                phase: phase
+            )
+            if phase == .paused {
+                firstSession.pauseIntervals = [PauseInterval(startedAt: start)]
+            } else if phase == .finishing {
+                firstSession.endedAt = start.addingTimeInterval(10)
+            }
+            let secondSession = ActiveSession(
+                projectID: secondGuarded.id,
+                projectName: secondGuarded.name,
+                startedAt: start.addingTimeInterval(1)
+            )
+            let persistence = ArchivePersistence(AppState(
+                workspaces: [firstWorkspace, secondWorkspace],
+                projects: [guarded, secondGuarded, unrelated],
+                activeSessions: [firstSession, secondSession]
+            ))
+            let store = makeStore(persistence: persistence)
+
+            XCTAssertThrowsError(try store.archiveProject(id: guarded.id, at: start.addingTimeInterval(20))) { error in
+                XCTAssertEqual(error as? ProjectArchiveError, .activeSession)
+            }
+            XCTAssertFalse(store.moveProject(id: guarded.id, to: secondWorkspace.id))
+            store.deleteProject(id: guarded.id)
+            XCTAssertTrue(store.state.projects.contains(where: { $0.id == guarded.id }))
+
+            _ = try store.archiveProject(id: unrelated.id, at: start.addingTimeInterval(20))
+            XCTAssertTrue(store.state.projects.first(where: { $0.id == unrelated.id })?.isArchived == true)
+        }
+    }
+
     func testArchivingDefaultProjectNormalizesSpecificAndLastUsedResolution() throws {
         let first = ProjectRecord(
             name: "First",

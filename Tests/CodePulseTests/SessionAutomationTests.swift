@@ -48,9 +48,11 @@ final class SessionAutomationTests: XCTestCase {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded(state)) as? [String: Any])
         object["sessionPresets"] = [["id": "not-a-uuid"]]
         object["automationRules"] = [["id": "not-a-uuid"]]
-        var activeObject = try XCTUnwrap(object["activeSession"] as? [String: Any])
+        var activeSessions = try XCTUnwrap(object["activeSessions"] as? [[String: Any]])
+        var activeObject = try XCTUnwrap(activeSessions.first)
         activeObject["automationMetadata"] = ["controlEnabled": true]
-        object["activeSession"] = activeObject
+        activeSessions[0] = activeObject
+        object["activeSessions"] = activeSessions
 
         let decoded = try JSONDecoder.iso8601.decode(
             AppState.self,

@@ -156,8 +156,10 @@ final class SessionStore: ObservableObject {
             self?.handleFrontmostApplication(application)
         }
 
-        if !isInRecoveryMode, state.activeSession?.phase == .idle {
-            state.activeSession = nil
+        if !isInRecoveryMode,
+           state.activeSessions.count == 1,
+           state.activeSessions[0].phase == .idle {
+            state.activeSessions.removeAll()
         }
 
         if !isInRecoveryMode {
@@ -202,10 +204,16 @@ final class SessionStore: ObservableObject {
         )
     }
 
-    var activeSession: ActiveSession? { state.activeSession }
+    var activeSession: ActiveSession? { state.soleActiveSession }
+
+    private func replaceActiveSession(_ session: ActiveSession, in state: inout AppState) -> Bool {
+        guard let index = state.activeSessionIndex(id: session.id) else { return false }
+        state.activeSessions[index] = session
+        return true
+    }
 
     var phase: SessionPhase {
-        state.activeSession?.phase ?? .idle
+        state.soleActiveSession?.phase ?? .idle
     }
 
     var shouldPresentOnboarding: Bool {
@@ -213,7 +221,7 @@ final class SessionStore: ObservableObject {
     }
 
     var activeAutomationStatusLabel: String? {
-        guard let metadata = state.activeSession?.automationMetadata,
+        guard let metadata = state.soleActiveSession?.automationMetadata,
               metadata.controlEnabled else {
             return nil
         }
@@ -271,7 +279,7 @@ final class SessionStore: ObservableObject {
     }
 
     var elapsedDuration: TimeInterval {
-        guard let session = state.activeSession else { return 0 }
+        guard let session = state.soleActiveSession else { return 0 }
         return session.activeDuration(at: now)
     }
 
@@ -368,7 +376,7 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func selectWorkspace(id: UUID) -> Bool {
         guard !isInRecoveryMode,
-              phase == .idle,
+              state.activeSessions.isEmpty,
               state.workspaces.contains(where: { $0.id == id }) else {
             return false
         }
@@ -684,7 +692,7 @@ final class SessionStore: ObservableObject {
         guard rule.isEnabled,
               rule.isValid,
               case .developerTool = source,
-              state.activeSession == nil,
+              state.activeSessions.isEmpty,
               let project = state.projects.first(where: { $0.id == resolvedProjectID }),
               project.isActive,
               DeveloperToolProjectResolver.isUsableFolder(for: project),
@@ -739,7 +747,7 @@ final class SessionStore: ObservableObject {
               rule.isValid,
               case .application(let bundleIdentifier) = source else { return false }
 
-        guard state.activeSession == nil,
+        guard state.activeSessions.isEmpty,
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
               isPresetUsableForAutomation(preset),
@@ -807,7 +815,7 @@ final class SessionStore: ObservableObject {
         at startDate: Date,
         automationMetadata: SessionAutomationMetadata?
     ) -> (state: AppState, session: ActiveSession, folderURL: URL?)? {
-        guard state.activeSession == nil else { return nil }
+        guard state.activeSessions.isEmpty else { return nil }
 
         guard projectID == nil || state.projects.contains(where: { $0.id == projectID && $0.isActive }) else {
             return nil
@@ -825,7 +833,19 @@ final class SessionStore: ObservableObject {
         )
 
         var nextState = state
-        nextState.activeSession = session
+        if let automationMetadata,
+           let identity = automationMetadata.startedBySource.developerToolThreadIdentity {
+            do {
+                try nextState.admitDeveloperToolOwner(
+                    tool: identity.tool,
+                    externalSessionID: identity.externalSessionID,
+                    at: startDate
+                )
+            } catch {
+                return nil
+            }
+        }
+        nextState.activeSessions.append(session)
         if let projectID,
            let index = nextState.projects.firstIndex(where: { $0.id == projectID }) {
             nextState.projects[index].lastUsedAt = startDate
@@ -873,35 +893,35 @@ final class SessionStore: ObservableObject {
     }
 
     private func preparedManualPauseState(at date: Date) -> (state: AppState, session: ActiveSession)? {
-        guard var session = state.activeSession,
+        guard var session = state.soleActiveSession,
               session.pause(at: date) else {
             return nil
         }
         relinquishManualAutomationControl(in: &session)
         var nextState = state
-        nextState.activeSession = session
+        guard replaceActiveSession(session, in: &nextState) else { return nil }
         return (nextState, session)
     }
 
     private func preparedManualResumeState(at date: Date) -> (state: AppState, session: ActiveSession)? {
-        guard var session = state.activeSession,
+        guard var session = state.soleActiveSession,
               session.resume(at: date) else {
             return nil
         }
         relinquishManualAutomationControl(in: &session)
         var nextState = state
-        nextState.activeSession = session
+        guard replaceActiveSession(session, in: &nextState) else { return nil }
         return (nextState, session)
     }
 
     private func preparedManualFinishState(at date: Date) -> (state: AppState, session: ActiveSession)? {
-        guard var session = state.activeSession,
+        guard var session = state.soleActiveSession,
               session.finish(at: date) else {
             return nil
         }
         relinquishManualAutomationControl(in: &session)
         var nextState = state
-        nextState.activeSession = session
+        guard replaceActiveSession(session, in: &nextState) else { return nil }
         return (nextState, session)
     }
 
@@ -916,12 +936,13 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func updateFinishingOutcome(_ outcome: String?) -> Bool {
         guard !isInRecoveryMode,
-              state.activeSession?.phase == .finishing else {
+              state.soleActiveSession?.phase == .finishing else {
             return false
         }
 
         var nextState = state
-        nextState.activeSession?.outcome = ActiveSession.cleanOptionalText(outcome)
+        guard let index = nextState.activeSessionIndex(id: state.soleActiveSession!.id) else { return false }
+        nextState.activeSessions[index].outcome = ActiveSession.cleanOptionalText(outcome)
         guard nextState != state else { return true }
         return commit(nextState, critical: true)
     }
@@ -929,13 +950,18 @@ final class SessionStore: ObservableObject {
     @discardableResult
     func discardSession() -> Bool {
         guard !isInRecoveryMode,
-              state.activeSession?.phase == .finishing else { return false }
+              state.soleActiveSession?.phase == .finishing else { return false }
         var nextState = state
-        if var session = nextState.activeSession {
+        if var session = nextState.soleActiveSession {
             relinquishManualAutomationControl(in: &session)
-            nextState.activeSession = session
+            guard replaceActiveSession(session, in: &nextState) else { return false }
+            do {
+                try nextState.retireDeveloperToolOwnership(for: session, retiredAt: clock.now)
+                _ = try nextState.removeActiveSession(id: session.id)
+            } catch {
+                return false
+            }
         }
-        nextState.activeSession = nil
         guard commit(nextState, critical: true) else { return false }
         gitCaptureSessionID = nil
         gitCaptureInProgress = false
@@ -1045,7 +1071,7 @@ final class SessionStore: ObservableObject {
             )
 
         case .startManual(let projectName, let sessionType, let goal):
-            guard state.activeSession == nil else {
+            guard state.activeSessions.isEmpty else {
                 return recordControlFailure(
                     commandID: command.id,
                     result: .invalidStateTransition,
@@ -1198,7 +1224,7 @@ final class SessionStore: ObservableObject {
         preset resolution: PresetResolution,
         date: Date
     ) -> CodePulseControlResponse {
-        guard state.activeSession == nil else {
+        guard state.activeSessions.isEmpty else {
             return recordControlFailure(
                 commandID: commandID,
                 result: .invalidStateTransition,
@@ -1379,7 +1405,7 @@ final class SessionStore: ObservableObject {
         for state: AppState,
         at date: Date
     ) -> CodePulseControlStatus {
-        guard let session = state.activeSession else {
+        guard let session = state.soleActiveSession else {
             return CodePulseControlStatus(
                 phase: SessionPhase.idle.rawValue,
                 elapsedSeconds: 0,
@@ -1427,7 +1453,9 @@ final class SessionStore: ObservableObject {
         let completedTotal = state.completedSessions.reduce(into: 0) { total, session in
             total += session.activeDuration(in: day)
         }
-        let activeTotal = state.activeSession?.activeDuration(in: day, referenceDate: referenceDate) ?? 0
+        let activeTotal = state.activeSessions.reduce(into: 0) { total, session in
+            total += session.activeDuration(in: day, referenceDate: referenceDate)
+        }
         return max(0, completedTotal + activeTotal)
     }
 
@@ -1555,7 +1583,7 @@ final class SessionStore: ObservableObject {
                 startedAt: session.startedAt
             )
         }
-        if let activeSession = state.activeSession {
+        for activeSession in state.activeSessions {
             collect(
                 projectID: activeSession.projectID,
                 projectName: activeSession.projectName,
@@ -1635,7 +1663,7 @@ final class SessionStore: ObservableObject {
         )
         var nextState = state
         nextState.workspaces.append(workspace)
-        if phase == .idle {
+        if state.activeSessions.isEmpty {
             nextState.settings.selectedWorkspaceID = workspace.id
         }
         guard commit(nextState) else { return nil }
@@ -1665,7 +1693,7 @@ final class SessionStore: ObservableObject {
         guard !isInRecoveryMode,
               state.workspaces.contains(where: { $0.id == workspaceID }),
               let index = state.projects.firstIndex(where: { $0.id == id }),
-              state.activeSession?.projectID != id else {
+              !state.activeSessions.contains(where: { $0.projectID == id }) else {
             return false
         }
         guard state.projects[index].workspaceID != workspaceID else { return true }
@@ -1705,7 +1733,7 @@ final class SessionStore: ObservableObject {
         guard !state.projects[index].isArchived else {
             throw ProjectArchiveError.alreadyArchived
         }
-        guard state.activeSession?.projectID != id else {
+        guard !state.activeSessions.contains(where: { $0.projectID == id }) else {
             throw ProjectArchiveError.activeSession
         }
 
@@ -1766,7 +1794,8 @@ final class SessionStore: ObservableObject {
     }
 
     func deleteProject(id: UUID) {
-        guard !isInRecoveryMode else { return }
+        guard !isInRecoveryMode,
+              !state.activeSessions.contains(where: { $0.projectID == id }) else { return }
         var nextState = state
         nextState.projects.removeAll { $0.id == id }
         if nextState.settings.specificProjectID == id {
@@ -2073,7 +2102,7 @@ final class SessionStore: ObservableObject {
     }
 
     func restoreBackup(_ candidate: BackupRestoreCandidate) throws -> BackupRestoreResult {
-        guard state.activeSession == nil, !gitCaptureInProgress else {
+        guard state.activeSessions.isEmpty, !gitCaptureInProgress else {
             throw BackupRestoreError.activeSession
         }
         guard let restoringPersistence = persistence as? StateRestoring else {
@@ -2335,7 +2364,7 @@ final class SessionStore: ObservableObject {
                       for: event.workingDirectory,
                       in: state.projects
                   ),
-                  state.activeSession?.projectID == resolvedProjectID,
+                  state.soleActiveSession?.projectID == resolvedProjectID,
                   sessionAutomationCoordinator.hasSupportingRule(
                       for: .developerTool(tool: tool, externalSessionID: externalSessionID),
                       projectID: resolvedProjectID,
@@ -2358,7 +2387,7 @@ final class SessionStore: ObservableObject {
                       for: event.workingDirectory,
                       in: state.projects
                   ) == projectID,
-                  state.activeSession?.projectID == projectID,
+                  state.soleActiveSession?.projectID == projectID,
                   sessionAutomationCoordinator.hasSupportingRule(
                       for: .developerTool(tool: tool, externalSessionID: externalSessionID),
                       projectID: projectID,
@@ -2383,7 +2412,7 @@ final class SessionStore: ObservableObject {
                           for: event.workingDirectory,
                           in: state.projects
                       ),
-                      state.activeSession?.projectID == resolvedProjectID,
+                      state.soleActiveSession?.projectID == resolvedProjectID,
                       sessionAutomationCoordinator.hasSupportingRule(
                           for: .developerTool(tool: tool, externalSessionID: externalSessionID),
                           projectID: resolvedProjectID,
@@ -2416,7 +2445,7 @@ final class SessionStore: ObservableObject {
         signalAt eventDate: Date,
         transitionAt date: Date
     ) -> Bool {
-        guard var session = state.activeSession,
+        guard var session = state.soleActiveSession,
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
               session.phase == .running || session.phase == .paused else {
@@ -2454,13 +2483,13 @@ final class SessionStore: ObservableObject {
         session.automationMetadata = metadata
 
         var nextState = state
-        nextState.activeSession = session
+        guard replaceActiveSession(session, in: &nextState) else { return false }
         return commit(nextState, critical: true)
     }
 
     private func evaluateAutomaticLifecycle(at date: Date) {
         guard state.settings.automationEnabled,
-              var session = state.activeSession,
+              var session = state.soleActiveSession,
               (session.phase == .running || session.phase == .paused),
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
@@ -2503,12 +2532,12 @@ final class SessionStore: ObservableObject {
             if session.pause(at: pauseEligibleAt) {
                 session.automationMetadata = metadata
                 var nextState = state
-                nextState.activeSession = session
+                guard replaceActiveSession(session, in: &nextState) else { return }
                 guard commit(nextState, critical: true) else { return }
             }
         }
 
-        guard let refreshedSession = state.activeSession,
+        guard let refreshedSession = state.soleActiveSession,
               refreshedSession.phase == .paused,
               refreshedSession.automationMetadata?.controlEnabled == true,
               date >= finishEligibleAt else {
@@ -2555,7 +2584,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func finishAutomatically(at date: Date) {
-        guard var session = state.activeSession,
+        guard var session = state.soleActiveSession,
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
               !metadata.pendingAutomaticSave,
@@ -2567,7 +2596,7 @@ final class SessionStore: ObservableObject {
         metadata.pendingAutomaticSave = true
         session.automationMetadata = metadata
         var nextState = state
-        nextState.activeSession = session
+        guard replaceActiveSession(session, in: &nextState) else { return }
         guard commit(nextState, critical: true) else { return }
         now = clock.now
 
@@ -2579,7 +2608,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func restoreAutomaticFinishingState() {
-        guard let session = state.activeSession, session.phase == .finishing else { return }
+        guard let session = state.soleActiveSession, session.phase == .finishing else { return }
 
         if session.automationMetadata?.pendingAutomaticSave == true {
             if session.gitContext != nil {
@@ -2602,7 +2631,7 @@ final class SessionStore: ObservableObject {
 
     private func attemptAutomaticSaveIfReady(for sessionID: UUID) {
         guard !gitCaptureInProgress,
-              let session = state.activeSession,
+              let session = state.soleActiveSession,
               session.id == sessionID,
               session.phase == .finishing,
               let metadata = session.automationMetadata,
@@ -2613,7 +2642,12 @@ final class SessionStore: ObservableObject {
         let endedAt = session.endedAt ?? clock.now
         if session.activeDuration(at: endedAt) < metadata.minimumSavedDuration {
             var nextState = state
-            nextState.activeSession = nil
+            do {
+                try nextState.retireDeveloperToolOwnership(for: session, retiredAt: clock.now)
+                _ = try nextState.removeActiveSession(id: sessionID)
+            } catch {
+                return
+            }
             guard commit(nextState, critical: true) else { return }
             gitCaptureSessionID = nil
             gitCaptureInProgress = false
@@ -2626,7 +2660,7 @@ final class SessionStore: ObservableObject {
 
     private func completeFinishedSession(outcome: String?, refreshAfter: Bool = true) -> Bool {
         guard !gitCaptureInProgress,
-              var session = state.activeSession,
+              var session = state.soleActiveSession,
               session.phase == .finishing else {
             return false
         }
@@ -2641,7 +2675,12 @@ final class SessionStore: ObservableObject {
             nextState.completedSessions.append(completed)
         }
         nextState.completedSessions.sort { $0.startedAt > $1.startedAt }
-        nextState.activeSession = nil
+        do {
+            try nextState.retireDeveloperToolOwnership(for: session, retiredAt: clock.now)
+            _ = try nextState.removeActiveSession(id: session.id)
+        } catch {
+            return false
+        }
         guard commit(nextState, critical: true) else { return false }
         gitCaptureSessionID = nil
         gitCaptureInProgress = false
@@ -2658,41 +2697,41 @@ final class SessionStore: ObservableObject {
     }
 
     private func relinquishInvalidAutomation(in state: inout AppState) {
-        guard var session = state.activeSession,
-              var metadata = session.automationMetadata else {
-            return
-        }
+        for index in state.activeSessions.indices {
+            var session = state.activeSessions[index]
+            guard var metadata = session.automationMetadata else { continue }
 
-        guard state.settings.automationEnabled else {
-            metadata.controlEnabled = false
-            metadata.pendingAutomaticSave = false
-            metadata.claims = metadata.claims.map { claim in
-                var claim = claim
-                claim.isActive = false
-                return claim
+            guard state.settings.automationEnabled else {
+                metadata.controlEnabled = false
+                metadata.pendingAutomaticSave = false
+                metadata.claims = metadata.claims.map { claim in
+                    var claim = claim
+                    claim.isActive = false
+                    return claim
+                }
+                session.automationMetadata = metadata
+                state.activeSessions[index] = session
+                continue
+            }
+
+            let sources = Set(metadata.claims.map(\.source) + [metadata.startedBySource])
+            let supportedSources = sources.filter { source in
+                sessionAutomationCoordinator.hasSupportingRule(
+                    for: source,
+                    projectID: session.projectID,
+                    in: state
+                )
+            }
+
+            metadata.claims = metadata.claims.filter { supportedSources.contains($0.source) }
+            if supportedSources.isEmpty {
+                metadata.controlEnabled = false
+                metadata.pendingAutomaticSave = false
+                metadata.claims = []
             }
             session.automationMetadata = metadata
-            state.activeSession = session
-            return
+            state.activeSessions[index] = session
         }
-
-        let sources = Set(metadata.claims.map(\.source) + [metadata.startedBySource])
-        let supportedSources = sources.filter { source in
-            sessionAutomationCoordinator.hasSupportingRule(
-                for: source,
-                projectID: session.projectID,
-                in: state
-            )
-        }
-
-        metadata.claims = metadata.claims.filter { supportedSources.contains($0.source) }
-        if supportedSources.isEmpty {
-            metadata.controlEnabled = false
-            metadata.pendingAutomaticSave = false
-            metadata.claims = []
-        }
-        session.automationMetadata = metadata
-        state.activeSession = session
     }
 
     private func hasSupportingAutomationRule(
@@ -2723,7 +2762,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func applyStartGitSnapshot(_ snapshot: GitStartSnapshot?, to sessionID: UUID) {
-        guard var session = state.activeSession, session.id == sessionID else {
+        guard var session = state.soleActiveSession, session.id == sessionID else {
             clearGitCapture(for: sessionID)
             return
         }
@@ -2742,7 +2781,7 @@ final class SessionStore: ObservableObject {
             preExistingWorkingTreePaths: snapshot.preExistingWorkingTreePaths.map { $0.sorted() }
         )
         var nextState = state
-        nextState.activeSession = session
+        guard replaceActiveSession(session, in: &nextState) else { return }
         commit(nextState)
 
         if session.phase == .finishing {
@@ -2786,11 +2825,11 @@ final class SessionStore: ObservableObject {
     private func applyGitHubContext(_ context: GitHubSessionContext?, to sessionID: UUID) {
         guard let context else { return }
 
-        if var session = state.activeSession, session.id == sessionID {
+        if var session = state.soleActiveSession, session.id == sessionID {
             guard session.githubContext != context else { return }
             session.githubContext = context
             var nextState = state
-            nextState.activeSession = session
+            guard replaceActiveSession(session, in: &nextState) else { return }
             commit(nextState)
             return
         }
@@ -2822,7 +2861,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func scheduleFinalGitCapture(for sessionID: UUID) {
-        guard let session = state.activeSession,
+        guard let session = state.soleActiveSession,
               session.id == sessionID,
               let gitContext = session.gitContext,
               let startSnapshot = gitStartSnapshot(from: gitContext) else {
@@ -2843,7 +2882,7 @@ final class SessionStore: ObservableObject {
     }
 
     private func applyFinishGitSnapshot(_ snapshot: GitFinishSnapshot?, to sessionID: UUID) {
-        guard var session = state.activeSession, session.id == sessionID else {
+        guard var session = state.soleActiveSession, session.id == sessionID else {
             clearGitCapture(for: sessionID)
             return
         }
@@ -2861,7 +2900,7 @@ final class SessionStore: ObservableObject {
             session.gitContext = gitContext
 
             var nextState = state
-            nextState.activeSession = session
+            guard replaceActiveSession(session, in: &nextState) else { return }
             commit(nextState)
         }
         clearGitCapture(for: sessionID)

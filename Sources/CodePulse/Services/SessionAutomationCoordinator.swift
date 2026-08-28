@@ -80,7 +80,7 @@ struct SessionAutomationCoordinator {
         now: Date
     ) -> [SessionAutomationAction] {
         guard state.settings.automationEnabled else {
-            guard state.activeSession?.automationMetadata?.controlEnabled == true else { return [] }
+            guard state.soleActiveSession?.automationMetadata?.controlEnabled == true else { return [] }
             return [.relinquish]
         }
 
@@ -90,7 +90,8 @@ struct SessionAutomationCoordinator {
             in: state.projects
         )
 
-        if let activeSession = state.activeSession {
+        if !state.activeSessions.isEmpty {
+            guard let activeSession = state.soleActiveSession else { return [] }
             guard activeSession.phase == .running || activeSession.phase == .paused,
                   let metadata = activeSession.automationMetadata,
                   metadata.controlEnabled else {
@@ -151,7 +152,7 @@ struct SessionAutomationCoordinator {
         now: Date
     ) -> [SessionAutomationAction] {
         guard state.settings.automationEnabled else {
-            guard state.activeSession?.automationMetadata?.controlEnabled == true else { return [] }
+            guard state.soleActiveSession?.automationMetadata?.controlEnabled == true else { return [] }
             return [.relinquish]
         }
 
@@ -161,7 +162,8 @@ struct SessionAutomationCoordinator {
         }
         let isDeveloperToolApplication = application.map(Self.isDeveloperToolApplication) == true
 
-        if let activeSession = state.activeSession {
+        if !state.activeSessions.isEmpty {
+            guard let activeSession = state.soleActiveSession else { return [] }
             guard activeSession.phase == .running || activeSession.phase == .paused,
                   let metadata = activeSession.automationMetadata,
                   metadata.controlEnabled else {

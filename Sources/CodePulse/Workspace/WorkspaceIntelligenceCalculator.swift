@@ -140,7 +140,7 @@ enum WorkspaceIntelligenceCalculator {
             sustainedFocusShare: summary.focusInsights.sustainedFocusShare
         )
 
-        let activeProjectID: UUID? = state.activeSession.flatMap { active in
+        let activeProjectID: UUID? = state.soleActiveSession.flatMap { active in
             guard let projectID = active.projectID, projectIDs.contains(projectID) else {
                 return nil
             }
