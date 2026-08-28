@@ -95,8 +95,8 @@ additional integrity boundaries:
   state protections.
 - Git capture is isolated per Session UUID. Concurrent captures cannot block or
   mutate another Session, and same-repository mutation statistics are
-  suppressed or explicitly marked ambiguous rather than silently attributed to
-  multiple Threads.
+  suppressed for affected Sessions (an explicit ambiguity marker may be shown)
+  rather than silently attributed to multiple Threads.
 - Existing symlink/path validation, inbox bounds, permissions, event-size and
   timestamp checks, and transactional persistence guarantees remain mandatory;
   concurrency is not a reason to weaken any of them.
