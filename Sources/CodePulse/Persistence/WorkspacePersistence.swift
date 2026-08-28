@@ -1,13 +1,15 @@
+import CodePulseIntegration
 import Foundation
 
 /// Version boundaries for the on-disk AppState document.
 ///
 /// The pre-workspace document was effectively schema 1, although it did not
 /// persist an explicit version marker. Schema 2 is the first canonical
-/// workspace-aware representation.
+/// workspace-aware representation. Schema 3 is the canonical concurrent
+/// active-session collection representation.
 enum CodePulseStateSchema {
     static let legacyVersion = 1
-    static let currentVersion = 2
+    static let currentVersion = 3
 }
 
 struct WorkspaceRecord: Codable, Equatable, Identifiable, Sendable {
@@ -79,6 +81,18 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
     case duplicateWorkspaceID
     case duplicateProjectID
     case danglingProjectWorkspace(UUID)
+    case activeSessionLimitExceeded(Int)
+    case duplicateActiveSessionID(UUID)
+    case activeSessionHistoryCollision(UUID)
+    case invalidActiveSession(UUID)
+    case danglingActiveSessionProject(UUID)
+    case archivedActiveSessionProject(UUID)
+    case invalidActiveSessionProjectWorkspace(UUID)
+    case duplicateDeveloperToolOwnership(DeveloperTool, String)
+    case malformedDeveloperToolOwnership
+    case duplicateRetiredDeveloperToolThread(DeveloperTool, String)
+    case duplicateReservedDeveloperToolThread(DeveloperTool, String)
+    case retiredDeveloperToolCapacityExceeded
 
     var errorDescription: String? {
         switch self {
@@ -92,12 +106,36 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
             return "CodePulse state contains duplicate project identifiers."
         case .danglingProjectWorkspace(let id):
             return "Project \(id.uuidString) references a missing workspace."
+        case .activeSessionLimitExceeded(let count):
+            return "CodePulse state contains \(count) active sessions; the maximum is 16."
+        case .duplicateActiveSessionID(let id):
+            return "CodePulse state contains duplicate active session identifier \(id.uuidString)."
+        case .activeSessionHistoryCollision(let id):
+            return "Active session \(id.uuidString) is also present in completed history."
+        case .invalidActiveSession(let id):
+            return "Active session \(id.uuidString) has an invalid timeline or pause structure."
+        case .danglingActiveSessionProject(let id):
+            return "Active session \(id.uuidString) references a missing project."
+        case .archivedActiveSessionProject(let id):
+            return "Active session \(id.uuidString) references an archived project."
+        case .invalidActiveSessionProjectWorkspace(let id):
+            return "Active session \(id.uuidString) references an invalid project/workspace relationship."
+        case .duplicateDeveloperToolOwnership(let tool, let externalSessionID):
+            return "Developer-tool ownership \(tool.rawValue):\(externalSessionID) is claimed more than once."
+        case .malformedDeveloperToolOwnership:
+            return "CodePulse state contains malformed developer-tool ownership metadata."
+        case .duplicateRetiredDeveloperToolThread(let tool, let externalSessionID):
+            return "Retired developer-tool identity \(tool.rawValue):\(externalSessionID) is duplicated."
+        case .duplicateReservedDeveloperToolThread(let tool, let externalSessionID):
+            return "Reserved developer-tool identity \(tool.rawValue):\(externalSessionID) is duplicated."
+        case .retiredDeveloperToolCapacityExceeded:
+            return "CodePulse state exceeds the retired/reserved developer-tool capacity."
         }
     }
 }
 
 enum AppStateIntegrityValidator {
-    static func validate(_ state: AppState) throws {
+    static func validate(_ state: AppState, at date: Date = Date()) throws {
         guard state.schemaVersion == CodePulseStateSchema.currentVersion else {
             throw AppStateIntegrityError.unsupportedSchemaVersion(state.schemaVersion)
         }
@@ -120,6 +158,111 @@ enum AppStateIntegrityValidator {
             guard workspaceIDSet.contains(project.workspaceID) else {
                 throw AppStateIntegrityError.danglingProjectWorkspace(project.workspaceID)
             }
+        }
+
+        guard state.activeSessions.count <= ConcurrentSessionLimits.maximumActiveSessions else {
+            throw AppStateIntegrityError.activeSessionLimitExceeded(state.activeSessions.count)
+        }
+
+        let activeIDs = state.activeSessions.map(\.id)
+        var activeIDSet = Set<UUID>()
+        for id in activeIDs {
+            guard activeIDSet.insert(id).inserted else {
+                throw AppStateIntegrityError.duplicateActiveSessionID(id)
+            }
+            guard !state.completedSessions.contains(where: { $0.id == id }) else {
+                throw AppStateIntegrityError.activeSessionHistoryCollision(id)
+            }
+        }
+
+        let projectsByID = Dictionary(uniqueKeysWithValues: state.projects.map { ($0.id, $0) })
+        let workspaceIDsByProjectID = Dictionary(uniqueKeysWithValues: state.projects.map { ($0.id, $0.workspaceID) })
+        for session in state.activeSessions {
+            guard session.isValidConcurrentTimeline else {
+                throw AppStateIntegrityError.invalidActiveSession(session.id)
+            }
+            if let projectID = session.projectID {
+                guard let project = projectsByID[projectID] else {
+                    throw AppStateIntegrityError.danglingActiveSessionProject(session.id)
+                }
+                guard !project.isArchived else {
+                    throw AppStateIntegrityError.archivedActiveSessionProject(session.id)
+                }
+                guard workspaceIDSet.contains(project.workspaceID),
+                      workspaceIDsByProjectID[projectID] == project.workspaceID else {
+                    throw AppStateIntegrityError.invalidActiveSessionProjectWorkspace(session.id)
+                }
+            }
+        }
+
+        var ownershipIDs = Set<DeveloperToolThreadIdentity>()
+        for session in state.activeSessions {
+            if let metadata = session.automationMetadata {
+                if let startedIdentity = metadata.startedBySource.developerToolThreadIdentity,
+                   !startedIdentity.isValid,
+                   !(startedIdentity.externalSessionID.isEmpty && metadata.claims.isEmpty) {
+                    throw AppStateIntegrityError.malformedDeveloperToolOwnership
+                }
+                for claim in metadata.claims {
+                    if let identity = claim.source.developerToolThreadIdentity,
+                       !identity.isValid {
+                        throw AppStateIntegrityError.malformedDeveloperToolOwnership
+                    }
+                }
+            }
+            for identity in session.activeDeveloperToolOwnershipIdentities {
+                guard identity.isValid else {
+                    throw AppStateIntegrityError.malformedDeveloperToolOwnership
+                }
+                guard ownershipIDs.insert(identity).inserted else {
+                    throw AppStateIntegrityError.duplicateDeveloperToolOwnership(
+                        identity.tool,
+                        identity.externalSessionID
+                    )
+                }
+            }
+        }
+
+        if let processing = state.developerToolIntegration {
+            var retiredIDs = Set<DeveloperToolThreadIdentity>()
+            for retired in processing.retiredDeveloperToolThreads {
+                guard retired.isValid else {
+                    throw AppStateIntegrityError.malformedDeveloperToolOwnership
+                }
+                guard retiredIDs.insert(retired.identity).inserted else {
+                    throw AppStateIntegrityError.duplicateRetiredDeveloperToolThread(
+                        retired.tool,
+                        retired.externalSessionID
+                    )
+                }
+            }
+
+            var reservedIDs = Set<DeveloperToolThreadIdentity>()
+            for reserved in processing.reservedDeveloperToolThreads {
+                guard reserved.isValid else {
+                    throw AppStateIntegrityError.malformedDeveloperToolOwnership
+                }
+                guard reservedIDs.insert(reserved).inserted else {
+                    throw AppStateIntegrityError.duplicateReservedDeveloperToolThread(
+                        reserved.tool,
+                        reserved.externalSessionID
+                    )
+                }
+            }
+
+            let protectedRetiredIDs = Set(
+                processing.retiredDeveloperToolThreads
+                    .filter { $0.isProtected(at: date) }
+                    .map(\.identity)
+            )
+            guard protectedRetiredIDs.isDisjoint(with: ownershipIDs),
+                  protectedRetiredIDs.isDisjoint(with: reservedIDs) else {
+                throw AppStateIntegrityError.malformedDeveloperToolOwnership
+            }
+        }
+
+        guard state.developerToolThreadCapacityUsed(at: date) <= ConcurrentSessionLimits.maximumProtectedDeveloperToolThreads else {
+            throw AppStateIntegrityError.retiredDeveloperToolCapacityExceeded
         }
     }
 
@@ -166,7 +309,7 @@ enum AppStateLegacyMigration {
             workspaces: [workspace],
             projects: projects.map { $0.migrated(to: workspace.id) },
             completedSessions: completedSessions,
-            activeSession: activeSession,
+            activeSessions: activeSession.map { [$0] } ?? [],
             settings: migratedSettings,
             sessionPresets: sessionPresets,
             developerToolIntegration: developerToolIntegration,

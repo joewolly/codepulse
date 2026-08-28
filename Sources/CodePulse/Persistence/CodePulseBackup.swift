@@ -69,6 +69,7 @@ struct CodePulseBackupPreview: Equatable {
     let workspaceCount: Int
     let presetCount: Int
     let automationRuleCount: Int
+    let activeSessionCount: Int
     let includesActiveSession: Bool
     let earliestSavedSessionAt: Date?
     let latestSavedSessionAt: Date?
@@ -83,7 +84,8 @@ struct CodePulseBackupPreview: Equatable {
         self.completedSessionCount = state.completedSessions.count
         self.presetCount = state.sessionPresets.count
         self.automationRuleCount = state.automationRules.count
-        self.includesActiveSession = state.activeSession != nil
+        self.activeSessionCount = state.activeSessions.count
+        self.includesActiveSession = !state.activeSessions.isEmpty
 
         let dates = state.completedSessions.flatMap { [$0.startedAt, $0.endedAt] }
         self.earliestSavedSessionAt = dates.min()
@@ -139,7 +141,8 @@ enum CodePulseBackupCodec {
             try rejectWorkspaceMetadataFromLegacyState(state)
         }
         if version == CodePulseBackup.currentVersion {
-            guard state["schemaVersion"] as? Int == CodePulseStateSchema.currentVersion else {
+            guard let schemaVersion = state["schemaVersion"] as? Int,
+                  schemaVersion == 2 || schemaVersion == CodePulseStateSchema.currentVersion else {
                 throw CodePulseBackupError.missingRequiredField("workspace schema")
             }
             try requireHistoryArray("workspaces", in: state)
@@ -159,6 +162,35 @@ enum CodePulseBackupCodec {
         let backup: CodePulseBackup
         do {
             backup = try decoder.decode(CodePulseBackup.self, from: data)
+        } catch let error as AppStateIntegrityError {
+            // AppState performs collection-level integrity validation while it
+            // decodes schema-3 state. Preserve the backup boundary's more
+            // specific diagnostics instead of collapsing those failures into
+            // a generic configuration error.
+            switch error {
+            case .danglingProjectWorkspace,
+                 .noWorkspaces,
+                 .duplicateWorkspaceID,
+                 .invalidActiveSessionProjectWorkspace,
+                 .danglingActiveSessionProject,
+                 .archivedActiveSessionProject:
+                throw CodePulseBackupError.invalidWorkspaceReference
+            case .duplicateProjectID:
+                throw CodePulseBackupError.duplicateIdentifier("project")
+            case .duplicateActiveSessionID,
+                 .activeSessionHistoryCollision:
+                throw CodePulseBackupError.duplicateIdentifier("session")
+            case .activeSessionLimitExceeded,
+                 .invalidActiveSession,
+                 .duplicateDeveloperToolOwnership,
+                 .malformedDeveloperToolOwnership,
+                 .duplicateRetiredDeveloperToolThread,
+                 .duplicateReservedDeveloperToolThread,
+                 .retiredDeveloperToolCapacityExceeded:
+                throw CodePulseBackupError.invalidTimeline
+            case .unsupportedSchemaVersion:
+                throw CodePulseBackupError.malformedConfiguration
+            }
         } catch let error as DecodingError {
             let codingPath = Self.codingPath(for: error)
             if codingPathContainsHistory(codingPath) {
@@ -244,25 +276,55 @@ enum CodePulseBackupCodec {
     }
 
     private static func validateActiveSessionIdentifier(in state: [String: Any]) throws {
-        guard let raw = state["activeSession"] as? [String: Any] else { return }
-        guard let id = raw["id"] as? String, UUID(uuidString: id) != nil else {
-            throw CodePulseBackupError.malformedHistoryField("active session")
+        var identifiers = Set<String>()
+        if let rawCollection = state["activeSessions"] {
+            guard let records = rawCollection as? [[String: Any]] else {
+                throw CodePulseBackupError.malformedHistoryField("active session")
+            }
+            for record in records {
+                guard let id = record["id"] as? String, UUID(uuidString: id) != nil else {
+                    throw CodePulseBackupError.malformedHistoryField("active session")
+                }
+                guard identifiers.insert(id.lowercased()).inserted else {
+                    throw CodePulseBackupError.duplicateIdentifier("session")
+                }
+            }
         }
-        guard let completed = state["completedSessions"] as? [[String: Any]] else { return }
-        if completed.contains(where: { ($0["id"] as? String)?.lowercased() == id.lowercased() }) {
-            throw CodePulseBackupError.duplicateIdentifier("session")
+        if let rawValue = state["activeSession"], !(rawValue is NSNull) {
+            // A backup carrying both representations is ambiguous. Schema 2
+            // migration accepts the singular form; schema 3 must be
+            // collection-only and AppState's decoder enforces that boundary.
+            guard state["activeSessions"] == nil else {
+                throw CodePulseBackupError.malformedConfiguration
+            }
+            guard let raw = state["activeSession"] as? [String: Any],
+                  let id = raw["id"] as? String,
+                  UUID(uuidString: id) != nil else {
+                throw CodePulseBackupError.malformedHistoryField("active session")
+            }
+            identifiers.insert(id.lowercased())
+        }
+        if let completed = state["completedSessions"] as? [[String: Any]] {
+            if completed.contains(where: { record in
+                guard let id = record["id"] as? String else { return false }
+                return identifiers.contains(id.lowercased())
+            }) {
+                throw CodePulseBackupError.duplicateIdentifier("session")
+            }
         }
     }
 
     private static func codingPathContainsHistory(_ codingPath: [CodingKey]) -> Bool {
         codingPath.contains { key in
-            ["projects", "completedSessions", "activeSession"].contains(key.stringValue)
+            ["projects", "completedSessions", "activeSession", "activeSessions"].contains(key.stringValue)
         }
     }
 
     private static func historyField(for codingPath: [CodingKey]) -> String {
         if codingPath.contains(where: { $0.stringValue == "projects" }) { return "project" }
-        if codingPath.contains(where: { $0.stringValue == "activeSession" }) { return "active session" }
+        if codingPath.contains(where: { ["activeSession", "activeSessions"].contains($0.stringValue) }) {
+            return "active session"
+        }
         return "saved session"
     }
 
@@ -271,6 +333,7 @@ enum CodePulseBackupCodec {
         case "projects": return "project"
         case "completedSessions": return "saved session"
         case "activeSession": return "active session"
+        case "activeSessions": return "active session"
         default: return key
         }
     }

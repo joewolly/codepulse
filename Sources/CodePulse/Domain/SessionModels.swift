@@ -290,6 +290,19 @@ struct ActiveSession: Codable, Equatable, Identifiable {
         case pauseIntervals, outcome, gitContext, githubContext, developerToolContexts, automationMetadata
     }
 
+    private struct AutomationMetadataCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue: Int) {
+            self.stringValue = String(intValue)
+        }
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -308,10 +321,31 @@ struct ActiveSession: Codable, Equatable, Identifiable {
             [DeveloperToolSessionContext].self,
             forKey: .developerToolContexts
         ) ?? []
-        // Automation ownership is recoverable metadata. If it is damaged or
-        // from a newer schema, preserve the active session itself and restore
-        // it without automatic control rather than discarding the session.
-        automationMetadata = try? container.decodeIfPresent(SessionAutomationMetadata.self, forKey: .automationMetadata)
+        // Keep the historical fail-soft behavior for non-ownership automation
+        // metadata, but do not hide malformed ownership fields that would make
+        // developer-tool routing ambiguous.
+        if !container.contains(.automationMetadata) {
+            automationMetadata = nil
+        } else {
+            do {
+                automationMetadata = try container.decodeIfPresent(
+                    SessionAutomationMetadata.self,
+                    forKey: .automationMetadata
+                )
+            } catch {
+                let ownershipKeys = try? container.nestedContainer(
+                    keyedBy: AutomationMetadataCodingKey.self,
+                    forKey: .automationMetadata
+                )
+                let hasOwnershipMetadata = ownershipKeys?.allKeys.contains { key in
+                    ["startedBySource", "startedByTool", "claims"].contains(key.stringValue)
+                } == true
+                if hasOwnershipMetadata {
+                    throw error
+                }
+                automationMetadata = nil
+            }
+        }
     }
 
     var pausedAt: Date? {
@@ -782,7 +816,10 @@ struct AppState: Codable, Equatable {
     var workspaces: [WorkspaceRecord]
     var projects: [ProjectRecord]
     var completedSessions: [CompletedSession]
-    var activeSession: ActiveSession?
+    /// Canonical persisted active-session collection. Array order is retained
+    /// for stable persistence/display only; UUIDs are the identity used by all
+    /// mutations.
+    var activeSessions: [ActiveSession]
     var settings: CodePulseSettings
     var sessionPresets: [SessionPreset]
     var developerToolIntegration: DeveloperToolIntegrationProcessingState?
@@ -795,6 +832,7 @@ struct AppState: Codable, Equatable {
         workspaces: [WorkspaceRecord]? = nil,
         projects: [ProjectRecord] = [],
         completedSessions: [CompletedSession] = [],
+        activeSessions: [ActiveSession]? = nil,
         activeSession: ActiveSession? = nil,
         settings: CodePulseSettings = CodePulseSettings(),
         sessionPresets: [SessionPreset] = [],
@@ -830,7 +868,7 @@ struct AppState: Codable, Equatable {
         self.workspaces = resolvedWorkspaces
         self.projects = resolvedProjects
         self.completedSessions = completedSessions
-        self.activeSession = activeSession
+        self.activeSessions = activeSessions ?? activeSession.map { [$0] } ?? []
         self.settings = settings
         self.sessionPresets = Self.normalizedPresets(sessionPresets, rules: automationRules)
         self.developerToolIntegration = developerToolIntegration
@@ -840,10 +878,71 @@ struct AppState: Codable, Equatable {
         AppStateIntegrityValidator.normalizeSelectedWorkspace(in: &self)
     }
 
+    /// Temporary source-compatible access for the pre-concurrency runtime.
+    /// It is derived from the canonical collection and is never encoded.
+    var soleActiveSession: ActiveSession? {
+        guard activeSessions.count == 1 else { return nil }
+        return activeSessions[0]
+    }
+
+    /// Compatibility accessor for existing one-session presentation and
+    /// lifecycle code. A multi-session state deliberately reads as ambiguous
+    /// instead of silently selecting an array element. Writes are ignored for
+    /// an ambiguous collection so a legacy caller cannot discard unrelated
+    /// active Sessions by assigning through this temporary accessor.
+    var activeSession: ActiveSession? {
+        get { soleActiveSession }
+        set {
+            guard activeSessions.count <= 1 else { return }
+            activeSessions = newValue.map { [$0] } ?? []
+        }
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, workspaces, projects, completedSessions, activeSession, settings
+        case schemaVersion, workspaces, projects, completedSessions, activeSessions, activeSession, settings
         case sessionPresets, developerToolIntegration, automationRules, controlProcessing
         case localInputAcceptanceDate
+    }
+
+    private struct AnyCodingKey: CodingKey {
+        let stringValue: String
+        let intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+            self.intValue = nil
+        }
+
+        init?(intValue: Int) {
+            self.stringValue = String(intValue)
+            self.intValue = intValue
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        guard schemaVersion == CodePulseStateSchema.currentVersion else {
+            throw EncodingError.invalidValue(
+                schemaVersion,
+                .init(
+                    codingPath: encoder.codingPath,
+                    debugDescription: "Only schema 3 state may be durably encoded."
+                )
+            )
+        }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(CodePulseStateSchema.currentVersion, forKey: .schemaVersion)
+        try container.encode(workspaces, forKey: .workspaces)
+        try container.encode(projects, forKey: .projects)
+        try container.encode(completedSessions, forKey: .completedSessions)
+        // Schema 3 has one authoritative representation. The compatibility
+        // accessor above must never create a legacy persisted key.
+        try container.encode(activeSessions, forKey: .activeSessions)
+        try container.encode(settings, forKey: .settings)
+        try container.encode(sessionPresets, forKey: .sessionPresets)
+        try container.encodeIfPresent(developerToolIntegration, forKey: .developerToolIntegration)
+        try container.encode(automationRules, forKey: .automationRules)
+        try container.encodeIfPresent(controlProcessing, forKey: .controlProcessing)
+        try container.encodeIfPresent(localInputAcceptanceDate, forKey: .localInputAcceptanceDate)
     }
 
     private struct WorkspaceEraCodingKey: CodingKey {
@@ -893,20 +992,38 @@ struct AppState: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let allKeys = try decoder.container(keyedBy: AnyCodingKey.self)
+        let ambiguousActiveSessionKey = allKeys.allKeys.map(\.stringValue).first { key in
+            let normalized = key.lowercased()
+            let compact = normalized.filter { $0.isLetter || $0.isNumber }
+            return !["activesession", "activesessions"].contains(compact) &&
+                (compact.contains("activesession") ||
+                 ["currentsession", "currentsessionid"].contains(compact))
+        }
+        guard ambiguousActiveSessionKey == nil else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "State contains an ambiguous active-session representation."
+            ))
+        }
         let completedSessions = try container.decodeIfPresent([CompletedSession].self, forKey: .completedSessions) ?? []
-        let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
         let settings = try container.decodeIfPresent(CodePulseSettings.self, forKey: .settings) ?? CodePulseSettings()
         // Presets and automation rules are configuration, not irreplaceable
         // history. A malformed or forward-incompatible collection must not
         // make the whole state file unreadable.
         let sessionPresets = (try? container.decode([SessionPreset].self, forKey: .sessionPresets)) ?? []
-        // Processed developer-tool IDs are local replay bookkeeping. Preserve
-        // the existing fail-soft behavior if an old ledger is malformed; the
-        // restore path resets it regardless.
-        let developerToolIntegration = try? container.decodeIfPresent(
-            DeveloperToolIntegrationProcessingState.self,
-            forKey: .developerToolIntegration
-        )
+        // Processed IDs retain their historical fail-soft decoder, but the
+        // retired/reserved ownership fields are authoritative machine-local
+        // safety state and must not be silently discarded when malformed.
+        let developerToolIntegration: DeveloperToolIntegrationProcessingState?
+        if container.contains(.developerToolIntegration) {
+            developerToolIntegration = try container.decode(
+                DeveloperToolIntegrationProcessingState.self,
+                forKey: .developerToolIntegration
+            )
+        } else {
+            developerToolIntegration = nil
+        }
         let automationRules = (try? container.decode([SessionAutomationRule].self, forKey: .automationRules)) ?? []
         // Control bookkeeping is auxiliary recovery state. If it is damaged,
         // keep the user's sessions and configuration and start with an empty
@@ -924,6 +1041,13 @@ struct AppState: Codable, Equatable {
             ? try container.decode(Int.self, forKey: .schemaVersion)
             : nil
         if persistedSchemaVersion == nil || persistedSchemaVersion == CodePulseStateSchema.legacyVersion {
+            guard !container.contains(.activeSessions) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Legacy state contains schema-3 activeSessions."
+                ))
+            }
+            let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
             guard !(try Self.containsWorkspaceEraMarkers(in: container)) else {
                 throw DecodingError.dataCorrupted(.init(
                     codingPath: container.codingPath,
@@ -945,6 +1069,41 @@ struct AppState: Codable, Equatable {
                 controlProcessing: controlProcessing,
                 localInputAcceptanceDate: localInputAcceptanceDate
             )
+            try AppStateIntegrityValidator.validate(self)
+            return
+        }
+
+        if persistedSchemaVersion == 2 {
+            guard !container.contains(.activeSessions) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Schema 2 state contains schema-3 activeSessions."
+                ))
+            }
+            let activeSession = try container.decodeIfPresent(ActiveSession.self, forKey: .activeSession)
+            guard container.contains(.workspaces),
+                  container.contains(.projects),
+                  container.contains(.completedSessions),
+                  container.contains(.settings) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: container.codingPath,
+                    debugDescription: "Schema 2 state is missing required core collections."
+                ))
+            }
+            self.init(
+                schemaVersion: CodePulseStateSchema.currentVersion,
+                workspaces: try container.decode([WorkspaceRecord].self, forKey: .workspaces),
+                projects: try container.decode([ProjectRecord].self, forKey: .projects),
+                completedSessions: completedSessions,
+                activeSessions: activeSession.map { [$0] } ?? [],
+                settings: try container.decode(CodePulseSettings.self, forKey: .settings),
+                sessionPresets: sessionPresets,
+                developerToolIntegration: developerToolIntegration,
+                automationRules: automationRules,
+                controlProcessing: controlProcessing,
+                localInputAcceptanceDate: localInputAcceptanceDate
+            )
+            try AppStateIntegrityValidator.validate(self)
             return
         }
 
@@ -955,6 +1114,7 @@ struct AppState: Codable, Equatable {
         guard container.contains(.workspaces),
               container.contains(.projects),
               container.contains(.completedSessions),
+              container.contains(.activeSessions),
               container.contains(.settings) else {
             throw DecodingError.dataCorrupted(.init(
                 codingPath: container.codingPath,
@@ -965,13 +1125,20 @@ struct AppState: Codable, Equatable {
         let workspaces = try container.decode([WorkspaceRecord].self, forKey: .workspaces)
         let projects = try container.decode([ProjectRecord].self, forKey: .projects)
         let canonicalCompletedSessions = try container.decode([CompletedSession].self, forKey: .completedSessions)
+        guard !container.contains(.activeSession) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: container.codingPath,
+                debugDescription: "Schema 3 state contains the legacy activeSession key."
+            ))
+        }
+        let canonicalActiveSessions = try container.decode([ActiveSession].self, forKey: .activeSessions)
         let canonicalSettings = try container.decode(CodePulseSettings.self, forKey: .settings)
         self.init(
             schemaVersion: persistedSchemaVersion!,
             workspaces: workspaces,
             projects: projects,
             completedSessions: canonicalCompletedSessions,
-            activeSession: activeSession,
+            activeSessions: canonicalActiveSessions,
             settings: canonicalSettings,
             sessionPresets: sessionPresets,
             developerToolIntegration: developerToolIntegration,
@@ -979,6 +1146,7 @@ struct AppState: Codable, Equatable {
             controlProcessing: controlProcessing,
             localInputAcceptanceDate: localInputAcceptanceDate
         )
+        try AppStateIntegrityValidator.validate(self)
     }
 
     private static func normalizedPresets(
@@ -1032,6 +1200,60 @@ struct DeveloperToolProcessedEvent: Codable, Equatable, Identifiable {
 
 struct DeveloperToolIntegrationProcessingState: Codable, Equatable {
     var processedEvents: [DeveloperToolProcessedEvent] = []
+    /// Machine-local protection for completed/discarded developer-tool
+    /// identities. These records are intentionally not portable user data.
+    var retiredDeveloperToolThreads: [RetiredDeveloperToolThread] = []
+    /// Machine-local reservations held by active automated ownership. The
+    /// identity is the (tool, external session ID) pair, not the CodePulse
+    /// Session UUID.
+    var reservedDeveloperToolThreads: [DeveloperToolThreadIdentity] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case processedEvents
+        case retiredDeveloperToolThreads
+        case reservedDeveloperToolThreads
+    }
+
+    init(
+        processedEvents: [DeveloperToolProcessedEvent] = [],
+        retiredDeveloperToolThreads: [RetiredDeveloperToolThread] = [],
+        reservedDeveloperToolThreads: [DeveloperToolThreadIdentity] = []
+    ) {
+        self.processedEvents = processedEvents
+        self.retiredDeveloperToolThreads = retiredDeveloperToolThreads
+        self.reservedDeveloperToolThreads = reservedDeveloperToolThreads
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            processedEvents: (try? container.decodeIfPresent(
+                [DeveloperToolProcessedEvent].self,
+                forKey: .processedEvents
+            )) ?? [],
+            retiredDeveloperToolThreads: try container.decodeIfPresent(
+                [RetiredDeveloperToolThread].self,
+                forKey: .retiredDeveloperToolThreads
+            ) ?? [],
+            reservedDeveloperToolThreads: try container.decodeIfPresent(
+                [DeveloperToolThreadIdentity].self,
+                forKey: .reservedDeveloperToolThreads
+            ) ?? []
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(processedEvents, forKey: .processedEvents)
+        try container.encode(retiredDeveloperToolThreads, forKey: .retiredDeveloperToolThreads)
+        try container.encode(reservedDeveloperToolThreads, forKey: .reservedDeveloperToolThreads)
+    }
+
+    var isEmpty: Bool {
+        processedEvents.isEmpty &&
+            retiredDeveloperToolThreads.isEmpty &&
+            reservedDeveloperToolThreads.isEmpty
+    }
 }
 
 struct CodePulseProcessedControlCommand: Codable, Equatable, Identifiable {

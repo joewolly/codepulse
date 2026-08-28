@@ -8,16 +8,42 @@ enum CodePulseBackupValidator {
         try validateUniqueIDs(state.sessionPresets.map(\.id), field: "preset")
         try validateUniqueIDs(state.automationRules.map(\.id), field: "automation rule")
 
-        if let activeID = state.activeSession?.id,
-           state.completedSessions.contains(where: { $0.id == activeID }) {
+        try validateUniqueIDs(state.activeSessions.map(\.id), field: "session")
+        if state.activeSessions.contains(where: { active in
+            state.completedSessions.contains(where: { $0.id == active.id })
+        }) {
             throw CodePulseBackupError.duplicateIdentifier("session")
         }
 
         for session in state.completedSessions {
             try validateCompletedSession(session)
         }
-        if let activeSession = state.activeSession {
+        for activeSession in state.activeSessions {
             try validateActiveSession(activeSession)
+            if let projectID = activeSession.projectID {
+                guard let project = state.projects.first(where: { $0.id == projectID }),
+                      !project.isArchived,
+                      state.workspaces.contains(where: { $0.id == project.workspaceID }) else {
+                    throw CodePulseBackupError.invalidWorkspaceReference
+                }
+            }
+        }
+
+        do {
+            try AppStateIntegrityValidator.validate(state)
+        } catch let error as AppStateIntegrityError {
+            switch error {
+            case .duplicateActiveSessionID, .activeSessionHistoryCollision:
+                throw CodePulseBackupError.duplicateIdentifier("session")
+            case .activeSessionLimitExceeded,
+                 .invalidActiveSession,
+                 .danglingActiveSessionProject,
+                 .archivedActiveSessionProject,
+                 .invalidActiveSessionProjectWorkspace:
+                throw CodePulseBackupError.invalidTimeline
+            default:
+                throw CodePulseBackupError.invalidWorkspaceReference
+            }
         }
     }
 
@@ -144,15 +170,16 @@ enum BackupRestoreNormalizer {
         restored.developerToolIntegration = nil
         restored.localInputAcceptanceDate = nil
 
-        if var activeSession = restored.activeSession,
-           var metadata = activeSession.automationMetadata {
+        for index in restored.activeSessions.indices {
+            var activeSession = restored.activeSessions[index]
+            guard var metadata = activeSession.automationMetadata else { continue }
             // The timeline and captured contexts are portable. Claims and
             // pending lifecycle work belong to the machine that created them.
             metadata.controlEnabled = false
             metadata.pendingAutomaticSave = false
             metadata.claims = []
             activeSession.automationMetadata = metadata
-            restored.activeSession = activeSession
+            restored.activeSessions[index] = activeSession
         }
 
         restored.automationRules = restored.automationRules.map { rule in
