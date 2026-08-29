@@ -4,6 +4,12 @@ import Foundation
 protocol DeveloperToolEventConsuming: AnyObject {
     func drainPending(state: inout AppState, now: Date) -> [ValidatedDeveloperToolEvent]
     func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool
+    func attach(
+        _ event: DeveloperToolEvent,
+        toSessionID sessionID: UUID,
+        in state: inout AppState,
+        now: Date
+    ) -> Bool
     func markProcessed(
         _ pending: ValidatedDeveloperToolEvent,
         in state: inout AppState,
@@ -11,6 +17,18 @@ protocol DeveloperToolEventConsuming: AnyObject {
     ) -> Bool
     func cleanup(_ pending: ValidatedDeveloperToolEvent)
     func processPending(state: inout AppState, now: Date) -> Bool
+}
+
+extension DeveloperToolEventConsuming {
+    func attach(
+        _ event: DeveloperToolEvent,
+        toSessionID sessionID: UUID,
+        in state: inout AppState,
+        now: Date
+    ) -> Bool {
+        guard state.soleActiveSession?.id == sessionID else { return false }
+        return attach(event, to: &state, now: now)
+    }
 }
 
 final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
@@ -26,7 +44,18 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
 
     @discardableResult
     func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool {
-        guard var session = state.soleActiveSession,
+        guard let sessionID = state.soleActiveSession?.id else { return false }
+        return attach(event, toSessionID: sessionID, in: &state, now: now)
+    }
+
+    @discardableResult
+    func attach(
+        _ event: DeveloperToolEvent,
+        toSessionID sessionID: UUID,
+        in state: inout AppState,
+        now: Date
+    ) -> Bool {
+        guard var session = state.activeSession(id: sessionID),
               session.projectID != nil,
               let resolvedProjectID = DeveloperToolProjectResolver.projectID(
                   for: event.workingDirectory,
@@ -47,11 +76,18 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
             }
             context.firstActivityAt = min(context.firstActivityAt, event.timestamp)
             context.lastActivityAt = max(context.lastActivityAt, event.timestamp)
-            context.model = event.model ?? context.model
-            context.profile = event.profile ?? context.profile
+            let isNewestEvent = event.timestamp >= context.lastActivityAt
+            if isNewestEvent {
+                context.model = event.model ?? context.model
+                context.profile = event.profile ?? context.profile
+            }
             context.eventCount += 1
-            if event.eventType == .sessionEnded {
-                context.endedAt = max(context.endedAt ?? event.timestamp, event.timestamp)
+            if isNewestEvent {
+                if event.eventType == .sessionEnded {
+                    context.endedAt = event.timestamp
+                } else if event.eventType == .sessionStarted || event.eventType == .activity {
+                    context.endedAt = nil
+                }
             }
             session.developerToolContexts[index] = context
         } else {
@@ -79,7 +115,7 @@ final class DeveloperToolEventConsumer: DeveloperToolEventConsuming {
             session.developerToolContexts.append(context)
         }
 
-        guard let index = state.activeSessionIndex(id: session.id) else { return false }
+        guard let index = state.activeSessionIndex(id: sessionID) else { return false }
         var candidate = state
         candidate.activeSessions[index] = session
         do {

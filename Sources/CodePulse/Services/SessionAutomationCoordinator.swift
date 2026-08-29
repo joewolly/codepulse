@@ -39,6 +39,12 @@ enum SessionAutomationAction: Equatable {
         source: SessionAutomationClaimSource,
         isActive: Bool
     )
+    case signalSession(
+        sessionID: UUID,
+        rule: SessionAutomationRule?,
+        source: SessionAutomationClaimSource,
+        isActive: Bool
+    )
     case relinquish
 }
 
@@ -79,30 +85,31 @@ struct SessionAutomationCoordinator {
         in state: AppState,
         now: Date
     ) -> [SessionAutomationAction] {
-        guard state.settings.automationEnabled else {
-            guard state.soleActiveSession?.automationMetadata?.controlEnabled == true else { return [] }
-            return [.relinquish]
-        }
+        guard state.settings.automationEnabled else { return [] }
 
         let isActive = event.eventType == .sessionStarted || event.eventType == .activity
-        let resolvedProjectID = DeveloperToolProjectResolver.projectID(
+        guard let resolvedProjectID = DeveloperToolProjectResolver.projectID(
             for: event.workingDirectory,
             in: state.projects
+        ) else { return [] }
+        let identity = DeveloperToolThreadIdentity(
+            tool: event.tool,
+            externalSessionID: event.externalSessionID
         )
+        let owners = state.activeSessions.filter {
+            $0.developerToolOwnershipIdentities.contains(identity)
+        }
+        guard owners.count <= 1 else { return [] }
 
-        if !state.activeSessions.isEmpty {
-            guard let activeSession = state.soleActiveSession else { return [] }
-            guard activeSession.phase == .running || activeSession.phase == .paused,
+        if let activeSession = owners.first {
+            guard activeSession.projectID == resolvedProjectID,
+                  event.timestamp >= activeSession.startedAt,
+                  event.timestamp <= activeSession.endedAt ?? now,
+                  activeSession.phase == .running || activeSession.phase == .paused,
                   let metadata = activeSession.automationMetadata,
                   metadata.controlEnabled else {
                 return []
             }
-
-            guard let resolvedProjectID,
-                  resolvedProjectID == activeSession.projectID else {
-                return []
-            }
-
             guard let rule = matchingDeveloperRule(
                 for: event,
                 projectID: resolvedProjectID,
@@ -110,11 +117,10 @@ struct SessionAutomationCoordinator {
             ) else {
                 return []
             }
-            return [.signalWithResolvedProject(
+            return [.signalSession(
+                sessionID: activeSession.id,
                 rule: rule,
-                projectID: resolvedProjectID,
-                tool: event.tool,
-                externalSessionID: event.externalSessionID,
+                source: .developerTool(tool: event.tool, externalSessionID: event.externalSessionID),
                 isActive: isActive
             )]
         }
@@ -122,7 +128,6 @@ struct SessionAutomationCoordinator {
         guard isActive,
               event.timestamp <= now,
               event.timestamp >= now.addingTimeInterval(-Self.maximumStartBackdate),
-              let resolvedProjectID,
               let rule = matchingDeveloperRule(
                   for: event,
                   projectID: resolvedProjectID,
@@ -152,8 +157,16 @@ struct SessionAutomationCoordinator {
         now: Date
     ) -> [SessionAutomationAction] {
         guard state.settings.automationEnabled else {
-            guard state.soleActiveSession?.automationMetadata?.controlEnabled == true else { return [] }
-            return [.relinquish]
+            return state.activeSessions.compactMap { session in
+                guard case .application = session.automationMetadata?.startedBySource,
+                      session.automationMetadata?.controlEnabled == true else { return nil }
+                return .signalSession(
+                    sessionID: session.id,
+                    rule: nil,
+                    source: session.automationMetadata!.startedBySource,
+                    isActive: false
+                )
+            }
         }
 
         let bundleIdentifier = application?.isValid == true ? application?.bundleIdentifier : nil
@@ -162,8 +175,11 @@ struct SessionAutomationCoordinator {
         }
         let isDeveloperToolApplication = application.map(Self.isDeveloperToolApplication) == true
 
-        if !state.activeSessions.isEmpty {
-            guard let activeSession = state.soleActiveSession else { return [] }
+        let applicationOwners = state.activeSessions.filter {
+            if case .application = $0.automationMetadata?.startedBySource { return true }
+            return false
+        }
+        if let activeSession = applicationOwners.first {
             guard activeSession.phase == .running || activeSession.phase == .paused,
                   let metadata = activeSession.automationMetadata,
                   metadata.controlEnabled else {
@@ -178,7 +194,8 @@ struct SessionAutomationCoordinator {
                    projectID: activeSession.projectID,
                    state: state
                ).first {
-                actions.append(.signalWithSource(
+                actions.append(.signalSession(
+                    sessionID: activeSession.id,
                     rule: rule,
                     source: .application(bundleIdentifier: application.bundleIdentifier),
                     isActive: true
@@ -196,7 +213,8 @@ struct SessionAutomationCoordinator {
                     && !isDeveloperToolApplication
                     && claimedBundleIdentifier == bundleIdentifier
                 guard !isSupportedCurrentApplication else { continue }
-                actions.append(.signalWithSource(
+                actions.append(.signalSession(
+                    sessionID: activeSession.id,
                     rule: nil,
                     source: claim.source,
                     isActive: false
@@ -205,7 +223,8 @@ struct SessionAutomationCoordinator {
             return actions
         }
 
-        guard let application,
+        guard applicationOwners.isEmpty,
+              let application,
               !isDeveloperToolApplication,
               let rule = matchingApplicationRules(for: application, projectID: nil, state: state).first else {
             return []
@@ -271,7 +290,7 @@ struct SessionAutomationCoordinator {
         !rulesSupporting(source, projectID: projectID, in: state).isEmpty
     }
 
-    private func matchingDeveloperRule(
+    func matchingDeveloperRule(
         for event: DeveloperToolEvent,
         projectID: UUID,
         state: AppState
@@ -287,7 +306,7 @@ struct SessionAutomationCoordinator {
     /// Projectless rules are reusable fallbacks only when no eligible scoped
     /// rule exists. Neither category has an intentional priority feature, so
     /// an equal-precedence collision fails closed instead of sorting by name.
-    private func matchingDeveloperRule(
+    func matchingDeveloperRule(
         for tool: DeveloperTool,
         projectID: UUID,
         state: AppState
