@@ -2682,8 +2682,9 @@ final class SessionStore: ObservableObject {
             )
         }
 
-        // An unowned end never enriches or creates. Other unmatched events may
-        // enrich exactly one timeline-eligible manual Session, without claims.
+        // Unowned events that automation does not claim may context-enrich
+        // exactly one timeline-eligible manual Session. They never create
+        // automation ownership or lifecycle control.
         let manualTargets = candidate.activeSessions.filter {
             $0.automationMetadata == nil &&
             $0.projectID == resolvedProjectID &&

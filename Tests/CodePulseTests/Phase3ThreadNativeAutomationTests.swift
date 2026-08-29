@@ -100,6 +100,39 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         XCTAssertTrue(isProcessed(input.id, in: fixture.store.state))
     }
 
+    func testUnownedEndContextEnrichesOnlyEligibleManualSessionWithoutAutomationAuthority() throws {
+        let fixture = try makeFixture(automationEnabled: false)
+        let manualID = try XCTUnwrap(fixture.store.createManualSession(
+            projectID: fixture.project.id,
+            goal: "Manual",
+            at: start
+        ))
+        let input = event(
+            "manual-end",
+            .sessionEnded,
+            at: start.addingTimeInterval(1),
+            path: fixture.folder.path
+        )
+
+        try send(input, through: fixture)
+
+        let manual = try XCTUnwrap(fixture.store.state.activeSession(id: manualID))
+        XCTAssertEqual(manual.developerToolContexts.first?.externalSessionID, "manual-end")
+        XCTAssertEqual(manual.developerToolContexts.first?.eventCount, 1)
+        XCTAssertNil(manual.automationMetadata)
+        XCTAssertTrue(manual.developerToolOwnershipIdentities.isEmpty)
+        XCTAssertEqual(manual.phase, .running)
+        XCTAssertNil(manual.endedAt)
+        XCTAssertTrue(
+            fixture.store.state.developerToolIntegration?.reservedDeveloperToolThreads.isEmpty == true
+        )
+        XCTAssertTrue(
+            fixture.store.state.developerToolIntegration?.retiredDeveloperToolThreads.isEmpty == true
+        )
+        XCTAssertTrue(isProcessed(input.id, in: fixture.store.state))
+        XCTAssertTrue(fixture.inbox.pendingEventURLs().isEmpty)
+    }
+
     func testTwoEligibleManualSessionsAreUnchangedAndEventAcknowledged() throws {
         let fixture = try makeFixture(automationEnabled: false)
         _ = fixture.store.createManualSession(projectID: fixture.project.id, goal: "A", at: start)
@@ -315,14 +348,15 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         fixture.persistence.failCriticalSaves = true
         let input = event("git", .activity, at: start, path: fixture.folder.path)
         try send(input, through: fixture)
-        try await Task.sleep(nanoseconds: 20_000_000)
         XCTAssertEqual(git.captureStartCount, 0)
         XCTAssertTrue(fixture.store.state.activeSessions.isEmpty)
         XCTAssertEqual(fixture.inbox.pendingEventURLs().count, 1)
         fixture.persistence.failCriticalSaves = false
         fixture.clock.now = fixture.clock.now.addingTimeInterval(5)
         fixture.store.refresh()
-        try await Task.sleep(nanoseconds: 50_000_000)
+        try await waitUntil("Git discovery did not start after successful critical admission") {
+            git.captureStartCount == 1
+        }
         XCTAssertEqual(git.captureStartCount, 1)
         XCTAssertEqual(git.criticalSuccessCountAtCapture, [1])
         XCTAssertEqual(git.pathsAtCapture, [fixture.folder.path])
@@ -332,12 +366,15 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         let saved = try makeFixture(pauseDelay: 1, finishDelay: 2, minimumSavedDuration: 0)
         let savedStart = event("saved", .activity, at: start, path: saved.folder.path)
         try send(savedStart, through: saved)
-        try await Task.sleep(nanoseconds: 30_000_000)
+        try await settleGitCapture(saved.store)
         let savedOwnerID = try XCTUnwrap(owner("saved", in: saved.store.state)?.id)
         let savedUnrelatedID = try XCTUnwrap(saved.store.createManualSession(projectID: saved.project.id, goal: "Unrelated", at: start))
         let savedUnrelatedBefore = try XCTUnwrap(saved.store.state.activeSession(id: savedUnrelatedID))
         try send(event("saved", .sessionEnded, at: start.addingTimeInterval(1), path: saved.folder.path), through: saved)
-        try await Task.sleep(nanoseconds: 30_000_000)
+        try await waitUntil("Automatic save did not remove the owner and publish its completed Session") {
+            saved.store.state.activeSession(id: savedOwnerID) == nil &&
+            saved.store.state.completedSessions.contains { $0.id == savedOwnerID }
+        }
         XCTAssertNil(saved.store.state.activeSession(id: savedOwnerID))
         XCTAssertEqual(saved.store.state.completedSessions.filter { $0.id == savedOwnerID }.count, 1)
         XCTAssertEqual(saved.store.state.activeSession(id: savedUnrelatedID), savedUnrelatedBefore)
@@ -351,9 +388,13 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
 
         let discarded = try makeFixture(pauseDelay: 1, finishDelay: 2, minimumSavedDuration: 100)
         try send(event("short", .activity, at: start, path: discarded.folder.path), through: discarded)
-        try await Task.sleep(nanoseconds: 30_000_000)
+        try await settleGitCapture(discarded.store)
+        let discardedOwnerID = try XCTUnwrap(owner("short", in: discarded.store.state)?.id)
         try send(event("short", .sessionEnded, at: start.addingTimeInterval(1), path: discarded.folder.path), through: discarded)
-        try await Task.sleep(nanoseconds: 30_000_000)
+        try await waitUntil("Minimum-duration discard did not remove the owner without publishing history") {
+            discarded.store.state.activeSession(id: discardedOwnerID) == nil &&
+            !discarded.store.state.completedSessions.contains { $0.id == discardedOwnerID }
+        }
         XCTAssertNil(owner("short", in: discarded.store.state))
         XCTAssertTrue(discarded.store.state.completedSessions.isEmpty)
         try send(event("short", .activity, at: discarded.clock.now, path: discarded.folder.path), through: discarded)
@@ -439,6 +480,23 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         state.developerToolIntegration?.processedEvents.contains { $0.id == id } == true
     }
 
+    private func settleGitCapture(_ store: SessionStore) async throws {
+        try await waitUntil("Timed out waiting for Git capture to settle") {
+            !store.gitCaptureInProgress
+        }
+    }
+
+    private func waitUntil(
+        _ failureMessage: String,
+        predicate: @escaping @MainActor () -> Bool
+    ) async throws {
+        for _ in 0..<200 {
+            if predicate() { return }
+            await Task.yield()
+        }
+        XCTFail(failureMessage)
+    }
+
     private func relaunch(_ fixture: Fixture) -> SessionStore {
         SessionStore(
             persistence: fixture.persistence,
@@ -517,16 +575,36 @@ private struct OwnershipSnapshot: Equatable {
 }
 
 private final class Phase3Persistence: StatePersisting {
-    var state: AppState
-    var failCriticalSaves = false
-    var criticalSuccessCount = 0
-    init(_ state: AppState) { self.state = state }
+    private let lock = NSLock()
+    private var _state: AppState
+    private var _failCriticalSaves = false
+    private var _criticalSuccessCount = 0
+
+    var state: AppState {
+        get { withLock { _state } }
+        set { withLock { _state = newValue } }
+    }
+    var failCriticalSaves: Bool {
+        get { withLock { _failCriticalSaves } }
+        set { withLock { _failCriticalSaves = newValue } }
+    }
+    var criticalSuccessCount: Int { withLock { _criticalSuccessCount } }
+
+    init(_ state: AppState) { _state = state }
     func load() -> AppState { state }
     func save(_ state: AppState) { self.state = state }
     func saveCritical(_ state: AppState) throws {
-        if failCriticalSaves { throw Phase3SaveFailure() }
-        criticalSuccessCount += 1
-        self.state = state
+        try withLock {
+            if _failCriticalSaves { throw Phase3SaveFailure() }
+            _criticalSuccessCount += 1
+            _state = state
+        }
+    }
+
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
     }
 }
 private struct Phase3SaveFailure: Error {}
@@ -540,19 +618,33 @@ private final class Phase3NoOpGit: GitServicing, @unchecked Sendable {
 }
 
 private final class Phase3RecordingGit: GitServicing, @unchecked Sendable {
+    private let lock = NSLock()
     var persistence: Phase3Persistence
-    private(set) var captureStartCount = 0
-    private(set) var criticalSuccessCountAtCapture: [Int] = []
-    private(set) var pathsAtCapture: [String] = []
+    private var _captureStartCount = 0
+    private var _criticalSuccessCountAtCapture: [Int] = []
+    private var _pathsAtCapture: [String] = []
+
+    var captureStartCount: Int { withLock { _captureStartCount } }
+    var criticalSuccessCountAtCapture: [Int] { withLock { _criticalSuccessCountAtCapture } }
+    var pathsAtCapture: [String] { withLock { _pathsAtCapture } }
 
     init(persistence: Phase3Persistence) { self.persistence = persistence }
 
     func captureStartSnapshot(at folderURL: URL) -> GitStartSnapshot? {
-        captureStartCount += 1
-        criticalSuccessCountAtCapture.append(persistence.criticalSuccessCount)
-        pathsAtCapture.append(folderURL.path)
+        let criticalSuccessCount = persistence.criticalSuccessCount
+        withLock {
+            _captureStartCount += 1
+            _criticalSuccessCountAtCapture.append(criticalSuccessCount)
+            _pathsAtCapture.append(folderURL.path)
+        }
         return nil
     }
 
     func captureFinishSnapshot(for startSnapshot: GitStartSnapshot) -> GitFinishSnapshot? { nil }
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
 }
