@@ -1,6 +1,60 @@
 import CodePulseIntegration
 import Foundation
 
+/// Transient per-Session Git work status. It is intentionally not part of
+/// AppState persistence: durable Git context contains only completed
+/// observation metadata, while in-flight jobs are invalidated on replacement.
+enum SessionGitCaptureStatus: Equatable, Sendable {
+    case scheduled
+    case running
+    case succeeded
+    case failed
+    case ambiguous
+}
+
+enum SessionGitCaptureStage: Equatable, Sendable {
+    case start
+    case final
+}
+
+struct SessionGitCaptureState: Equatable, Sendable {
+    var startStatus: SessionGitCaptureStatus?
+    var finalStatus: SessionGitCaptureStatus?
+    var activeStage: SessionGitCaptureStage?
+    var pendingFinalCapture: Bool
+    var jobToken: UUID?
+    var generation: UUID
+
+    init(
+        startStatus: SessionGitCaptureStatus? = nil,
+        finalStatus: SessionGitCaptureStatus? = nil,
+        activeStage: SessionGitCaptureStage? = nil,
+        pendingFinalCapture: Bool = false,
+        jobToken: UUID? = nil,
+        generation: UUID = UUID()
+    ) {
+        self.startStatus = startStatus
+        self.finalStatus = finalStatus
+        self.activeStage = activeStage
+        self.pendingFinalCapture = pendingFinalCapture
+        self.jobToken = jobToken
+        self.generation = generation
+    }
+
+    var isInFlight: Bool { activeStage != nil }
+
+    var aggregateStatus: SessionGitCaptureStatus? {
+        if let activeStage {
+            switch activeStage {
+            case .start: return startStatus ?? .running
+            case .final: return finalStatus ?? .running
+            }
+        }
+        if finalStatus != nil { return finalStatus }
+        return startStatus
+    }
+}
+
 /// Phase 1 bounds and retention values. Keeping these in one domain type makes
 /// the persistence and admission rules deterministic for later lifecycle work.
 enum ConcurrentSessionLimits {
@@ -528,5 +582,184 @@ extension AppState {
     private func validIdentity(tool: DeveloperTool, externalSessionID: String) -> DeveloperToolThreadIdentity? {
         let identity = DeveloperToolThreadIdentity(tool: tool, externalSessionID: externalSessionID)
         return identity.isValid ? identity : nil
+    }
+}
+
+/// Reconciles repository-wide Git deltas using the actual successful
+/// observation windows recorded on each Session. This is a derived property:
+/// it may suppress numeric values on more than one Session, but it never
+/// changes lifecycle, timeline, ownership, or outcome fields.
+enum GitObservationAttributionResolver {
+    private struct Observation {
+        let id: UUID
+        let repositoryRoot: String
+        let startedAt: Date?
+        let endedAt: Date?
+        let attribution: GitDeltaAttribution?
+        let conflictIDs: Set<UUID>
+    }
+
+    static func reconcile(_ state: inout AppState) {
+        let observations: [Observation] = state.activeSessions.compactMap { session in
+            guard let context = session.gitContext,
+                  !context.repositoryRoot.isEmpty else { return nil }
+            return Observation(
+                id: session.id,
+                repositoryRoot: canonicalRoot(context.repositoryRoot),
+                startedAt: context.observationStartedAt,
+                endedAt: context.observationEndedAt,
+                attribution: context.deltaAttribution,
+                conflictIDs: context.ambiguityConflictIDs
+            )
+        } + state.completedSessions.compactMap { session in
+            guard let context = session.gitContext,
+                  !context.repositoryRoot.isEmpty else { return nil }
+            return Observation(
+                id: session.id,
+                repositoryRoot: canonicalRoot(context.repositoryRoot),
+                startedAt: context.observationStartedAt,
+                endedAt: context.observationEndedAt,
+                attribution: context.deltaAttribution,
+                conflictIDs: context.ambiguityConflictIDs
+            )
+        }
+
+        var conflictIDsBySession = Dictionary(uniqueKeysWithValues: observations.map { ($0.id, $0.conflictIDs) })
+        let hadPersistedConflictIDs = Set(observations.filter { !$0.conflictIDs.isEmpty }.map(\.id))
+        let observationsByRoot = Dictionary(grouping: observations, by: \.repositoryRoot)
+        for sameRootObservations in observationsByRoot.values where sameRootObservations.count > 1 {
+            for leftIndex in sameRootObservations.indices {
+                guard leftIndex + 1 < sameRootObservations.count else { continue }
+                let left = sameRootObservations[leftIndex]
+                for right in sameRootObservations[(leftIndex + 1)...] {
+                    guard left.id != right.id else { continue }
+                    if windowsMayOverlap(left, right) {
+                        conflictIDsBySession[left.id, default: []].insert(right.id)
+                        conflictIDsBySession[right.id, default: []].insert(left.id)
+                    } else {
+                        conflictIDsBySession[left.id, default: []].remove(right.id)
+                        conflictIDsBySession[right.id, default: []].remove(left.id)
+                    }
+                }
+            }
+        }
+
+        for index in state.activeSessions.indices {
+            guard var context = state.activeSessions[index].gitContext else { continue }
+            let conflictIDs = conflictIDsBySession[state.activeSessions[index].id] ?? []
+            context.setAmbiguityConflictIDs(conflictIDs)
+            if context.deltaAttribution == .indeterminate {
+                suppressNumericDeltas(in: &context, attribution: .indeterminate)
+            } else if !conflictIDs.isEmpty {
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
+            } else if context.hasCompleteObservationWindow {
+                if context.deltaAttribution != .ambiguous || hadPersistedConflictIDs.contains(state.activeSessions[index].id) {
+                    context.deltaAttribution = .attributable
+                } else {
+                    suppressNumericDeltas(in: &context, attribution: .ambiguous)
+                }
+            } else if context.deltaAttribution == .ambiguous {
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
+            }
+            state.activeSessions[index].gitContext = context
+        }
+
+        for index in state.completedSessions.indices {
+            guard var context = state.completedSessions[index].gitContext else { continue }
+            let conflictIDs = conflictIDsBySession[state.completedSessions[index].id] ?? []
+            context.setAmbiguityConflictIDs(conflictIDs)
+            if context.deltaAttribution == .indeterminate {
+                suppressNumericDeltas(in: &context, attribution: .indeterminate)
+            } else if !conflictIDs.isEmpty {
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
+            } else if context.hasCompleteObservationWindow {
+                if context.deltaAttribution != .ambiguous || hadPersistedConflictIDs.contains(state.completedSessions[index].id) {
+                    context.deltaAttribution = .attributable
+                } else {
+                    suppressNumericDeltas(in: &context, attribution: .ambiguous)
+                }
+            } else if context.deltaAttribution == .ambiguous {
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
+            }
+            let existing = state.completedSessions[index]
+            state.completedSessions[index] = CompletedSession(
+                id: existing.id,
+                projectID: existing.projectID,
+                projectName: existing.projectName,
+                type: existing.type,
+                goal: existing.goal,
+                outcome: existing.outcome,
+                startedAt: existing.startedAt,
+                endedAt: existing.endedAt,
+                pauseIntervals: existing.pauseIntervals,
+                gitContext: context,
+                githubContext: existing.githubContext,
+                developerToolContexts: existing.developerToolContexts
+            )
+        }
+    }
+
+    private static func windowsMayOverlap(_ left: Observation, _ right: Observation) -> Bool {
+        // Known opposite boundaries can prove strict separation even when the
+        // other two boundaries are absent. Check that proof before treating a
+        // partial window as ambiguous. Boundaries are closed, so equality is
+        // deliberately not separation.
+        if let leftEnd = validDate(left.endedAt),
+           let rightStart = validDate(right.startedAt),
+           leftEnd < rightStart {
+            return false
+        }
+        if let rightEnd = validDate(right.endedAt),
+           let leftStart = validDate(left.startedAt),
+           rightEnd < leftStart {
+            return false
+        }
+
+        guard let leftStart = left.startedAt,
+              let leftEnd = left.endedAt,
+              let rightStart = right.startedAt,
+              let rightEnd = right.endedAt,
+              leftStart.timeIntervalSinceReferenceDate.isFinite,
+              leftEnd.timeIntervalSinceReferenceDate.isFinite,
+              rightStart.timeIntervalSinceReferenceDate.isFinite,
+              rightEnd.timeIntervalSinceReferenceDate.isFinite,
+              leftStart <= leftEnd,
+              rightStart <= rightEnd else {
+            return true
+        }
+
+        // Observation boundaries are closed: touching endpoints are treated
+        // as intersecting because a repository-wide mutation at that instant
+        // could be visible to both snapshots.
+        return leftStart <= rightEnd && rightStart <= leftEnd
+    }
+
+    private static func validDate(_ date: Date?) -> Date? {
+        guard let date, date.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        return date
+    }
+
+    private static func canonicalRoot(_ value: String) -> String {
+        let url = URL(fileURLWithPath: value, isDirectory: true)
+        return url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    private static func suppressNumericDeltas(
+        in context: inout GitSessionContext,
+        attribution: GitDeltaAttribution
+    ) {
+        context.commitCount = nil
+        context.filesChanged = nil
+        context.insertions = nil
+        context.deletions = nil
+        context.deltaAttribution = attribution
+    }
+}
+
+extension AppState {
+    /// Public domain entry point for deterministic tests and enrichment code.
+    /// Callers should invoke this on a candidate state before persistence.
+    mutating func reconcileGitObservationAttribution() {
+        GitObservationAttributionResolver.reconcile(&self)
     }
 }

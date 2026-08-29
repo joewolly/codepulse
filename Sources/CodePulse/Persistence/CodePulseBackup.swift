@@ -274,6 +274,7 @@ enum CodePulseBackupCodec {
                 throw CodePulseBackupError.duplicateIdentifier("session")
             case .activeSessionLimitExceeded,
                  .invalidActiveSession,
+                 .selfReferentialGitAmbiguity,
                  .duplicateDeveloperToolOwnership,
                  .malformedDeveloperToolOwnership,
                  .duplicateRetiredDeveloperToolThread,
