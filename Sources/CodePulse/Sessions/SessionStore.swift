@@ -96,6 +96,7 @@ final class SessionStore: ObservableObject {
     @Published private(set) var gitCaptureInProgress = false
     @Published private(set) var gitCaptureStates: [UUID: SessionGitCaptureState] = [:]
     @Published private(set) var lifecycleErrorMessage: String?
+    @Published private(set) var lifecycleErrorSessionID: UUID?
     @Published private(set) var isInRecoveryMode: Bool
 
     let persistence: StatePersisting
@@ -281,7 +282,12 @@ final class SessionStore: ObservableObject {
     }
 
     var activeAutomationStatusLabel: String? {
-        guard let metadata = state.soleActiveSession?.automationMetadata,
+        guard let sessionID = state.soleActiveSession?.id else { return nil }
+        return automationStatusLabel(for: sessionID)
+    }
+
+    func automationStatusLabel(for sessionID: UUID) -> String? {
+        guard let metadata = state.activeSession(id: sessionID)?.automationMetadata,
               metadata.controlEnabled else {
             return nil
         }
@@ -311,6 +317,11 @@ final class SessionStore: ObservableObject {
     }
 
     var menuBarAccessibilityText: String {
+        let sessions = state.activeSessions
+        if sessions.count > 1 {
+            let counts = activeSessionCounts
+            return "CodePulse, \(counts.total) active sessions, \(counts.running) running, \(counts.paused) paused, \(counts.finishing) finishing"
+        }
         switch phase {
         case .idle:
             return "CodePulse, ready to start a session"
@@ -336,11 +347,26 @@ final class SessionStore: ObservableObject {
 
     func dismissLifecycleError() {
         lifecycleErrorMessage = nil
+        lifecycleErrorSessionID = nil
     }
 
     var elapsedDuration: TimeInterval {
         guard let session = state.soleActiveSession else { return 0 }
         return session.activeDuration(at: now)
+    }
+
+    func elapsedDuration(for sessionID: UUID) -> TimeInterval {
+        state.activeSession(id: sessionID)?.activeDuration(at: now) ?? 0
+    }
+
+    var activeSessionCounts: (total: Int, running: Int, paused: Int, finishing: Int) {
+        let sessions = state.activeSessions
+        return (
+            sessions.count,
+            sessions.filter { $0.phase == .running }.count,
+            sessions.filter { $0.phase == .paused }.count,
+            sessions.filter { $0.phase == .finishing }.count
+        )
     }
 
     var defaultProjectID: UUID? {
@@ -430,13 +456,11 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    /// Changes only presentation/navigation state. This is intentionally
-    /// unavailable while a session is active so the existing session context
-    /// cannot become ambiguous.
+    /// Changes only durable presentation/navigation state for future manual
+    /// work. Active Session ownership is UUID-backed and remains untouched.
     @discardableResult
     func selectWorkspace(id: UUID) -> Bool {
         guard !isInRecoveryMode,
-              state.activeSessions.isEmpty,
               state.workspaces.contains(where: { $0.id == id }) else {
             return false
         }
@@ -723,6 +747,16 @@ final class SessionStore: ObservableObject {
         now = clock.now
         scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
         return prepared.session.id
+    }
+
+    @discardableResult
+    func createManualSession(using preset: SessionPreset, at date: Date? = nil) -> UUID? {
+        createManualSession(
+            projectID: preset.projectID,
+            goal: preset.goal,
+            type: preset.sessionType,
+            at: date
+        )
     }
 
     @discardableResult
@@ -1014,11 +1048,13 @@ final class SessionStore: ObservableObject {
               let prepared = preparedManualPauseState(
                   sessionID: sessionID,
                   at: date ?? clock.now
-              ),
-              commit(prepared.state, critical: true, normalizeAutomation: false) else {
+              ) else {
             return false
         }
+        lifecycleErrorSessionID = sessionID
+        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return false }
         refreshAfterLifecycleMutation(for: sessionID)
+        lifecycleErrorSessionID = nil
         return true
     }
 
@@ -1034,11 +1070,13 @@ final class SessionStore: ObservableObject {
               let prepared = preparedManualResumeState(
                   sessionID: sessionID,
                   at: date ?? clock.now
-              ),
-              commit(prepared.state, critical: true, normalizeAutomation: false) else {
+              ) else {
             return false
         }
+        lifecycleErrorSessionID = sessionID
+        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return false }
         refreshAfterLifecycleMutation(for: sessionID)
+        lifecycleErrorSessionID = nil
         return true
     }
 
@@ -1054,11 +1092,13 @@ final class SessionStore: ObservableObject {
               let prepared = preparedManualFinishState(
                   sessionID: sessionID,
                   at: date ?? clock.now
-              ),
-              commit(prepared.state, critical: true, normalizeAutomation: false) else {
+              ) else {
             return false
         }
+        lifecycleErrorSessionID = sessionID
+        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return false }
         refreshAfterLifecycleMutation(for: sessionID)
+        lifecycleErrorSessionID = nil
 
         if prepared.session.gitContext != nil || isGitCaptureInProgress(for: sessionID) {
             scheduleFinalGitCapture(for: sessionID)
@@ -1136,7 +1176,10 @@ final class SessionStore: ObservableObject {
               !isGitCaptureInProgress(for: sessionID) else {
             return false
         }
-        return completeFinishedSession(sessionID: sessionID, outcome: outcome)
+        lifecycleErrorSessionID = sessionID
+        let saved = completeFinishedSession(sessionID: sessionID, outcome: outcome)
+        if saved { lifecycleErrorSessionID = nil }
+        return saved
     }
 
     @discardableResult
@@ -1155,8 +1198,14 @@ final class SessionStore: ObservableObject {
         var nextState = state
         guard let index = nextState.activeSessionIndex(id: sessionID) else { return false }
         nextState.activeSessions[index].outcome = ActiveSession.cleanOptionalText(outcome)
-        guard nextState != state else { return true }
-        return commit(nextState, critical: true, normalizeAutomation: false)
+        guard nextState != state else {
+            lifecycleErrorSessionID = nil
+            return true
+        }
+        lifecycleErrorSessionID = sessionID
+        let updated = commit(nextState, critical: true, normalizeAutomation: false)
+        if updated { lifecycleErrorSessionID = nil }
+        return updated
     }
 
     @discardableResult
@@ -1180,9 +1229,11 @@ final class SessionStore: ObservableObject {
                 return false
             }
         }
+        lifecycleErrorSessionID = sessionID
         guard commit(nextState, critical: true, normalizeAutomation: false) else { return false }
         invalidateAsyncWork(for: sessionID)
         refreshAfterLifecycleMutation(for: sessionID)
+        lifecycleErrorSessionID = nil
         return true
     }
 

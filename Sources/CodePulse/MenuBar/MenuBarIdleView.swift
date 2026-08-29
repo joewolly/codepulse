@@ -2,7 +2,17 @@ import AppKit
 import SwiftUI
 
 struct MenuBarIdleView: View {
+    var body: some View {
+        MenuBarManualStartView(mode: .idle)
+    }
+}
+
+struct MenuBarManualStartView: View {
+    enum Mode { case idle, concurrent }
+
     @EnvironmentObject private var store: SessionStore
+    let mode: Mode
+    var onCreated: ((UUID) -> Void)? = nil
 
     @State private var selectedPresetID: UUID?
     @State private var selectedWorkspaceID: UUID?
@@ -20,13 +30,17 @@ struct MenuBarIdleView: View {
 
                 Spacer(minLength: 8)
 
-                Text("Idle")
+                Text(mode == .idle ? "Idle" : "New Session")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
             }
 
             if !store.sessionPresetsSorted.isEmpty {
-                MenuBarQuickStartView(selectedPresetID: $selectedPresetID)
+                MenuBarQuickStartView(
+                    selectedPresetID: $selectedPresetID,
+                    concurrent: mode == .concurrent,
+                    onCreated: onCreated
+                )
             }
 
             Divider()
@@ -48,7 +62,14 @@ struct MenuBarIdleView: View {
             }
 
             Button {
-                _ = store.startSession(projectID: selectedProjectID, goal: goal, type: selectedType)
+                let sessionID: UUID?
+                if mode == .concurrent {
+                    sessionID = store.createManualSession(projectID: selectedProjectID, goal: goal, type: selectedType)
+                } else {
+                    sessionID = store.startSession(projectID: selectedProjectID, goal: goal, type: selectedType)
+                        ? store.state.soleActiveSession?.id : nil
+                }
+                if let sessionID { onCreated?(sessionID) }
             } label: {
                 Label("Start Session", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
@@ -59,7 +80,10 @@ struct MenuBarIdleView: View {
             .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .controlSize(.large)
             .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(!store.isProjectAvailableForManualStart(selectedProjectID))
+            .disabled(
+                !store.isProjectAvailableForManualStart(selectedProjectID)
+                    || store.state.activeSessions.count >= ConcurrentSessionLimits.maximumActiveSessions
+            )
             .accessibilityLabel("Start Session")
             .accessibilityValue("Start Session")
             .accessibilityHint("Starts a \(selectedType.title.lowercased()) session")
@@ -145,6 +169,8 @@ struct MenuBarWorkspacePicker: View {
 private struct MenuBarQuickStartView: View {
     @EnvironmentObject private var store: SessionStore
     @Binding var selectedPresetID: UUID?
+    let concurrent: Bool
+    let onCreated: ((UUID) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -177,7 +203,13 @@ private struct MenuBarQuickStartView: View {
                 Button {
                     guard let selectedPresetID,
                           let preset = store.sessionPreset(id: selectedPresetID) else { return }
-                    _ = store.startSession(using: preset)
+                    let sessionID: UUID?
+                    if concurrent {
+                        sessionID = store.createManualSession(using: preset)
+                    } else {
+                        sessionID = store.startSession(using: preset) ? store.state.soleActiveSession?.id : nil
+                    }
+                    if let sessionID { onCreated?(sessionID) }
                 } label: {
                     Label("Start", systemImage: "play.fill")
                 }
@@ -187,7 +219,8 @@ private struct MenuBarQuickStartView: View {
                 .controlSize(.regular)
                 .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .disabled(selectedPresetID.flatMap { store.sessionPreset(id: $0) }
-                    .map { !store.isSessionPresetAvailableForManualStart($0) } ?? true)
+                    .map { !store.isSessionPresetAvailableForManualStart($0) } ?? true
+                    || store.state.activeSessions.count >= ConcurrentSessionLimits.maximumActiveSessions)
                 .accessibilityLabel("Start selected session preset")
                 .accessibilityHint("Starts a manual session using the selected preset, when it is still available")
             }

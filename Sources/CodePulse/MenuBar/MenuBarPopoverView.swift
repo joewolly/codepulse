@@ -9,6 +9,8 @@ struct MenuBarPopoverView: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedSessionID: UUID?
+    @State private var isPresentingNewSession = false
 
     private let onDismiss: (() -> Void)?
     private let onOpenInsights: (() -> Void)?
@@ -22,7 +24,7 @@ struct MenuBarPopoverView: View {
         let dismissPopover = onDismiss ?? { dismiss() }
 
         Group {
-            if store.isInRecoveryMode || store.phase == .finishing || store.lifecycleErrorMessage != nil {
+            if store.isInRecoveryMode || !store.state.activeSessions.isEmpty || store.lifecycleErrorMessage != nil {
                 ScrollView(.vertical) {
                     popoverContent(dismissPopover: dismissPopover)
                 }
@@ -33,6 +35,12 @@ struct MenuBarPopoverView: View {
         }
         .frame(width: Self.standardWidth, alignment: .leading)
         .padding(.vertical, 16)
+        .onChange(of: store.state.activeSessions.map(\.id)) { sessionIDs in
+            if let selectedSessionID, !sessionIDs.contains(selectedSessionID) {
+                self.selectedSessionID = nil
+            }
+            if sessionIDs.isEmpty { isPresentingNewSession = false }
+        }
     }
 
     @ViewBuilder
@@ -41,7 +49,7 @@ struct MenuBarPopoverView: View {
             if let lifecycleErrorMessage = store.lifecycleErrorMessage,
                !store.isInRecoveryMode {
                 MenuBarLifecycleErrorView(
-                    message: lifecycleErrorMessage,
+                    message: scopedLifecycleErrorMessage(lifecycleErrorMessage),
                     dismiss: store.dismissLifecycleError
                 )
                 .padding(.bottom, 10)
@@ -52,14 +60,7 @@ struct MenuBarPopoverView: View {
                     windowCoordinator.showRecovery()
                 }
             } else {
-                switch store.phase {
-                case .idle:
-                    MenuBarIdleView()
-                case .running, .paused:
-                    MenuBarActiveView()
-                case .finishing:
-                    MenuBarFinishingView()
-                }
+                routedContent
 
                 Divider()
                     .padding(.vertical, 14)
@@ -69,6 +70,74 @@ struct MenuBarPopoverView: View {
         }
         .frame(width: Self.contentWidth, alignment: .leading)
         .padding(.horizontal, 16)
+    }
+
+    private func scopedLifecycleErrorMessage(_ message: String) -> String {
+        guard let sessionID = store.lifecycleErrorSessionID,
+              let session = store.state.activeSession(id: sessionID) else { return message }
+        let name = session.projectName.flatMap { $0.isEmpty ? nil : $0 } ?? "No Project"
+        return "\(name): \(message)"
+    }
+
+    @ViewBuilder
+    private var routedContent: some View {
+        let sessions = store.state.activeSessions
+        if isPresentingNewSession {
+            navigationHeader(title: "New Session") { isPresentingNewSession = false }
+            MenuBarManualStartView(mode: .concurrent) { _ in
+                isPresentingNewSession = false
+                selectedSessionID = nil
+            }
+        } else if let selectedSessionID,
+                  let session = store.state.activeSession(id: selectedSessionID),
+                  sessions.count > 1 {
+            navigationHeader(title: session.projectName ?? "No Project") {
+                self.selectedSessionID = nil
+            }
+            sessionDetail(session)
+        } else if sessions.isEmpty {
+            MenuBarIdleView()
+        } else if sessions.count == 1, let session = sessions.first {
+            HStack {
+                Spacer()
+                Button { isPresentingNewSession = true } label: {
+                    Label("New Session…", systemImage: "plus")
+                }
+                .disabled(sessions.count >= ConcurrentSessionLimits.maximumActiveSessions)
+                .accessibilityIdentifier("new-session-button")
+            }
+            sessionDetail(session)
+        } else {
+            MenuBarActiveSessionsHubView(
+                selectSession: { selectedSessionID = $0 },
+                newSession: { isPresentingNewSession = true }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func sessionDetail(_ session: ActiveSession) -> some View {
+        switch session.phase {
+        case .running, .paused:
+            MenuBarActiveView(sessionID: session.id)
+        case .finishing:
+            MenuBarFinishingView(sessionID: session.id)
+        case .idle:
+            EmptyView()
+        }
+    }
+
+    private func navigationHeader(title: String, back: @escaping () -> Void) -> some View {
+        HStack {
+            Button(action: back) {
+                Label("Back to Active Sessions", systemImage: "chevron.left")
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("back-to-active-sessions")
+            Spacer()
+            Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(.bottom, 10)
     }
 }
 
