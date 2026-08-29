@@ -393,6 +393,104 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
         XCTAssertEqual(state.completedSessions[1].gitContext?.commitCount, 2)
     }
 
+    func testProvenAmbiguitySurvivesPeerRemovalAndCompletedHistoryDeletion() {
+        let first = completed(id: UUID(), root: "/repo-a", start: 10, end: 30,
+                              commitCount: 2, filesChanged: 3, insertions: 4, deletions: 1)
+        let second = completed(id: UUID(), root: "/repo-a", start: 20, end: 40,
+                               commitCount: 5, filesChanged: 6, insertions: 7, deletions: 2)
+        let unrelated = completed(id: UUID(), root: "/repo-b", start: 10, end: 20,
+                                  commitCount: 8, filesChanged: 9, insertions: 10, deletions: 3)
+        var state = AppState(completedSessions: [first, second, unrelated])
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions[0].gitContext?.deltaAttribution, .ambiguous)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.deltaAttribution, .ambiguous)
+        XCTAssertNil(state.completedSessions[1].gitContext?.commitCount)
+        let unrelatedAfterConflict = state.completedSessions[2]
+
+        state.completedSessions.removeAll { $0.id == first.id }
+        state.reconcileGitObservationAttribution()
+
+        let survivor = state.completedSessions.first { $0.id == second.id }
+        XCTAssertEqual(survivor?.gitContext?.deltaAttribution, .ambiguous)
+        XCTAssertNil(survivor?.gitContext?.commitCount)
+        XCTAssertNil(survivor?.gitContext?.filesChanged)
+        XCTAssertNil(survivor?.gitContext?.insertions)
+        XCTAssertNil(survivor?.gitContext?.deletions)
+        XCTAssertEqual(state.completedSessions.first { $0.id == unrelated.id }, unrelatedAfterConflict)
+    }
+
+    func testFinalCaptureCannotResurrectAmbiguousNumbersAfterPeerDiscard() async throws {
+        let root = try makeTemporaryDirectory(named: "preserved-ambiguity")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let project = ProjectRecord(name: "Shared", folderPath: root.path, createdAt: start)
+        var sessionA = ActiveSession(id: UUID(), projectID: project.id, projectName: project.name,
+                                     startedAt: start, phase: .finishing)
+        sessionA.endedAt = start.addingTimeInterval(25)
+        sessionA.gitContext = gitContext(root: root.path, start: 10, end: 25, attribution: .ambiguous)
+        var sessionB = ActiveSession(id: UUID(), projectID: project.id, projectName: project.name,
+                                     startedAt: start.addingTimeInterval(5))
+        sessionB.gitContext = gitContext(root: root.path, start: 15, end: nil, attribution: .ambiguous)
+        let unrelated = completed(id: UUID(), root: "/repo-b", start: 1, end: 2,
+                                  commitCount: 9, filesChanged: 8, insertions: 7, deletions: 6,
+                                  attribution: .attributable)
+        let persistence = Phase2TestPersistence(AppState(
+            projects: [project],
+            completedSessions: [unrelated],
+            activeSessions: [sessionA, sessionB]
+        ))
+        let finalEntered = expectation(description: "B final entered")
+        let finalRelease = DispatchSemaphore(value: 0)
+        var statistics = GitDiffStatistics()
+        statistics.add(GitNumstatEntry(path: "Sources/A.swift", insertions: 11, deletions: 3))
+        let finalSnapshot = GitFinishSnapshot(
+            branch: "main",
+            headSHA: "final-b",
+            isDetached: false,
+            commitCount: 4,
+            statistics: statistics,
+            observationEndedAt: start.addingTimeInterval(40)
+        )
+        let service = Phase2ControlledGitService(finishPlans: [root.path: .init(
+            snapshot: finalSnapshot, entered: finalEntered, release: finalRelease
+        )])
+        let store = makeStore(persistence: persistence, gitService: service)
+
+        XCTAssertTrue(store.discardSession(sessionID: sessionA.id))
+        XCTAssertNil(store.state.activeSession(id: sessionA.id))
+        XCTAssertEqual(store.state.activeSession(id: sessionB.id)?.gitContext?.deltaAttribution, .ambiguous)
+        let unrelatedAfterDiscard = try XCTUnwrap(store.state.completedSessions.first { $0.id == unrelated.id })
+        XCTAssertTrue(store.finish(sessionID: sessionB.id, at: start.addingTimeInterval(30)))
+        await fulfillment(of: [finalEntered], timeout: 2)
+        finalRelease.signal()
+        try await waitFor { !store.isGitCaptureInProgress(for: sessionB.id) }
+
+        let survivingContext = try XCTUnwrap(store.state.activeSession(id: sessionB.id)?.gitContext)
+        XCTAssertEqual(survivingContext.deltaAttribution, .ambiguous)
+        XCTAssertNil(survivingContext.commitCount)
+        XCTAssertNil(survivingContext.filesChanged)
+        XCTAssertNil(survivingContext.insertions)
+        XCTAssertNil(survivingContext.deletions)
+        XCTAssertEqual(store.state.completedSessions, [unrelatedAfterDiscard])
+    }
+
+    func testProvisionalAmbiguityClearsWhenSurvivingPeersProveSeparation() {
+        let first = completed(id: UUID(), root: "/repo-a", start: 10, end: 20,
+                              commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
+                              attribution: .ambiguous)
+        let second = completed(id: UUID(), root: "/repo-a", start: 21, end: 30,
+                               commitCount: 3, filesChanged: 4, insertions: 5, deletions: 1,
+                               attribution: .ambiguous)
+        var state = AppState(completedSessions: [first, second])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions.map { $0.gitContext?.deltaAttribution }, [.attributable, .attributable])
+        XCTAssertNil(state.completedSessions[0].gitContext?.commitCount)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.commitCount, 3)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.filesChanged, 4)
+    }
+
     func testStaleGitCallbackAfterDiscardIsIgnored() async throws {
         let root = try makeTemporaryDirectory(named: "discard")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -525,6 +623,23 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
     private func startSnapshot(root: URL, sha: String) -> GitStartSnapshot {
         GitStartSnapshot(repositoryRoot: root, branch: "main", headSHA: sha, isDetached: false,
                          preExistingWorkingTreePaths: [], observationStartedAt: start.addingTimeInterval(10))
+    }
+
+    private func gitContext(
+        root: String,
+        start: TimeInterval?,
+        end: TimeInterval?,
+        attribution: GitDeltaAttribution?
+    ) -> GitSessionContext {
+        GitSessionContext(
+            repositoryRoot: root,
+            branchAtStart: "main",
+            startHeadSHA: "start",
+            startWasDetached: false,
+            observationStartedAt: start.map { self.start.addingTimeInterval($0) },
+            observationEndedAt: end.map { self.start.addingTimeInterval($0) },
+            deltaAttribution: attribution
+        )
     }
 
     private func waitFor(

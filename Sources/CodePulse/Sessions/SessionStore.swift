@@ -3417,6 +3417,7 @@ final class SessionStore: ObservableObject {
 
         let status: SessionGitCaptureStatus
         if let snapshot {
+            let hadProvenAmbiguity = gitContext.deltaAttribution == .ambiguous
             gitContext.branchAtEnd = snapshot.branch
             gitContext.endHeadSHA = snapshot.headSHA
             gitContext.endWasDetached = snapshot.isDetached
@@ -3442,7 +3443,11 @@ final class SessionStore: ObservableObject {
                     gitContext.insertions = nil
                     gitContext.deletions = nil
                 }
-                gitContext.deltaAttribution = .attributable
+                // Reconciliation may clear a prior ambiguity only when the
+                // conflicting same-root peer evidence is still present and
+                // now proves every comparison strictly separated. Preserve
+                // the marker until that decision is made.
+                gitContext.deltaAttribution = hadProvenAmbiguity ? .ambiguous : .attributable
             } else {
                 gitContext.commitCount = nil
                 gitContext.filesChanged = nil

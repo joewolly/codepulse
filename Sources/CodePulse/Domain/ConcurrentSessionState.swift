@@ -622,6 +622,7 @@ enum GitObservationAttributionResolver {
         }
 
         var ambiguousIDs = Set<UUID>()
+        var comparedIDs = Set<UUID>()
         let observationsByRoot = Dictionary(grouping: observations, by: \.repositoryRoot)
         for sameRootObservations in observationsByRoot.values where sameRootObservations.count > 1 {
             for leftIndex in sameRootObservations.indices {
@@ -629,6 +630,8 @@ enum GitObservationAttributionResolver {
                 let left = sameRootObservations[leftIndex]
                 for right in sameRootObservations[(leftIndex + 1)...] {
                     guard left.id != right.id else { continue }
+                    comparedIDs.insert(left.id)
+                    comparedIDs.insert(right.id)
                     if windowsMayOverlap(left, right) {
                         ambiguousIDs.insert(left.id)
                         ambiguousIDs.insert(right.id)
@@ -643,10 +646,13 @@ enum GitObservationAttributionResolver {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.deltaAttribution == .indeterminate {
                 suppressNumericDeltas(in: &context, attribution: .indeterminate)
+            } else if context.deltaAttribution == .ambiguous,
+                      !comparedIDs.contains(state.activeSessions[index].id) {
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.hasCompleteObservationWindow {
                 context.deltaAttribution = .attributable
             } else if context.deltaAttribution == .ambiguous {
-                context.deltaAttribution = nil
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
             }
             state.activeSessions[index].gitContext = context
         }
@@ -657,10 +663,13 @@ enum GitObservationAttributionResolver {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.deltaAttribution == .indeterminate {
                 suppressNumericDeltas(in: &context, attribution: .indeterminate)
+            } else if context.deltaAttribution == .ambiguous,
+                      !comparedIDs.contains(state.completedSessions[index].id) {
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.hasCompleteObservationWindow {
                 context.deltaAttribution = .attributable
             } else if context.deltaAttribution == .ambiguous {
-                context.deltaAttribution = nil
+                suppressNumericDeltas(in: &context, attribution: .ambiguous)
             }
             let existing = state.completedSessions[index]
             state.completedSessions[index] = CompletedSession(
