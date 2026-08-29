@@ -89,7 +89,12 @@ final class SessionStore: ObservableObject {
     @Published private(set) var state: AppState
     @Published private(set) var stateRevision = 0
     @Published private(set) var now: Date
+    /// Compatibility aggregate for the original menu-bar callers. The
+    /// authoritative capture state is `gitCaptureStates`, keyed by Session
+    /// UUID; this flag is never consulted to decide another Session's
+    /// lifecycle or save eligibility.
     @Published private(set) var gitCaptureInProgress = false
+    @Published private(set) var gitCaptureStates: [UUID: SessionGitCaptureState] = [:]
     @Published private(set) var lifecycleErrorMessage: String?
     @Published private(set) var isInRecoveryMode: Bool
 
@@ -103,7 +108,14 @@ final class SessionStore: ObservableObject {
     let controlTransport: CodePulseControlTransport?
     var calendar: Calendar
     private var refreshTimer: Timer?
-    private var gitCaptureSessionID: UUID?
+    private struct AsyncJobIdentity: Equatable {
+        let token: UUID
+        let stateGeneration: UUID
+    }
+    private var githubCaptureJobs: [UUID: AsyncJobIdentity] = [:]
+    /// Replacing/restoring state invalidates every callback from the prior
+    /// state generation, even when a UUID is later reused by the replacement.
+    private var stateGeneration = UUID()
     private var lastIntegrationScanAt: Date?
     private let controlLaunchDate: Date
     private var lastControlScanAt: Date?
@@ -141,7 +153,6 @@ final class SessionStore: ObservableObject {
         self.isInRecoveryMode = recoveryMode
         let initialNow = clock.now
         self.now = initialNow
-        self.gitCaptureSessionID = nil
         self.lastIntegrationScanAt = nil
         self.controlLaunchDate = initialNow
         self.lastControlScanAt = nil
@@ -205,6 +216,55 @@ final class SessionStore: ObservableObject {
     }
 
     var activeSession: ActiveSession? { state.soleActiveSession }
+
+    /// Returns the aggregate status for one Session's Git work. A terminal
+    /// status is retained until that Session retires so UI/tests can explain
+    /// why saving is or is not available.
+    func gitCaptureStatus(for sessionID: UUID) -> SessionGitCaptureStatus? {
+        gitCaptureStates[sessionID]?.aggregateStatus
+    }
+
+    func isGitCaptureInProgress(for sessionID: UUID) -> Bool {
+        gitCaptureStates[sessionID]?.isInFlight == true
+    }
+
+    var hasAnyRelevantGitCaptureInProgress: Bool {
+        gitCaptureStates.values.contains(where: \.isInFlight)
+    }
+
+    private var hasAnyRelevantCaptureOrEnrichmentInProgress: Bool {
+        hasAnyRelevantGitCaptureInProgress || !githubCaptureJobs.isEmpty
+    }
+
+    private func refreshGitCaptureAggregate() {
+        let value = hasAnyRelevantGitCaptureInProgress
+        if gitCaptureInProgress != value {
+            gitCaptureInProgress = value
+        }
+    }
+
+    /// A newly completed same-root observation can make a different
+    /// Session's already-terminal Git numbers ambiguous. Reflect that derived
+    /// outcome in the per-Session status without disturbing an in-flight
+    /// start/final job.
+    private func refreshTerminalGitCaptureStatuses() {
+        // Snapshot the keys before assigning updated values. This keeps the
+        // reconciliation safe even on runtimes that treat value assignment as
+        // a dictionary mutation during key-view iteration.
+        for sessionID in Array(gitCaptureStates.keys) {
+            guard var capture = gitCaptureStates[sessionID],
+                  !capture.isInFlight,
+                  state.activeSession(id: sessionID)?.gitContext?.deltaAttribution == .ambiguous else {
+                continue
+            }
+            if capture.finalStatus != nil {
+                capture.finalStatus = .ambiguous
+            } else if capture.startStatus != nil {
+                capture.startStatus = .ambiguous
+            }
+            gitCaptureStates[sessionID] = capture
+        }
+    }
 
     private func replaceActiveSession(_ session: ActiveSession, in state: inout AppState) -> Bool {
         guard let index = state.activeSessionIndex(id: session.id) else { return false }
@@ -526,6 +586,29 @@ final class SessionStore: ObservableObject {
         evaluateAutomaticLifecycle(at: now)
     }
 
+    /// The historical one-session UI refreshes immediately after a lifecycle
+    /// transition. With concurrent Sessions, that collection-wide pass could
+    /// mutate an unrelated automated Session as a side effect of targeting
+    /// this one. Keep the compatibility refresh only while the target remains
+    /// the sole active Session; otherwise advance the display clock without
+    /// running another Session's lifecycle evaluator.
+    private func refreshAfterLifecycleMutation(for sessionID: UUID) {
+        now = clock.now
+        // With no remaining active Session there is no unrelated lifecycle
+        // owner to advance, so retain the historical post-retirement refresh
+        // (including a pending integration-event drain). When another Session
+        // remains, only refresh while the target is still the sole owner.
+        if state.activeSessions.isEmpty {
+            refresh()
+            return
+        }
+        guard state.activeSessions.count == 1,
+              state.activeSession(id: sessionID) != nil else {
+            return
+        }
+        refresh()
+    }
+
     /// Feeds only the current frontmost identity into the coordinator. No
     /// activation history is retained or persisted.
     func handleFrontmostApplication(_ application: ApplicationIdentity?) {
@@ -599,17 +682,47 @@ final class SessionStore: ObservableObject {
         type: SessionType = .coding,
         at date: Date? = nil
     ) -> Bool {
-        let didStart = startSessionInternal(
+        // Keep the menu-bar compatibility entry point's original single-
+        // Session behavior. Phase 2 callers that need concurrent manual
+        // Sessions use `createManualSession`, which returns the new UUID.
+        guard state.activeSessions.isEmpty else { return false }
+        let didStart = createManualSession(
             projectID: projectID,
             goal: goal,
             type: type,
-            at: date ?? clock.now,
-            automationMetadata: nil
-        )
+            at: date
+        ) != nil
         if didStart {
             processPendingIntegrationEvents(force: true)
         }
         return didStart
+    }
+
+    /// Creates and durably commits one manual Session, returning its stable
+    /// UUID only after the critical start state has been persisted. Existing
+    /// active Sessions are left unchanged, subject only to the new Project's
+    /// `lastUsedAt` update.
+    @discardableResult
+    func createManualSession(
+        projectID: UUID?,
+        goal: String?,
+        type: SessionType = .coding,
+        at date: Date? = nil
+    ) -> UUID? {
+        guard let prepared = preparedStartState(
+            projectID: projectID,
+            goal: goal,
+            type: type,
+            at: date ?? clock.now,
+            automationMetadata: nil,
+            gitDiscoveryFolderURL: nil
+        ) else {
+            return nil
+        }
+        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return nil }
+        now = clock.now
+        scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
+        return prepared.session.id
     }
 
     @discardableResult
@@ -635,6 +748,11 @@ final class SessionStore: ObservableObject {
         ) else {
             return false
         }
+        guard let canonicalWorkingDirectory = DeveloperToolProjectPathMatcher.canonicalPath(
+            for: event.workingDirectory
+        ) else {
+            return false
+        }
 
         return startAutomatedSession(
             with: rule,
@@ -645,7 +763,8 @@ final class SessionStore: ObservableObject {
                 externalSessionID: event.externalSessionID
             ),
             at: startDate,
-            signalAt: signalAt
+            signalAt: signalAt,
+            gitDiscoveryFolderURL: URL(fileURLWithPath: canonicalWorkingDirectory, isDirectory: true)
         )
     }
 
@@ -659,7 +778,8 @@ final class SessionStore: ObservableObject {
         event: DeveloperToolEvent,
         source: SessionAutomationClaimSource,
         at startDate: Date,
-        signalAt: Date
+        signalAt: Date,
+        gitDiscoveryFolderURL: URL?
     ) -> Bool {
         guard DeveloperToolProjectResolver.projectID(
                   for: event.workingDirectory,
@@ -677,7 +797,8 @@ final class SessionStore: ObservableObject {
             resolvedProjectID: resolvedProjectID,
             source: source,
             at: startDate,
-            signalAt: signalAt
+            signalAt: signalAt,
+            gitDiscoveryFolderURL: gitDiscoveryFolderURL
         )
     }
 
@@ -687,7 +808,8 @@ final class SessionStore: ObservableObject {
         resolvedProjectID: UUID,
         source: SessionAutomationClaimSource,
         at startDate: Date,
-        signalAt: Date
+        signalAt: Date,
+        gitDiscoveryFolderURL: URL? = nil
     ) -> Bool {
         guard rule.isEnabled,
               rule.isValid,
@@ -732,7 +854,8 @@ final class SessionStore: ObservableObject {
             goal: preset.goal,
             type: preset.sessionType,
             at: startDate,
-            automationMetadata: metadata
+            automationMetadata: metadata,
+            gitDiscoveryFolderURL: gitDiscoveryFolderURL
         )
     }
 
@@ -780,7 +903,8 @@ final class SessionStore: ObservableObject {
             goal: preset.goal,
             type: preset.sessionType,
             at: startDate,
-            automationMetadata: metadata
+            automationMetadata: metadata,
+            gitDiscoveryFolderURL: nil
         )
     }
 
@@ -789,7 +913,8 @@ final class SessionStore: ObservableObject {
         goal: String?,
         type: SessionType,
         at startDate: Date,
-        automationMetadata: SessionAutomationMetadata?
+        automationMetadata: SessionAutomationMetadata?,
+        gitDiscoveryFolderURL: URL? = nil
     ) -> Bool {
         guard !isInRecoveryMode else { return false }
         guard let prepared = preparedStartState(
@@ -797,7 +922,8 @@ final class SessionStore: ObservableObject {
             goal: goal,
             type: type,
             at: startDate,
-            automationMetadata: automationMetadata
+            automationMetadata: automationMetadata,
+            gitDiscoveryFolderURL: gitDiscoveryFolderURL
         ) else {
             return false
         }
@@ -813,16 +939,17 @@ final class SessionStore: ObservableObject {
         goal: String?,
         type: SessionType,
         at startDate: Date,
-        automationMetadata: SessionAutomationMetadata?
+        automationMetadata: SessionAutomationMetadata?,
+        gitDiscoveryFolderURL: URL? = nil
     ) -> (state: AppState, session: ActiveSession, folderURL: URL?)? {
-        guard state.activeSessions.isEmpty else { return nil }
+        guard state.activeSessions.count < ConcurrentSessionLimits.maximumActiveSessions else { return nil }
 
         guard projectID == nil || state.projects.contains(where: { $0.id == projectID && $0.isActive }) else {
             return nil
         }
 
         let project = projectID.flatMap { id in state.projects.first(where: { $0.id == id }) }
-        let folderURL = project.flatMap { projectFolderURL(for: $0) }
+        let folderURL = gitDiscoveryFolderURL ?? project.flatMap { projectFolderURL(for: $0) }
         let session = ActiveSession(
             projectID: project?.id,
             projectName: project?.name,
@@ -872,37 +999,79 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func pause(at date: Date? = nil) -> Bool {
-        guard !isInRecoveryMode else { return false }
-        guard let prepared = preparedManualPauseState(at: date ?? clock.now) else { return false }
-        guard commit(prepared.state, critical: true) else { return false }
-        refresh()
+        guard let sessionID = uniqueEligibleSessionID(for: [.running]) else { return false }
+        return pause(sessionID: sessionID, at: date)
+    }
+
+    @discardableResult
+    func pause(sessionID: UUID, at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode,
+              let prepared = preparedManualPauseState(
+                  sessionID: sessionID,
+                  at: date ?? clock.now
+              ),
+              commit(prepared.state, critical: true, normalizeAutomation: false) else {
+            return false
+        }
+        refreshAfterLifecycleMutation(for: sessionID)
         return true
     }
 
     @discardableResult
     func resume(at date: Date? = nil) -> Bool {
-        guard !isInRecoveryMode else { return false }
-        guard let prepared = preparedManualResumeState(at: date ?? clock.now) else { return false }
-        guard commit(prepared.state, critical: true) else { return false }
-        refresh()
+        guard let sessionID = uniqueEligibleSessionID(for: [.paused]) else { return false }
+        return resume(sessionID: sessionID, at: date)
+    }
+
+    @discardableResult
+    func resume(sessionID: UUID, at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode,
+              let prepared = preparedManualResumeState(
+                  sessionID: sessionID,
+                  at: date ?? clock.now
+              ),
+              commit(prepared.state, critical: true, normalizeAutomation: false) else {
+            return false
+        }
+        refreshAfterLifecycleMutation(for: sessionID)
         return true
     }
 
     @discardableResult
     func finish(at date: Date? = nil) -> Bool {
-        guard !isInRecoveryMode else { return false }
-        guard let prepared = preparedManualFinishState(at: date ?? clock.now) else { return false }
-        guard commit(prepared.state, critical: true) else { return false }
-        refresh()
+        guard let sessionID = uniqueEligibleSessionID(for: [.running, .paused]) else { return false }
+        return finish(sessionID: sessionID, at: date)
+    }
 
-        if prepared.session.gitContext != nil {
-            scheduleFinalGitCapture(for: prepared.session.id)
+    @discardableResult
+    func finish(sessionID: UUID, at date: Date? = nil) -> Bool {
+        guard !isInRecoveryMode,
+              let prepared = preparedManualFinishState(
+                  sessionID: sessionID,
+                  at: date ?? clock.now
+              ),
+              commit(prepared.state, critical: true, normalizeAutomation: false) else {
+            return false
+        }
+        refreshAfterLifecycleMutation(for: sessionID)
+
+        if prepared.session.gitContext != nil || isGitCaptureInProgress(for: sessionID) {
+            scheduleFinalGitCapture(for: sessionID)
         }
         return true
     }
 
-    private func preparedManualPauseState(at date: Date) -> (state: AppState, session: ActiveSession)? {
-        guard var session = state.soleActiveSession,
+    private func uniqueEligibleSessionID(for phases: Set<SessionPhase>) -> UUID? {
+        let matches = state.activeSessions.filter { phases.contains($0.phase) }.map(\.id)
+        guard matches.count == 1 else { return nil }
+        return matches[0]
+    }
+
+    private func preparedManualPauseState(
+        sessionID: UUID,
+        at date: Date
+    ) -> (state: AppState, session: ActiveSession)? {
+        guard var session = state.activeSession(id: sessionID),
               session.pause(at: date) else {
             return nil
         }
@@ -912,8 +1081,11 @@ final class SessionStore: ObservableObject {
         return (nextState, session)
     }
 
-    private func preparedManualResumeState(at date: Date) -> (state: AppState, session: ActiveSession)? {
-        guard var session = state.soleActiveSession,
+    private func preparedManualResumeState(
+        sessionID: UUID,
+        at date: Date
+    ) -> (state: AppState, session: ActiveSession)? {
+        guard var session = state.activeSession(id: sessionID),
               session.resume(at: date) else {
             return nil
         }
@@ -923,8 +1095,11 @@ final class SessionStore: ObservableObject {
         return (nextState, session)
     }
 
-    private func preparedManualFinishState(at date: Date) -> (state: AppState, session: ActiveSession)? {
-        guard var session = state.soleActiveSession,
+    private func preparedManualFinishState(
+        sessionID: UUID,
+        at date: Date
+    ) -> (state: AppState, session: ActiveSession)? {
+        guard var session = state.activeSession(id: sessionID),
               session.finish(at: date) else {
             return nil
         }
@@ -936,45 +1111,73 @@ final class SessionStore: ObservableObject {
 
     @discardableResult
     func saveFinishedSession(outcome: String?) -> Bool {
-        guard !isInRecoveryMode else { return false }
-        processPendingIntegrationEvents(force: true)
-        guard !gitCaptureInProgress else { return false }
-        return completeFinishedSession(outcome: outcome)
+        guard let sessionID = uniqueEligibleSessionID(for: [.finishing]) else { return false }
+        return saveFinishedSession(sessionID: sessionID, outcome: outcome)
+    }
+
+    @discardableResult
+    func saveFinishedSession(sessionID: UUID, outcome: String?) -> Bool {
+        guard !isInRecoveryMode,
+              state.activeSession(id: sessionID)?.phase == .finishing else {
+            return false
+        }
+        // Preserve the legacy force-drain for the one-session UI, but do not
+        // let an explicit save of A process a pending event that can mutate B
+        // while concurrent Sessions are present.
+        if state.activeSessions.count == 1 {
+            processPendingIntegrationEvents(force: true)
+        }
+        guard state.activeSession(id: sessionID)?.phase == .finishing,
+              !isGitCaptureInProgress(for: sessionID) else {
+            return false
+        }
+        return completeFinishedSession(sessionID: sessionID, outcome: outcome)
     }
 
     @discardableResult
     func updateFinishingOutcome(_ outcome: String?) -> Bool {
+        guard let sessionID = uniqueEligibleSessionID(for: [.finishing]) else { return false }
+        return updateFinishingOutcome(sessionID: sessionID, outcome: outcome)
+    }
+
+    @discardableResult
+    func updateFinishingOutcome(sessionID: UUID, outcome: String?) -> Bool {
         guard !isInRecoveryMode,
-              state.soleActiveSession?.phase == .finishing else {
+              state.activeSession(id: sessionID)?.phase == .finishing else {
             return false
         }
 
         var nextState = state
-        guard let index = nextState.activeSessionIndex(id: state.soleActiveSession!.id) else { return false }
+        guard let index = nextState.activeSessionIndex(id: sessionID) else { return false }
         nextState.activeSessions[index].outcome = ActiveSession.cleanOptionalText(outcome)
         guard nextState != state else { return true }
-        return commit(nextState, critical: true)
+        return commit(nextState, critical: true, normalizeAutomation: false)
     }
 
     @discardableResult
     func discardSession() -> Bool {
+        guard let sessionID = uniqueEligibleSessionID(for: [.finishing]) else { return false }
+        return discardSession(sessionID: sessionID)
+    }
+
+    @discardableResult
+    func discardSession(sessionID: UUID) -> Bool {
         guard !isInRecoveryMode,
-              state.soleActiveSession?.phase == .finishing else { return false }
+              state.activeSession(id: sessionID)?.phase == .finishing else { return false }
         var nextState = state
-        if var session = nextState.soleActiveSession {
+        if var session = nextState.activeSession(id: sessionID) {
             relinquishManualAutomationControl(in: &session)
             guard replaceActiveSession(session, in: &nextState) else { return false }
             do {
                 try nextState.retireDeveloperToolOwnership(for: session, retiredAt: clock.now)
-                _ = try nextState.removeActiveSession(id: session.id)
+                _ = try nextState.removeActiveSession(id: sessionID)
             } catch {
                 return false
             }
         }
-        guard commit(nextState, critical: true) else { return false }
-        gitCaptureSessionID = nil
-        gitCaptureInProgress = false
-        refresh()
+        guard commit(nextState, critical: true, normalizeAutomation: false) else { return false }
+        invalidateAsyncWork(for: sessionID)
+        refreshAfterLifecycleMutation(for: sessionID)
         return true
     }
 
@@ -1148,7 +1351,8 @@ final class SessionStore: ObservableObject {
             return committedResponse
 
         case .pause:
-            guard let prepared = preparedManualPauseState(at: date) else {
+            guard let sessionID = uniqueEligibleSessionID(for: [.running]),
+                  let prepared = preparedManualPauseState(sessionID: sessionID, at: date) else {
                 return recordControlFailure(
                     commandID: command.id,
                     result: .invalidStateTransition,
@@ -1167,11 +1371,12 @@ final class SessionStore: ObservableObject {
             appendControlResponse(response, to: &nextState, at: date)
             let committedResponse = commitControlMutation(response, state: nextState)
             guard committedResponse.result == .success else { return committedResponse }
-            refresh()
+            refreshAfterLifecycleMutation(for: sessionID)
             return committedResponse
 
         case .resume:
-            guard let prepared = preparedManualResumeState(at: date) else {
+            guard let sessionID = uniqueEligibleSessionID(for: [.paused]),
+                  let prepared = preparedManualResumeState(sessionID: sessionID, at: date) else {
                 return recordControlFailure(
                     commandID: command.id,
                     result: .invalidStateTransition,
@@ -1190,11 +1395,12 @@ final class SessionStore: ObservableObject {
             appendControlResponse(response, to: &nextState, at: date)
             let committedResponse = commitControlMutation(response, state: nextState)
             guard committedResponse.result == .success else { return committedResponse }
-            refresh()
+            refreshAfterLifecycleMutation(for: sessionID)
             return committedResponse
 
         case .finish:
-            guard let prepared = preparedManualFinishState(at: date) else {
+            guard let sessionID = uniqueEligibleSessionID(for: [.running, .paused]),
+                  let prepared = preparedManualFinishState(sessionID: sessionID, at: date) else {
                 return recordControlFailure(
                     commandID: command.id,
                     result: .invalidStateTransition,
@@ -1213,8 +1419,8 @@ final class SessionStore: ObservableObject {
             appendControlResponse(response, to: &nextState, at: date)
             let committedResponse = commitControlMutation(response, state: nextState)
             guard committedResponse.result == .success else { return committedResponse }
-            refresh()
-            if prepared.session.gitContext != nil {
+            refreshAfterLifecycleMutation(for: sessionID)
+            if prepared.session.gitContext != nil || isGitCaptureInProgress(for: sessionID) {
                 scheduleFinalGitCapture(for: prepared.session.id)
             }
             return committedResponse
@@ -1367,7 +1573,7 @@ final class SessionStore: ObservableObject {
         _ response: CodePulseControlResponse,
         state nextState: AppState
     ) -> CodePulseControlResponse {
-        guard commit(nextState, critical: true) else {
+        guard commit(nextState, critical: true, normalizeAutomation: false) else {
             controlCommandNeedsRetry = true
             return CodePulseControlResponse(
                 commandID: response.commandID,
@@ -2118,7 +2324,7 @@ final class SessionStore: ObservableObject {
     }
 
     func restoreBackup(_ candidate: BackupRestoreCandidate) throws -> BackupRestoreResult {
-        guard state.activeSessions.isEmpty, !gitCaptureInProgress else {
+        guard state.activeSessions.isEmpty, !hasAnyRelevantCaptureOrEnrichmentInProgress else {
             throw BackupRestoreError.activeSession
         }
         guard let restoringPersistence = persistence as? StateRestoring else {
@@ -2145,6 +2351,10 @@ final class SessionStore: ObservableObject {
             isInRecoveryMode = false
             lifecycleErrorMessage = nil
             now = restoreAcceptanceDate
+            stateGeneration = UUID()
+            gitCaptureStates.removeAll()
+            githubCaptureJobs.removeAll()
+            refreshGitCaptureAggregate()
             configureApplicationMonitoring()
             restoreAutomaticFinishingState()
             return BackupRestoreResult(
@@ -2184,7 +2394,11 @@ final class SessionStore: ObservableObject {
     }
 
     @discardableResult
-    private func commit(_ nextState: AppState, critical: Bool = false) -> Bool {
+    private func commit(
+        _ nextState: AppState,
+        critical: Bool = false,
+        normalizeAutomation: Bool = true
+    ) -> Bool {
         guard !isInRecoveryMode else {
             if critical {
                 lastCriticalCommitFailed = true
@@ -2194,7 +2408,9 @@ final class SessionStore: ObservableObject {
 
         var normalizedState = nextState
         normalizeProjectConfiguration(in: &normalizedState)
-        relinquishInvalidAutomation(in: &normalizedState)
+        if normalizeAutomation {
+            relinquishInvalidAutomation(in: &normalizedState)
+        }
 
         do {
             try AppStateIntegrityValidator.validate(normalizedState)
@@ -2362,6 +2578,11 @@ final class SessionStore: ObservableObject {
             return didStart || !lastCriticalCommitFailed
         case .startWithResolvedProject(let rule, let projectID, let startDate):
             guard let event else { return true }
+            guard let canonicalWorkingDirectory = DeveloperToolProjectPathMatcher.canonicalPath(
+                for: event.workingDirectory
+            ) else {
+                return true
+            }
             let didStart = startAutomatedSession(
                 with: rule,
                 resolvedProjectID: projectID,
@@ -2371,7 +2592,8 @@ final class SessionStore: ObservableObject {
                     externalSessionID: event.externalSessionID
                 ),
                 at: startDate,
-                signalAt: event.timestamp
+                signalAt: event.timestamp,
+                gitDiscoveryFolderURL: URL(fileURLWithPath: canonicalWorkingDirectory, isDirectory: true)
             )
             return didStart || !lastCriticalCommitFailed
         case .signal(let rule, let tool, let externalSessionID, let isActive):
@@ -2538,8 +2760,26 @@ final class SessionStore: ObservableObject {
     }
 
     private func evaluateAutomaticLifecycle(at date: Date) {
+        guard state.settings.automationEnabled else { return }
+
+        // Snapshot only stable IDs. Every mutation below resolves the ID
+        // against current state again, so an earlier commit cannot make a
+        // later array position point at another Session.
+        let sessionIDs = state.activeSessions
+            .filter { session in
+                guard session.phase == .running || session.phase == .paused,
+                      let metadata = session.automationMetadata else { return false }
+                return metadata.controlEnabled && !metadata.pendingAutomaticSave
+            }
+            .map(\.id)
+        for sessionID in sessionIDs {
+            evaluateAutomaticLifecycle(for: sessionID, at: date)
+        }
+    }
+
+    private func evaluateAutomaticLifecycle(for sessionID: UUID, at date: Date) {
         guard state.settings.automationEnabled,
-              var session = state.soleActiveSession,
+              var session = state.activeSession(id: sessionID),
               (session.phase == .running || session.phase == .paused),
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
@@ -2549,8 +2789,10 @@ final class SessionStore: ObservableObject {
 
         guard hasSupportingAutomationRule(for: session, metadata: metadata, in: state) else {
             var nextState = state
-            relinquishInvalidAutomation(in: &nextState)
-            if nextState != state { commit(nextState) }
+            relinquishInvalidAutomation(for: sessionID, in: &nextState)
+            if nextState != state {
+                _ = commit(nextState, critical: true, normalizeAutomation: false)
+            }
             return
         }
 
@@ -2578,22 +2820,21 @@ final class SessionStore: ObservableObject {
         }
         guard !hasActiveClaim else { return }
 
-        if session.phase == .running, date >= pauseEligibleAt {
-            if session.pause(at: pauseEligibleAt) {
-                session.automationMetadata = metadata
-                var nextState = state
-                guard replaceActiveSession(session, in: &nextState) else { return }
-                guard commit(nextState, critical: true) else { return }
-            }
+        if session.phase == .running, date >= pauseEligibleAt,
+           session.pause(at: pauseEligibleAt) {
+            session.automationMetadata = metadata
+            var nextState = state
+            guard replaceActiveSession(session, in: &nextState),
+                  commit(nextState, critical: true, normalizeAutomation: false) else { return }
         }
 
-        guard let refreshedSession = state.soleActiveSession,
+        guard let refreshedSession = state.activeSession(id: sessionID),
               refreshedSession.phase == .paused,
               refreshedSession.automationMetadata?.controlEnabled == true,
               date >= finishEligibleAt else {
             return
         }
-        finishAutomatically(at: min(date, finishEligibleAt))
+        finishAutomatically(sessionID: sessionID, at: min(date, finishEligibleAt))
     }
 
     /// Developer-tool claims describe a real session/turn and remain active
@@ -2633,8 +2874,8 @@ final class SessionStore: ObservableObject {
         return deadline
     }
 
-    private func finishAutomatically(at date: Date) {
-        guard var session = state.soleActiveSession,
+    private func finishAutomatically(sessionID: UUID, at date: Date) {
+        guard var session = state.activeSession(id: sessionID),
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
               !metadata.pendingAutomaticSave,
@@ -2647,42 +2888,52 @@ final class SessionStore: ObservableObject {
         session.automationMetadata = metadata
         var nextState = state
         guard replaceActiveSession(session, in: &nextState) else { return }
-        guard commit(nextState, critical: true) else { return }
+        guard commit(nextState, critical: true, normalizeAutomation: false) else { return }
         now = clock.now
 
-        if session.gitContext != nil {
-            scheduleFinalGitCapture(for: session.id)
-        } else if !gitCaptureInProgress {
-            attemptAutomaticSaveIfReady(for: session.id)
+        if session.gitContext != nil || isGitCaptureInProgress(for: sessionID) {
+            scheduleFinalGitCapture(for: sessionID)
+        } else {
+            attemptAutomaticSaveIfReady(for: sessionID)
         }
     }
 
     private func restoreAutomaticFinishingState() {
-        guard let session = state.soleActiveSession, session.phase == .finishing else { return }
-
-        if session.automationMetadata?.pendingAutomaticSave == true {
-            if session.gitContext != nil {
-                scheduleFinalGitCapture(for: session.id)
-            } else if let project = session.projectID.flatMap({ id in
-                state.projects.first(where: { $0.id == id })
-            }),
-                      let folderURL = projectFolderURL(for: project),
-                      FileManager.default.fileExists(atPath: folderURL.path) {
-                // A relaunch can interrupt the initial Git capture. Recreate
-                // that boundary before attempting the final capture/save.
-                scheduleStartGitCapture(for: session.id, folderURL: folderURL)
-            } else {
-                attemptAutomaticSaveIfReady(for: session.id)
+        let finishingIDs = state.activeSessions
+            .filter { $0.phase == .finishing }
+            .map(\.id)
+        for sessionID in finishingIDs {
+            guard let session = state.activeSession(id: sessionID) else { continue }
+            let hasCompletedFinalObservation = session.gitContext?.observationEndedAt
+                .map { $0.timeIntervalSinceReferenceDate.isFinite } == true
+            if session.automationMetadata?.pendingAutomaticSave == true {
+                if hasCompletedFinalObservation {
+                    // The final observation boundary is durable. Do not
+                    // recapture it merely because the Session remained in its
+                    // finishing review state across relaunch.
+                    attemptAutomaticSaveIfReady(for: sessionID)
+                } else if session.gitContext != nil {
+                    scheduleFinalGitCapture(for: sessionID)
+                } else if let project = session.projectID.flatMap({ id in
+                    state.projects.first(where: { $0.id == id })
+                }),
+                          let folderURL = projectFolderURL(for: project),
+                          FileManager.default.fileExists(atPath: folderURL.path) {
+                    // A relaunch can interrupt the initial Git capture.
+                    // Recreate only this Session's missing boundary.
+                    scheduleStartGitCapture(for: sessionID, folderURL: folderURL)
+                } else {
+                    attemptAutomaticSaveIfReady(for: sessionID)
+                }
+            } else if session.gitContext != nil, !hasCompletedFinalObservation {
+                scheduleFinalGitCapture(for: sessionID)
             }
-        } else if session.gitContext != nil {
-            scheduleFinalGitCapture(for: session.id)
         }
     }
 
     private func attemptAutomaticSaveIfReady(for sessionID: UUID) {
-        guard !gitCaptureInProgress,
-              let session = state.soleActiveSession,
-              session.id == sessionID,
+        guard !isGitCaptureInProgress(for: sessionID),
+              let session = state.activeSession(id: sessionID),
               session.phase == .finishing,
               let metadata = session.automationMetadata,
               metadata.pendingAutomaticSave else {
@@ -2698,19 +2949,26 @@ final class SessionStore: ObservableObject {
             } catch {
                 return
             }
-            guard commit(nextState, critical: true) else { return }
-            gitCaptureSessionID = nil
-            gitCaptureInProgress = false
+            guard commit(nextState, critical: true, normalizeAutomation: false) else { return }
+            // Automatic minimum-duration discard retires the Session without
+            // a completed History record; invalidate both local Git and
+            // GitHub jobs so a late enrichment cannot linger as a restore
+            // blocker or attempt to recreate the discarded Session.
+            invalidateAsyncWork(for: sessionID)
             now = clock.now
             return
         }
 
-        _ = completeFinishedSession(outcome: nil, refreshAfter: false)
+        _ = completeFinishedSession(sessionID: sessionID, outcome: nil, refreshAfter: false)
     }
 
-    private func completeFinishedSession(outcome: String?, refreshAfter: Bool = true) -> Bool {
-        guard !gitCaptureInProgress,
-              var session = state.soleActiveSession,
+    private func completeFinishedSession(
+        sessionID: UUID,
+        outcome: String?,
+        refreshAfter: Bool = true
+    ) -> Bool {
+        guard !isGitCaptureInProgress(for: sessionID),
+              var session = state.activeSession(id: sessionID),
               session.phase == .finishing else {
             return false
         }
@@ -2731,11 +2989,17 @@ final class SessionStore: ObservableObject {
         } catch {
             return false
         }
-        guard commit(nextState, critical: true) else { return false }
-        gitCaptureSessionID = nil
-        gitCaptureInProgress = false
+        // Saving a legacy or otherwise partially observed Session is another
+        // durable boundary at which same-root attribution must be resolved.
+        // This may suppress derived numeric fields on the completed target
+        // and any overlapping same-root Session, but never changes lifecycle
+        // or ownership authority.
+        nextState.reconcileGitObservationAttribution()
+        guard commit(nextState, critical: true, normalizeAutomation: false) else { return false }
+        refreshTerminalGitCaptureStatuses()
+        invalidateGitCaptureState(for: sessionID)
         now = clock.now
-        if refreshAfter { refresh() }
+        if refreshAfter { refreshAfterLifecycleMutation(for: sessionID) }
         return true
     }
 
@@ -2744,6 +3008,50 @@ final class SessionStore: ObservableObject {
         metadata.controlEnabled = false
         metadata.pendingAutomaticSave = false
         session.automationMetadata = metadata
+    }
+
+    /// Targeted form used by automatic lifecycle evaluation. The existing
+    /// collection-wide normalization remains appropriate for configuration
+    /// changes, but a deadline evaluation must not touch another Session.
+    private func relinquishInvalidAutomation(for sessionID: UUID, in state: inout AppState) {
+        guard let index = state.activeSessionIndex(id: sessionID) else { return }
+        var session = state.activeSessions[index]
+        guard var metadata = session.automationMetadata else { return }
+
+        guard state.settings.automationEnabled else {
+            metadata.controlEnabled = false
+            metadata.pendingAutomaticSave = false
+            metadata.claims = metadata.claims.map { claim in
+                var claim = claim
+                claim.isActive = false
+                return claim
+            }
+            session.automationMetadata = metadata
+            state.activeSessions[index] = session
+            return
+        }
+
+        let sources = Set(metadata.claims.map(\.source) + [metadata.startedBySource])
+        let supportedSources = sources.filter { source in
+            sessionAutomationCoordinator.hasSupportingRule(
+                for: source,
+                projectID: session.projectID,
+                in: state
+            )
+        }
+        metadata.claims = metadata.claims.map { claim in
+            var claim = claim
+            if !supportedSources.contains(claim.source) {
+                claim.isActive = false
+            }
+            return claim
+        }
+        if supportedSources.isEmpty {
+            metadata.controlEnabled = false
+            metadata.pendingAutomaticSave = false
+        }
+        session.automationMetadata = metadata
+        state.activeSessions[index] = session
     }
 
     private func relinquishInvalidAutomation(in state: inout AppState) {
@@ -2810,25 +3118,83 @@ final class SessionStore: ObservableObject {
     }
 
     private func scheduleStartGitCapture(for sessionID: UUID, folderURL: URL) {
-        gitCaptureSessionID = sessionID
-        gitCaptureInProgress = true
+        guard state.activeSession(id: sessionID) != nil else { return }
+
+        var capture = gitCaptureStates[sessionID] ?? SessionGitCaptureState()
+        if capture.activeStage != nil {
+            return
+        }
+        // A successful start boundary is immutable for a Session. Relaunch
+        // recovery only retries when the boundary was never established.
+        guard capture.startStatus != .succeeded else { return }
+
+        let token = UUID()
+        capture.startStatus = .scheduled
+        capture.activeStage = .start
+        capture.jobToken = token
+        capture.generation = stateGeneration
+        gitCaptureStates[sessionID] = capture
+        refreshGitCaptureAggregate()
+
         let service = gitService
+        let generation = stateGeneration
+        DispatchQueue.main.async { [weak self] in
+            self?.markGitJobRunning(
+                sessionID: sessionID,
+                stage: .start,
+                token: token,
+                generation: generation
+            )
+        }
         DispatchQueue.global(qos: .utility).async {
             let snapshot = service.captureStartSnapshot(at: folderURL)
+            // A legacy/test GitServicing implementation may not populate the
+            // optional boundary itself. Capture the completion instant on the
+            // worker immediately after the repository observation returns so
+            // the fallback still describes Git observation, never the Session
+            // timer transition.
+            let observationCompletedAt = Date()
             DispatchQueue.main.async { [weak self] in
-                self?.applyStartGitSnapshot(snapshot, to: sessionID)
+                self?.applyStartGitSnapshot(
+                    snapshot,
+                    to: sessionID,
+                    token: token,
+                    generation: generation,
+                    fallbackObservationStartedAt: observationCompletedAt
+                )
             }
         }
     }
 
-    private func applyStartGitSnapshot(_ snapshot: GitStartSnapshot?, to sessionID: UUID) {
-        guard var session = state.soleActiveSession, session.id == sessionID else {
-            clearGitCapture(for: sessionID)
+    private func applyStartGitSnapshot(
+        _ snapshot: GitStartSnapshot?,
+        to sessionID: UUID,
+        token: UUID,
+        generation: UUID,
+        fallbackObservationStartedAt: Date
+    ) {
+        guard isCurrentGitJob(
+            sessionID: sessionID,
+            token: token,
+            generation: generation,
+            stage: .start
+        ) else {
+            return
+        }
+
+        guard var session = state.activeSession(id: sessionID) else {
+            invalidateAsyncWork(for: sessionID)
             return
         }
 
         guard let snapshot else {
-            clearGitCapture(for: sessionID)
+            finishGitJob(
+                sessionID: sessionID,
+                stage: .start,
+                status: .failed,
+                token: token,
+                generation: generation
+            )
             attemptAutomaticSaveIfReady(for: sessionID)
             return
         }
@@ -2838,67 +3204,105 @@ final class SessionStore: ObservableObject {
             branchAtStart: snapshot.branch,
             startHeadSHA: snapshot.headSHA,
             startWasDetached: snapshot.isDetached,
-            preExistingWorkingTreePaths: snapshot.preExistingWorkingTreePaths.map { $0.sorted() }
+            preExistingWorkingTreePaths: snapshot.preExistingWorkingTreePaths.map { $0.sorted() },
+            observationStartedAt: snapshot.observationStartedAt ?? fallbackObservationStartedAt
         )
         var nextState = state
         guard replaceActiveSession(session, in: &nextState) else { return }
-        commit(nextState)
+        nextState.reconcileGitObservationAttribution()
+        guard commit(nextState, normalizeAutomation: false) else {
+            finishGitJob(
+                sessionID: sessionID,
+                stage: .start,
+                status: .failed,
+                token: token,
+                generation: generation
+            )
+            attemptAutomaticSaveIfReady(for: sessionID)
+            return
+        }
+        refreshTerminalGitCaptureStatuses()
 
-        if session.phase == .finishing {
+        finishGitJob(
+            sessionID: sessionID,
+            stage: .start,
+            status: state.activeSession(id: sessionID)?.gitContext?.deltaAttribution == .ambiguous
+                ? .ambiguous
+                : .succeeded,
+            token: token,
+            generation: generation
+        )
+
+        if state.activeSession(id: sessionID)?.phase == .finishing ||
+            gitCaptureStates[sessionID]?.pendingFinalCapture == true {
             scheduleFinalGitCapture(for: sessionID)
-        } else {
-            clearGitCapture(for: sessionID)
         }
         attemptAutomaticSaveIfReady(for: sessionID)
-
         scheduleGitHubCapture(for: sessionID, snapshot: snapshot)
     }
 
     private func scheduleGitHubCapture(for sessionID: UUID, snapshot: GitStartSnapshot) {
+        guard let repository = snapshot.remotes
+            .sorted(by: { lhs, rhs in
+                if lhs.name == "origin" { return rhs.name != "origin" }
+                if rhs.name == "origin" { return false }
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            })
+            .compactMap({ GitHubRemoteParser.parse($0.url) })
+            .first else {
+            return
+        }
+
+        let token = UUID()
+        let generation = stateGeneration
+        githubCaptureJobs[sessionID] = AsyncJobIdentity(token: token, stateGeneration: generation)
         let service = githubContextService
         let repositoryRoot = snapshot.repositoryRoot
         let branch = snapshot.branch
-        let remotes = snapshot.remotes
-        Task.detached(priority: .utility) { [service, repositoryRoot, branch, remotes, sessionID] in
-            guard let repository = remotes
-                .sorted(by: { lhs, rhs in
-                    if lhs.name == "origin" { return rhs.name != "origin" }
-                    if rhs.name == "origin" { return false }
-                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                })
-                .compactMap({ GitHubRemoteParser.parse($0.url) })
-                .first else {
-                return
-            }
-
+        Task.detached(priority: .utility) { [service, repositoryRoot, branch, repository, sessionID] in
             let context = await service.captureContext(
                 repositoryRoot: repositoryRoot,
                 repository: repository,
                 branch: branch
             )
             DispatchQueue.main.async { [weak self] in
-                self?.applyGitHubContext(context, to: sessionID)
+                self?.applyGitHubContext(
+                    context,
+                    to: sessionID,
+                    token: token,
+                    generation: generation
+                )
             }
         }
     }
 
-    private func applyGitHubContext(_ context: GitHubSessionContext?, to sessionID: UUID) {
+    private func applyGitHubContext(
+        _ context: GitHubSessionContext?,
+        to sessionID: UUID,
+        token: UUID,
+        generation: UUID
+    ) {
+        guard githubCaptureJobs[sessionID] == AsyncJobIdentity(token: token, stateGeneration: generation),
+              generation == stateGeneration else {
+            return
+        }
+        githubCaptureJobs.removeValue(forKey: sessionID)
         guard let context else { return }
 
-        if var session = state.soleActiveSession, session.id == sessionID {
+        if var session = state.activeSession(id: sessionID) {
             guard session.githubContext != context else { return }
             session.githubContext = context
             var nextState = state
             guard replaceActiveSession(session, in: &nextState) else { return }
-            commit(nextState)
+            _ = commit(nextState, normalizeAutomation: false)
             return
         }
 
-        guard let completed = state.completedSessions.first(where: { $0.id == sessionID }),
-              completed.githubContext != context else {
+        guard let index = state.completedSessions.firstIndex(where: { $0.id == sessionID }) else {
             return
         }
-
+        let completed = state.completedSessions[index]
+        guard completed.githubContext != context else { return }
         let updated = CompletedSession(
             id: completed.id,
             projectID: completed.projectID,
@@ -2914,63 +3318,269 @@ final class SessionStore: ObservableObject {
             developerToolContexts: completed.developerToolContexts
         )
         var nextState = state
-        if let index = nextState.completedSessions.firstIndex(where: { $0.id == sessionID }) {
-            nextState.completedSessions[index] = updated
-            commit(nextState)
-        }
+        nextState.completedSessions[index] = updated
+        _ = commit(nextState, normalizeAutomation: false)
     }
 
     private func scheduleFinalGitCapture(for sessionID: UUID) {
-        guard let session = state.soleActiveSession,
-              session.id == sessionID,
-              let gitContext = session.gitContext,
+        guard let session = state.activeSession(id: sessionID) else {
+            return
+        }
+
+        var capture = gitCaptureStates[sessionID] ?? SessionGitCaptureState()
+        if capture.activeStage == .start {
+            capture.pendingFinalCapture = true
+            gitCaptureStates[sessionID] = capture
+            refreshGitCaptureAggregate()
+            return
+        }
+        if capture.activeStage == .final {
+            return
+        }
+
+        guard let gitContext = session.gitContext,
               let startSnapshot = gitStartSnapshot(from: gitContext) else {
-            clearGitCapture(for: sessionID)
+            // A missing start boundary means there is no valid final job to
+            // run. Mark the required final phase terminally failed when this
+            // was an explicit finishing request, then let save/discard logic
+            // proceed without blocking unrelated Sessions.
+            capture.pendingFinalCapture = false
+            capture.finalStatus = .failed
+            capture.activeStage = nil
+            capture.jobToken = nil
+            gitCaptureStates[sessionID] = capture
+            refreshGitCaptureAggregate()
             attemptAutomaticSaveIfReady(for: sessionID)
             return
         }
 
-        gitCaptureSessionID = sessionID
-        gitCaptureInProgress = true
+        let token = UUID()
+        capture.finalStatus = .scheduled
+        capture.activeStage = .final
+        capture.pendingFinalCapture = false
+        capture.jobToken = token
+        capture.generation = stateGeneration
+        gitCaptureStates[sessionID] = capture
+        refreshGitCaptureAggregate()
+
         let service = gitService
+        let generation = stateGeneration
+        DispatchQueue.main.async { [weak self] in
+            self?.markGitJobRunning(
+                sessionID: sessionID,
+                stage: .final,
+                token: token,
+                generation: generation
+            )
+        }
         DispatchQueue.global(qos: .utility).async {
             let snapshot = service.captureFinishSnapshot(for: startSnapshot)
+            let observationCompletedAt = Date()
             DispatchQueue.main.async { [weak self] in
-                self?.applyFinishGitSnapshot(snapshot, to: sessionID)
+                self?.applyFinishGitSnapshot(
+                    snapshot,
+                    to: sessionID,
+                    token: token,
+                    generation: generation,
+                    fallbackObservationEndedAt: observationCompletedAt
+                )
             }
         }
     }
 
-    private func applyFinishGitSnapshot(_ snapshot: GitFinishSnapshot?, to sessionID: UUID) {
-        guard var session = state.soleActiveSession, session.id == sessionID else {
-            clearGitCapture(for: sessionID)
+    private func applyFinishGitSnapshot(
+        _ snapshot: GitFinishSnapshot?,
+        to sessionID: UUID,
+        token: UUID,
+        generation: UUID,
+        fallbackObservationEndedAt: Date
+    ) {
+        guard isCurrentGitJob(
+            sessionID: sessionID,
+            token: token,
+            generation: generation,
+            stage: .final
+        ) else {
+            return
+        }
+        guard var session = state.activeSession(id: sessionID),
+              var gitContext = session.gitContext else {
+            finishGitJob(
+                sessionID: sessionID,
+                stage: .final,
+                status: .failed,
+                token: token,
+                generation: generation
+            )
             return
         }
 
-        if let snapshot, var gitContext = session.gitContext {
+        let status: SessionGitCaptureStatus
+        if let snapshot {
             gitContext.branchAtEnd = snapshot.branch
             gitContext.endHeadSHA = snapshot.headSHA
             gitContext.endWasDetached = snapshot.isDetached
-            gitContext.commitCount = snapshot.commitCount
-            if let statistics = snapshot.statistics {
-                gitContext.filesChanged = statistics.filesChanged
-                gitContext.insertions = statistics.insertions
-                gitContext.deletions = statistics.deletions
-            }
-            session.gitContext = gitContext
+            let observationEndedAt = snapshot.observationEndedAt ?? fallbackObservationEndedAt
+            gitContext.observationEndedAt = observationEndedAt
 
-            var nextState = state
-            guard replaceActiveSession(session, in: &nextState) else { return }
-            commit(nextState)
+            // A final snapshot is numerically attributable only when the
+            // persisted start boundary is also known. Historical contexts
+            // may have no observationStartedAt; never backfill that missing
+            // boundary from Session.startedAt or manufacture confident
+            // deltas from the final snapshot alone.
+            if let observationStartedAt = gitContext.observationStartedAt,
+               observationStartedAt.timeIntervalSinceReferenceDate.isFinite,
+               observationEndedAt.timeIntervalSinceReferenceDate.isFinite,
+               observationStartedAt <= observationEndedAt {
+                gitContext.commitCount = snapshot.commitCount
+                if let statistics = snapshot.statistics {
+                    gitContext.filesChanged = statistics.filesChanged
+                    gitContext.insertions = statistics.insertions
+                    gitContext.deletions = statistics.deletions
+                } else {
+                    gitContext.filesChanged = nil
+                    gitContext.insertions = nil
+                    gitContext.deletions = nil
+                }
+                gitContext.deltaAttribution = .attributable
+            } else {
+                gitContext.commitCount = nil
+                gitContext.filesChanged = nil
+                gitContext.insertions = nil
+                gitContext.deletions = nil
+                gitContext.deltaAttribution = .indeterminate
+            }
+            status = .succeeded
+        } else {
+            // Never infer an exact end from Session.endedAt after a failed
+            // observation. Preserve independently valid start/repository
+            // metadata but suppress every numeric delta.
+            gitContext.observationEndedAt = nil
+            gitContext.commitCount = nil
+            gitContext.filesChanged = nil
+            gitContext.insertions = nil
+            gitContext.deletions = nil
+            gitContext.deltaAttribution = .indeterminate
+            status = .failed
         }
-        clearGitCapture(for: sessionID)
+        session.gitContext = gitContext
+
+        var nextState = state
+        guard replaceActiveSession(session, in: &nextState) else { return }
+        nextState.reconcileGitObservationAttribution()
+        guard commit(nextState, normalizeAutomation: false) else {
+            finishGitJob(
+                sessionID: sessionID,
+                stage: .final,
+                status: .failed,
+                token: token,
+                generation: generation
+            )
+            attemptAutomaticSaveIfReady(for: sessionID)
+            return
+        }
+
+        refreshTerminalGitCaptureStatuses()
+
+        let resolvedStatus: SessionGitCaptureStatus = state.activeSession(id: sessionID)?.gitContext?.deltaAttribution == .ambiguous
+            ? .ambiguous
+            : status
+        finishGitJob(
+            sessionID: sessionID,
+            stage: .final,
+            status: resolvedStatus,
+            token: token,
+            generation: generation
+        )
         attemptAutomaticSaveIfReady(for: sessionID)
     }
 
-    private func clearGitCapture(for sessionID: UUID) {
-        guard gitCaptureSessionID == sessionID else { return }
-        gitCaptureSessionID = nil
-        gitCaptureInProgress = false
+    private func isCurrentGitJob(
+        sessionID: UUID,
+        token: UUID,
+        generation: UUID,
+        stage: SessionGitCaptureStage
+    ) -> Bool {
+        guard generation == stateGeneration,
+              let capture = gitCaptureStates[sessionID],
+              capture.activeStage == stage,
+              capture.jobToken == token,
+              capture.generation == generation else {
+            return false
+        }
+        return true
+    }
+
+    private func markGitJobRunning(
+        sessionID: UUID,
+        stage: SessionGitCaptureStage,
+        token: UUID,
+        generation: UUID
+    ) {
+        guard isCurrentGitJob(
+            sessionID: sessionID,
+            token: token,
+            generation: generation,
+            stage: stage
+        ), var capture = gitCaptureStates[sessionID] else {
+            return
+        }
+        switch stage {
+        case .start:
+            capture.startStatus = .running
+        case .final:
+            capture.finalStatus = .running
+        }
+        gitCaptureStates[sessionID] = capture
+        refreshGitCaptureAggregate()
+    }
+
+    private func finishGitJob(
+        sessionID: UUID,
+        stage: SessionGitCaptureStage,
+        status: SessionGitCaptureStatus,
+        token: UUID,
+        generation: UUID
+    ) {
+        guard isCurrentGitJob(
+            sessionID: sessionID,
+            token: token,
+            generation: generation,
+            stage: stage
+        ), var capture = gitCaptureStates[sessionID] else {
+            return
+        }
+        switch stage {
+        case .start:
+            capture.startStatus = status
+            if status == .failed, capture.pendingFinalCapture {
+                // A finish request may have arrived while the start
+                // observation was running. There is no valid start context
+                // from which to establish a final snapshot, so close that
+                // queued requirement explicitly instead of leaving a stale
+                // pending flag behind.
+                capture.finalStatus = .failed
+                capture.pendingFinalCapture = false
+            }
+        case .final:
+            capture.finalStatus = status
+            capture.pendingFinalCapture = false
+        }
+        capture.activeStage = nil
+        capture.jobToken = nil
+        gitCaptureStates[sessionID] = capture
+        refreshGitCaptureAggregate()
+    }
+
+    private func invalidateGitCaptureState(for sessionID: UUID) {
+        gitCaptureStates.removeValue(forKey: sessionID)
+        refreshGitCaptureAggregate()
+    }
+
+    private func invalidateAsyncWork(for sessionID: UUID) {
+        gitCaptureStates.removeValue(forKey: sessionID)
+        githubCaptureJobs.removeValue(forKey: sessionID)
+        refreshGitCaptureAggregate()
     }
 
     private func projectFolderURL(for project: ProjectRecord) -> URL? {
@@ -2999,7 +3609,8 @@ final class SessionStore: ObservableObject {
             branch: context.branchAtStart,
             headSHA: context.startHeadSHA,
             isDetached: context.startWasDetached,
-            preExistingWorkingTreePaths: context.preExistingWorkingTreePaths.map { Set($0) }
+            preExistingWorkingTreePaths: context.preExistingWorkingTreePaths.map { Set($0) },
+            observationStartedAt: context.observationStartedAt
         )
     }
 }
