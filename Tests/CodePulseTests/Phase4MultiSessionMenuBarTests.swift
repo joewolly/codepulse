@@ -210,8 +210,26 @@ final class Phase4MultiSessionMenuBarTests: XCTestCase {
 
     func testDeveloperToolPresentationSupportsMultiOwnerAndContextOnlyLegacySessions() {
         var multi = running(1); multi.developerToolContexts = [toolContext(.opencode, id: "open"), toolContext(.codex, id: "codex")]
+        multi.automationMetadata = SessionAutomationMetadata(
+            startedByRuleID: uuid(101),
+            startedByRuleName: "Developer Tools",
+            startedBySource: .developerTool(tool: .codex, externalSessionID: "codex"),
+            lastMatchingSignalAt: now,
+            pauseDelay: 1,
+            finishDelay: 2,
+            minimumSavedDuration: 0,
+            claims: [SessionAutomationClaim(tool: .opencode, externalSessionID: "open", isActive: true, lastSignalAt: now)]
+        )
         var contextOnly = running(2); contextOnly.developerToolContexts = [toolContext(.opencode, id: "context")]
-        let rows = MenuBarSessionPresentation.sorted(state: stateWithSessions([multi, contextOnly]))
+        let state = stateWithSessions([multi, contextOnly])
+        XCTAssertEqual(
+            multi.developerToolOwnershipIdentities,
+            Set([
+                DeveloperToolThreadIdentity(tool: .codex, externalSessionID: "codex"),
+                DeveloperToolThreadIdentity(tool: .opencode, externalSessionID: "open")
+            ])
+        )
+        let rows = MenuBarSessionPresentation.sorted(state: state)
         XCTAssertEqual(rows.first(where: { $0.id == multi.id })?.developerToolLabel, "Codex + OpenCode")
         XCTAssertEqual(rows.first(where: { $0.id == contextOnly.id })?.developerToolLabel, "OpenCode")
         XCTAssertNil(contextOnly.automationMetadata)
