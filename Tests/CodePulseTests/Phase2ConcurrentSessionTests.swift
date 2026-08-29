@@ -377,12 +377,16 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
     }
 
     func testPriorAmbiguityIsRecomputedFromCurrentEvidenceWithoutInventingMetrics() {
-        let first = completed(id: UUID(), root: "/repo-a", start: 10, end: 20,
+        let firstID = UUID()
+        let secondID = UUID()
+        let first = completed(id: firstID, root: "/repo-a", start: 10, end: 20,
                               commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
-                              attribution: .ambiguous)
-        let second = completed(id: UUID(), root: "/repo-a", start: 21, end: 30,
+                              attribution: .ambiguous,
+                              conflictIDs: [secondID])
+        let second = completed(id: secondID, root: "/repo-a", start: 21, end: 30,
                                commitCount: 2, filesChanged: 3, insertions: 4, deletions: 1,
-                               attribution: .ambiguous)
+                               attribution: .ambiguous,
+                               conflictIDs: [firstID])
         var state = AppState(completedSessions: [first, second])
 
         state.reconcileGitObservationAttribution()
@@ -424,19 +428,26 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
         let root = try makeTemporaryDirectory(named: "preserved-ambiguity")
         defer { try? FileManager.default.removeItem(at: root) }
         let project = ProjectRecord(name: "Shared", folderPath: root.path, createdAt: start)
-        var sessionA = ActiveSession(id: UUID(), projectID: project.id, projectName: project.name,
+        let sessionAID = UUID()
+        let sessionBID = UUID()
+        var sessionA = ActiveSession(id: sessionAID, projectID: project.id, projectName: project.name,
                                      startedAt: start, phase: .finishing)
         sessionA.endedAt = start.addingTimeInterval(25)
-        sessionA.gitContext = gitContext(root: root.path, start: 10, end: 25, attribution: .ambiguous)
-        var sessionB = ActiveSession(id: UUID(), projectID: project.id, projectName: project.name,
+        sessionA.gitContext = gitContext(root: root.path, start: 10, end: 25, attribution: .ambiguous,
+                                         conflictIDs: [sessionBID])
+        var sessionB = ActiveSession(id: sessionBID, projectID: project.id, projectName: project.name,
                                      startedAt: start.addingTimeInterval(5))
-        sessionB.gitContext = gitContext(root: root.path, start: 15, end: nil, attribution: .ambiguous)
+        sessionB.gitContext = gitContext(root: root.path, start: 15, end: nil, attribution: .ambiguous,
+                                         conflictIDs: [sessionAID])
+        let replacement = completed(id: UUID(), root: root.path, start: 41, end: 50,
+                                    commitCount: 1, filesChanged: 1, insertions: 1, deletions: 0,
+                                    attribution: .attributable)
         let unrelated = completed(id: UUID(), root: "/repo-b", start: 1, end: 2,
                                   commitCount: 9, filesChanged: 8, insertions: 7, deletions: 6,
                                   attribution: .attributable)
         let persistence = Phase2TestPersistence(AppState(
             projects: [project],
-            completedSessions: [unrelated],
+            completedSessions: [replacement, unrelated],
             activeSessions: [sessionA, sessionB]
         ))
         let finalEntered = expectation(description: "B final entered")
@@ -467,28 +478,124 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
 
         let survivingContext = try XCTUnwrap(store.state.activeSession(id: sessionB.id)?.gitContext)
         XCTAssertEqual(survivingContext.deltaAttribution, .ambiguous)
+        XCTAssertEqual(survivingContext.ambiguityConflictIDs, [sessionAID])
+        XCTAssertFalse(survivingContext.ambiguityConflictIDs.contains(replacement.id))
         XCTAssertNil(survivingContext.commitCount)
         XCTAssertNil(survivingContext.filesChanged)
         XCTAssertNil(survivingContext.insertions)
         XCTAssertNil(survivingContext.deletions)
-        XCTAssertEqual(store.state.completedSessions, [unrelatedAfterDiscard])
+        XCTAssertEqual(store.state.completedSessions.first { $0.id == unrelated.id }, unrelatedAfterDiscard)
+        XCTAssertEqual(store.state.completedSessions.first { $0.id == replacement.id }?.gitContext?.deltaAttribution, .attributable)
     }
 
     func testProvisionalAmbiguityClearsWhenSurvivingPeersProveSeparation() {
-        let first = completed(id: UUID(), root: "/repo-a", start: 10, end: 20,
+        let firstID = UUID()
+        let secondID = UUID()
+        let first = completed(id: firstID, root: "/repo-a", start: 10, end: 20,
                               commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
-                              attribution: .ambiguous)
-        let second = completed(id: UUID(), root: "/repo-a", start: 21, end: 30,
+                              attribution: .ambiguous, conflictIDs: [secondID])
+        let second = completed(id: secondID, root: "/repo-a", start: 21, end: 30,
                                commitCount: 3, filesChanged: 4, insertions: 5, deletions: 1,
-                               attribution: .ambiguous)
+                               attribution: .ambiguous, conflictIDs: [firstID])
         var state = AppState(completedSessions: [first, second])
 
         state.reconcileGitObservationAttribution()
 
         XCTAssertEqual(state.completedSessions.map { $0.gitContext?.deltaAttribution }, [.attributable, .attributable])
+        XCTAssertTrue(state.completedSessions.allSatisfy { $0.gitContext?.ambiguityConflictIDs.isEmpty == true })
         XCTAssertNil(state.completedSessions[0].gitContext?.commitCount)
         XCTAssertEqual(state.completedSessions[1].gitContext?.commitCount, 3)
         XCTAssertEqual(state.completedSessions[1].gitContext?.filesChanged, 4)
+    }
+
+    func testThirdPeerDoesNotResolveMissingPeerConflict() {
+        let missingID = UUID()
+        let survivorID = UUID()
+        let replacementID = UUID()
+        let survivor = completed(id: survivorID, root: "/repo-a", start: 10, end: 20,
+                                 commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
+                                 attribution: .ambiguous, conflictIDs: [missingID])
+        let replacement = completed(id: replacementID, root: "/repo-a", start: 21, end: 30,
+                                    commitCount: 2, filesChanged: 3, insertions: 4, deletions: 1,
+                                    attribution: .attributable)
+        var state = AppState(completedSessions: [survivor, replacement])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions[0].gitContext?.ambiguityConflictIDs, [missingID])
+        XCTAssertEqual(state.completedSessions[0].gitContext?.deltaAttribution, .ambiguous)
+        XCTAssertNil(state.completedSessions[0].gitContext?.commitCount)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.ambiguityConflictIDs, [])
+        XCTAssertEqual(state.completedSessions[1].gitContext?.deltaAttribution, .attributable)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.commitCount, 2)
+    }
+
+    func testMultipleConflictsResolveOnlyTheSpecificSafePeer() {
+        let idA = UUID()
+        let idB = UUID()
+        let idC = UUID()
+        let a = completed(id: idA, root: "/repo-a", start: 10, end: 20,
+                          commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
+                          attribution: .ambiguous, conflictIDs: [idB, idC])
+        let b = completed(id: idB, root: "/repo-a", start: 21, end: 30,
+                          commitCount: 2, filesChanged: 2, insertions: 2, deletions: 0,
+                          attribution: .ambiguous, conflictIDs: [idA])
+        let c = completed(id: idC, root: "/repo-a", start: 5, end: 15,
+                          commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
+                          attribution: .ambiguous, conflictIDs: [idA])
+        var state = AppState(completedSessions: [a, b, c])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions[0].gitContext?.ambiguityConflictIDs, [idC])
+        XCTAssertEqual(state.completedSessions[0].gitContext?.deltaAttribution, .ambiguous)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.ambiguityConflictIDs, [])
+        XCTAssertEqual(state.completedSessions[1].gitContext?.deltaAttribution, .attributable)
+        XCTAssertEqual(state.completedSessions[2].gitContext?.ambiguityConflictIDs, [idA])
+        XCTAssertEqual(state.completedSessions[2].gitContext?.deltaAttribution, .ambiguous)
+    }
+
+    func testAmbiguityProvenanceCodableIsDeterministicAndBackwardCompatible() throws {
+        let lower = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let upper = UUID(uuidString: "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF")!
+        let context = GitSessionContext(
+            repositoryRoot: "/repo-a",
+            deltaAttribution: .ambiguous,
+            ambiguousWithSessionIDs: [upper, lower, upper]
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let firstData = try encoder.encode(context)
+        let secondData = try encoder.encode(context)
+
+        XCTAssertEqual(firstData, secondData)
+        XCTAssertEqual(try JSONDecoder().decode(GitSessionContext.self, from: firstData).ambiguousWithSessionIDs,
+                       [lower, upper])
+
+        let legacyData = Data(#"{"repositoryRoot":"/legacy","commitCount":3}"#.utf8)
+        let legacy = try JSONDecoder().decode(GitSessionContext.self, from: legacyData)
+        XCTAssertEqual(legacy.repositoryRoot, "/legacy")
+        XCTAssertEqual(legacy.commitCount, 3)
+        XCTAssertTrue(legacy.ambiguousWithSessionIDs.isEmpty)
+    }
+
+    func testSelfConflictIsRejectedAndHistoricalSnapshotPreservesProvenance() throws {
+        let id = UUID()
+        var active = ActiveSession(id: id, startedAt: start)
+        active.gitContext = gitContext(root: "/repo-a", start: 10, end: 20, attribution: .ambiguous,
+                                       conflictIDs: [id])
+        XCTAssertThrowsError(try AppStateIntegrityValidator.validate(AppState(activeSessions: [active]))) { error in
+            XCTAssertEqual(error as? AppStateIntegrityError, .selfReferentialGitAmbiguity(id))
+        }
+
+        let peerID = UUID()
+        active.gitContext = gitContext(root: "/repo-a", start: 10, end: 20, attribution: .ambiguous,
+                                       conflictIDs: [peerID])
+        XCTAssertTrue(active.finish(at: start.addingTimeInterval(30)))
+        let completed = try XCTUnwrap(active.completedSnapshot(outcome: nil))
+        XCTAssertEqual(completed.id, id)
+        XCTAssertEqual(completed.gitContext?.ambiguityConflictIDs, [peerID])
+        XCTAssertNil(completed.gitContext?.preExistingWorkingTreePaths)
     }
 
     func testStaleGitCallbackAfterDiscardIsIgnored() async throws {
@@ -629,7 +736,8 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
         root: String,
         start: TimeInterval?,
         end: TimeInterval?,
-        attribution: GitDeltaAttribution?
+        attribution: GitDeltaAttribution?,
+        conflictIDs: [UUID] = []
     ) -> GitSessionContext {
         GitSessionContext(
             repositoryRoot: root,
@@ -638,7 +746,8 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
             startWasDetached: false,
             observationStartedAt: start.map { self.start.addingTimeInterval($0) },
             observationEndedAt: end.map { self.start.addingTimeInterval($0) },
-            deltaAttribution: attribution
+            deltaAttribution: attribution,
+            ambiguousWithSessionIDs: conflictIDs
         )
     }
 
@@ -664,7 +773,8 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
         insertions: Int?,
         deletions: Int?,
         githubContext: GitHubSessionContext? = nil,
-        attribution: GitDeltaAttribution? = nil
+        attribution: GitDeltaAttribution? = nil,
+        conflictIDs: [UUID] = []
     ) -> CompletedSession {
         let sessionStart = Date(timeIntervalSince1970: 1_800_000_000 + (start ?? 0))
         let sessionEnd = Date(timeIntervalSince1970: 1_800_000_000 + (end ?? 60))
@@ -691,7 +801,8 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
                 deletions: deletions,
                 observationStartedAt: start.map { Date(timeIntervalSince1970: 1_700_000_000 + $0) },
                 observationEndedAt: end.map { Date(timeIntervalSince1970: 1_700_000_000 + $0) },
-                deltaAttribution: attribution
+                deltaAttribution: attribution,
+                ambiguousWithSessionIDs: conflictIDs
             ),
             githubContext: githubContext
         )

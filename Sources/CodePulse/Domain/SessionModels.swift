@@ -68,6 +68,7 @@ struct GitSessionContext: Codable, Equatable {
     var observationStartedAt: Date?
     var observationEndedAt: Date?
     var deltaAttribution: GitDeltaAttribution?
+    private(set) var ambiguousWithSessionIDs: [UUID]
 
     init(
         repositoryRoot: String,
@@ -84,7 +85,8 @@ struct GitSessionContext: Codable, Equatable {
         deletions: Int? = nil,
         observationStartedAt: Date? = nil,
         observationEndedAt: Date? = nil,
-        deltaAttribution: GitDeltaAttribution? = nil
+        deltaAttribution: GitDeltaAttribution? = nil,
+        ambiguousWithSessionIDs: [UUID] = []
     ) {
         self.repositoryRoot = repositoryRoot
         self.branchAtStart = branchAtStart
@@ -101,6 +103,69 @@ struct GitSessionContext: Codable, Equatable {
         self.observationStartedAt = observationStartedAt
         self.observationEndedAt = observationEndedAt
         self.deltaAttribution = deltaAttribution
+        self.ambiguousWithSessionIDs = Self.sortedUnique(ambiguousWithSessionIDs)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case repositoryRoot, branchAtStart, startHeadSHA, startWasDetached
+        case preExistingWorkingTreePaths, branchAtEnd, endHeadSHA, endWasDetached
+        case commitCount, filesChanged, insertions, deletions
+        case observationStartedAt, observationEndedAt, deltaAttribution
+        case ambiguousWithSessionIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        repositoryRoot = try container.decode(String.self, forKey: .repositoryRoot)
+        branchAtStart = try container.decodeIfPresent(String.self, forKey: .branchAtStart)
+        startHeadSHA = try container.decodeIfPresent(String.self, forKey: .startHeadSHA)
+        startWasDetached = try container.decodeIfPresent(Bool.self, forKey: .startWasDetached)
+        preExistingWorkingTreePaths = try container.decodeIfPresent([String].self, forKey: .preExistingWorkingTreePaths)
+        branchAtEnd = try container.decodeIfPresent(String.self, forKey: .branchAtEnd)
+        endHeadSHA = try container.decodeIfPresent(String.self, forKey: .endHeadSHA)
+        endWasDetached = try container.decodeIfPresent(Bool.self, forKey: .endWasDetached)
+        commitCount = try container.decodeIfPresent(Int.self, forKey: .commitCount)
+        filesChanged = try container.decodeIfPresent(Int.self, forKey: .filesChanged)
+        insertions = try container.decodeIfPresent(Int.self, forKey: .insertions)
+        deletions = try container.decodeIfPresent(Int.self, forKey: .deletions)
+        observationStartedAt = try container.decodeIfPresent(Date.self, forKey: .observationStartedAt)
+        observationEndedAt = try container.decodeIfPresent(Date.self, forKey: .observationEndedAt)
+        deltaAttribution = try container.decodeIfPresent(GitDeltaAttribution.self, forKey: .deltaAttribution)
+        ambiguousWithSessionIDs = Self.sortedUnique(
+            try container.decodeIfPresent([UUID].self, forKey: .ambiguousWithSessionIDs) ?? []
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(repositoryRoot, forKey: .repositoryRoot)
+        try container.encodeIfPresent(branchAtStart, forKey: .branchAtStart)
+        try container.encodeIfPresent(startHeadSHA, forKey: .startHeadSHA)
+        try container.encodeIfPresent(startWasDetached, forKey: .startWasDetached)
+        try container.encodeIfPresent(preExistingWorkingTreePaths, forKey: .preExistingWorkingTreePaths)
+        try container.encodeIfPresent(branchAtEnd, forKey: .branchAtEnd)
+        try container.encodeIfPresent(endHeadSHA, forKey: .endHeadSHA)
+        try container.encodeIfPresent(endWasDetached, forKey: .endWasDetached)
+        try container.encodeIfPresent(commitCount, forKey: .commitCount)
+        try container.encodeIfPresent(filesChanged, forKey: .filesChanged)
+        try container.encodeIfPresent(insertions, forKey: .insertions)
+        try container.encodeIfPresent(deletions, forKey: .deletions)
+        try container.encodeIfPresent(observationStartedAt, forKey: .observationStartedAt)
+        try container.encodeIfPresent(observationEndedAt, forKey: .observationEndedAt)
+        try container.encodeIfPresent(deltaAttribution, forKey: .deltaAttribution)
+        if !ambiguousWithSessionIDs.isEmpty {
+            try container.encode(ambiguousWithSessionIDs, forKey: .ambiguousWithSessionIDs)
+        }
+    }
+
+    var ambiguityConflictIDs: Set<UUID> { Set(ambiguousWithSessionIDs) }
+
+    mutating func setAmbiguityConflictIDs(_ ids: Set<UUID>) {
+        ambiguousWithSessionIDs = Self.sortedUnique(Array(ids))
+    }
+
+    private static func sortedUnique(_ ids: [UUID]) -> [UUID] {
+        Set(ids).sorted { $0.uuidString < $1.uuidString }
     }
 
     var isDeltaAmbiguous: Bool { deltaAttribution == .ambiguous }

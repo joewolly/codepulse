@@ -596,6 +596,7 @@ enum GitObservationAttributionResolver {
         let startedAt: Date?
         let endedAt: Date?
         let attribution: GitDeltaAttribution?
+        let conflictIDs: Set<UUID>
     }
 
     static func reconcile(_ state: inout AppState) {
@@ -607,7 +608,8 @@ enum GitObservationAttributionResolver {
                 repositoryRoot: canonicalRoot(context.repositoryRoot),
                 startedAt: context.observationStartedAt,
                 endedAt: context.observationEndedAt,
-                attribution: context.deltaAttribution
+                attribution: context.deltaAttribution,
+                conflictIDs: context.ambiguityConflictIDs
             )
         } + state.completedSessions.compactMap { session in
             guard let context = session.gitContext,
@@ -617,12 +619,13 @@ enum GitObservationAttributionResolver {
                 repositoryRoot: canonicalRoot(context.repositoryRoot),
                 startedAt: context.observationStartedAt,
                 endedAt: context.observationEndedAt,
-                attribution: context.deltaAttribution
+                attribution: context.deltaAttribution,
+                conflictIDs: context.ambiguityConflictIDs
             )
         }
 
-        var ambiguousIDs = Set<UUID>()
-        var comparedIDs = Set<UUID>()
+        var conflictIDsBySession = Dictionary(uniqueKeysWithValues: observations.map { ($0.id, $0.conflictIDs) })
+        let hadPersistedConflictIDs = Set(observations.filter { !$0.conflictIDs.isEmpty }.map(\.id))
         let observationsByRoot = Dictionary(grouping: observations, by: \.repositoryRoot)
         for sameRootObservations in observationsByRoot.values where sameRootObservations.count > 1 {
             for leftIndex in sameRootObservations.indices {
@@ -630,11 +633,12 @@ enum GitObservationAttributionResolver {
                 let left = sameRootObservations[leftIndex]
                 for right in sameRootObservations[(leftIndex + 1)...] {
                     guard left.id != right.id else { continue }
-                    comparedIDs.insert(left.id)
-                    comparedIDs.insert(right.id)
                     if windowsMayOverlap(left, right) {
-                        ambiguousIDs.insert(left.id)
-                        ambiguousIDs.insert(right.id)
+                        conflictIDsBySession[left.id, default: []].insert(right.id)
+                        conflictIDsBySession[right.id, default: []].insert(left.id)
+                    } else {
+                        conflictIDsBySession[left.id, default: []].remove(right.id)
+                        conflictIDsBySession[right.id, default: []].remove(left.id)
                     }
                 }
             }
@@ -642,15 +646,18 @@ enum GitObservationAttributionResolver {
 
         for index in state.activeSessions.indices {
             guard var context = state.activeSessions[index].gitContext else { continue }
-            if ambiguousIDs.contains(state.activeSessions[index].id) {
-                suppressNumericDeltas(in: &context, attribution: .ambiguous)
-            } else if context.deltaAttribution == .indeterminate {
+            let conflictIDs = conflictIDsBySession[state.activeSessions[index].id] ?? []
+            context.setAmbiguityConflictIDs(conflictIDs)
+            if context.deltaAttribution == .indeterminate {
                 suppressNumericDeltas(in: &context, attribution: .indeterminate)
-            } else if context.deltaAttribution == .ambiguous,
-                      !comparedIDs.contains(state.activeSessions[index].id) {
+            } else if !conflictIDs.isEmpty {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.hasCompleteObservationWindow {
-                context.deltaAttribution = .attributable
+                if context.deltaAttribution != .ambiguous || hadPersistedConflictIDs.contains(state.activeSessions[index].id) {
+                    context.deltaAttribution = .attributable
+                } else {
+                    suppressNumericDeltas(in: &context, attribution: .ambiguous)
+                }
             } else if context.deltaAttribution == .ambiguous {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             }
@@ -659,15 +666,18 @@ enum GitObservationAttributionResolver {
 
         for index in state.completedSessions.indices {
             guard var context = state.completedSessions[index].gitContext else { continue }
-            if ambiguousIDs.contains(state.completedSessions[index].id) {
-                suppressNumericDeltas(in: &context, attribution: .ambiguous)
-            } else if context.deltaAttribution == .indeterminate {
+            let conflictIDs = conflictIDsBySession[state.completedSessions[index].id] ?? []
+            context.setAmbiguityConflictIDs(conflictIDs)
+            if context.deltaAttribution == .indeterminate {
                 suppressNumericDeltas(in: &context, attribution: .indeterminate)
-            } else if context.deltaAttribution == .ambiguous,
-                      !comparedIDs.contains(state.completedSessions[index].id) {
+            } else if !conflictIDs.isEmpty {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.hasCompleteObservationWindow {
-                context.deltaAttribution = .attributable
+                if context.deltaAttribution != .ambiguous || hadPersistedConflictIDs.contains(state.completedSessions[index].id) {
+                    context.deltaAttribution = .attributable
+                } else {
+                    suppressNumericDeltas(in: &context, attribution: .ambiguous)
+                }
             } else if context.deltaAttribution == .ambiguous {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             }

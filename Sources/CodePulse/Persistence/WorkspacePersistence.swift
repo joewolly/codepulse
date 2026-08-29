@@ -88,6 +88,7 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
     case danglingActiveSessionProject(UUID)
     case archivedActiveSessionProject(UUID)
     case invalidActiveSessionProjectWorkspace(UUID)
+    case selfReferentialGitAmbiguity(UUID)
     case duplicateDeveloperToolOwnership(DeveloperTool, String)
     case malformedDeveloperToolOwnership
     case duplicateRetiredDeveloperToolThread(DeveloperTool, String)
@@ -122,6 +123,8 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
             return "Active session \(id.uuidString) references an archived project."
         case .invalidActiveSessionProjectWorkspace(let id):
             return "Active session \(id.uuidString) references an invalid project/workspace relationship."
+        case .selfReferentialGitAmbiguity(let id):
+            return "Session \(id.uuidString) contains a self-referential Git ambiguity conflict."
         case .duplicateDeveloperToolOwnership(let tool, let externalSessionID):
             return "Developer-tool ownership \(tool.rawValue):\(externalSessionID) is claimed more than once."
         case .malformedDeveloperToolOwnership:
@@ -198,6 +201,14 @@ enum AppStateIntegrityValidator {
                       workspaceIDsByProjectID[projectID] == project.workspaceID else {
                     throw AppStateIntegrityError.invalidActiveSessionProjectWorkspace(session.id)
                 }
+            }
+            if session.gitContext?.ambiguityConflictIDs.contains(session.id) == true {
+                throw AppStateIntegrityError.selfReferentialGitAmbiguity(session.id)
+            }
+        }
+        for session in state.completedSessions {
+            if session.gitContext?.ambiguityConflictIDs.contains(session.id) == true {
+                throw AppStateIntegrityError.selfReferentialGitAmbiguity(session.id)
             }
         }
 
