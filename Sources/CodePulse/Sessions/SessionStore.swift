@@ -29,6 +29,11 @@ enum CompletedSessionProjectAssignment: Equatable {
     case project(UUID)
 }
 
+struct SessionLifecycleErrorPresentation: Equatable {
+    let message: String
+    let affectedSessionID: UUID?
+}
+
 enum SessionAutomationRuleStatus: Equatable, Sendable {
     case disabled
     case automationOff
@@ -95,8 +100,9 @@ final class SessionStore: ObservableObject {
     /// lifecycle or save eligibility.
     @Published private(set) var gitCaptureInProgress = false
     @Published private(set) var gitCaptureStates: [UUID: SessionGitCaptureState] = [:]
-    @Published private(set) var lifecycleErrorMessage: String?
-    @Published private(set) var lifecycleErrorSessionID: UUID?
+    @Published private(set) var lifecycleError: SessionLifecycleErrorPresentation?
+    var lifecycleErrorMessage: String? { lifecycleError?.message }
+    var lifecycleErrorSessionID: UUID? { lifecycleError?.affectedSessionID }
     @Published private(set) var isInRecoveryMode: Bool
 
     let persistence: StatePersisting
@@ -158,8 +164,11 @@ final class SessionStore: ObservableObject {
         self.controlLaunchDate = initialNow
         self.lastControlScanAt = nil
         self.currentFrontmostApplication = nil
-        self.lifecycleErrorMessage = recoveryMode
-            ? "CodePulse could not read its saved data. The original state file was left unchanged."
+        self.lifecycleError = recoveryMode
+            ? SessionLifecycleErrorPresentation(
+                message: "CodePulse could not read its saved data. The original state file was left unchanged.",
+                affectedSessionID: nil
+            )
             : nil
         self.lastCriticalCommitFailed = false
         self.controlCommandNeedsRetry = false
@@ -228,6 +237,19 @@ final class SessionStore: ObservableObject {
     func isGitCaptureInProgress(for sessionID: UUID) -> Bool {
         gitCaptureStates[sessionID]?.isInFlight == true
     }
+
+#if DEBUG
+    /// Narrow presentation-test hook. Production lifecycle authority never
+    /// consults or calls this; tests use it to model independent in-flight
+    /// capture state without scheduling real Git processes.
+    func setGitCaptureStateForPresentationTesting(
+        _ captureState: SessionGitCaptureState?,
+        sessionID: UUID
+    ) {
+        gitCaptureStates[sessionID] = captureState
+        refreshGitCaptureAggregate()
+    }
+#endif
 
     var hasAnyRelevantGitCaptureInProgress: Bool {
         gitCaptureStates.values.contains(where: \.isInFlight)
@@ -346,8 +368,7 @@ final class SessionStore: ObservableObject {
     }
 
     func dismissLifecycleError() {
-        lifecycleErrorMessage = nil
-        lifecycleErrorSessionID = nil
+        lifecycleError = nil
     }
 
     var elapsedDuration: TimeInterval {
@@ -1051,10 +1072,13 @@ final class SessionStore: ObservableObject {
               ) else {
             return false
         }
-        lifecycleErrorSessionID = sessionID
-        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return false }
+        guard commit(
+            prepared.state,
+            critical: true,
+            normalizeAutomation: false,
+            affectedSessionID: sessionID
+        ) else { return false }
         refreshAfterLifecycleMutation(for: sessionID)
-        lifecycleErrorSessionID = nil
         return true
     }
 
@@ -1073,10 +1097,13 @@ final class SessionStore: ObservableObject {
               ) else {
             return false
         }
-        lifecycleErrorSessionID = sessionID
-        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return false }
+        guard commit(
+            prepared.state,
+            critical: true,
+            normalizeAutomation: false,
+            affectedSessionID: sessionID
+        ) else { return false }
         refreshAfterLifecycleMutation(for: sessionID)
-        lifecycleErrorSessionID = nil
         return true
     }
 
@@ -1095,10 +1122,13 @@ final class SessionStore: ObservableObject {
               ) else {
             return false
         }
-        lifecycleErrorSessionID = sessionID
-        guard commit(prepared.state, critical: true, normalizeAutomation: false) else { return false }
+        guard commit(
+            prepared.state,
+            critical: true,
+            normalizeAutomation: false,
+            affectedSessionID: sessionID
+        ) else { return false }
         refreshAfterLifecycleMutation(for: sessionID)
-        lifecycleErrorSessionID = nil
 
         if prepared.session.gitContext != nil || isGitCaptureInProgress(for: sessionID) {
             scheduleFinalGitCapture(for: sessionID)
@@ -1176,10 +1206,7 @@ final class SessionStore: ObservableObject {
               !isGitCaptureInProgress(for: sessionID) else {
             return false
         }
-        lifecycleErrorSessionID = sessionID
-        let saved = completeFinishedSession(sessionID: sessionID, outcome: outcome)
-        if saved { lifecycleErrorSessionID = nil }
-        return saved
+        return completeFinishedSession(sessionID: sessionID, outcome: outcome)
     }
 
     @discardableResult
@@ -1198,14 +1225,13 @@ final class SessionStore: ObservableObject {
         var nextState = state
         guard let index = nextState.activeSessionIndex(id: sessionID) else { return false }
         nextState.activeSessions[index].outcome = ActiveSession.cleanOptionalText(outcome)
-        guard nextState != state else {
-            lifecycleErrorSessionID = nil
-            return true
-        }
-        lifecycleErrorSessionID = sessionID
-        let updated = commit(nextState, critical: true, normalizeAutomation: false)
-        if updated { lifecycleErrorSessionID = nil }
-        return updated
+        guard nextState != state else { return true }
+        return commit(
+            nextState,
+            critical: true,
+            normalizeAutomation: false,
+            affectedSessionID: sessionID
+        )
     }
 
     @discardableResult
@@ -1229,11 +1255,14 @@ final class SessionStore: ObservableObject {
                 return false
             }
         }
-        lifecycleErrorSessionID = sessionID
-        guard commit(nextState, critical: true, normalizeAutomation: false) else { return false }
+        guard commit(
+            nextState,
+            critical: true,
+            normalizeAutomation: false,
+            affectedSessionID: sessionID
+        ) else { return false }
         invalidateAsyncWork(for: sessionID)
         refreshAfterLifecycleMutation(for: sessionID)
-        lifecycleErrorSessionID = nil
         return true
     }
 
@@ -2405,7 +2434,7 @@ final class SessionStore: ObservableObject {
             state = restoredState
             stateRevision += 1
             isInRecoveryMode = false
-            lifecycleErrorMessage = nil
+            lifecycleError = nil
             now = restoreAcceptanceDate
             stateGeneration = UUID()
             gitCaptureStates.removeAll()
@@ -2453,7 +2482,8 @@ final class SessionStore: ObservableObject {
     private func commit(
         _ nextState: AppState,
         critical: Bool = false,
-        normalizeAutomation: Bool = true
+        normalizeAutomation: Bool = true,
+        affectedSessionID: UUID? = nil
     ) -> Bool {
         guard !isInRecoveryMode else {
             if critical {
@@ -2471,7 +2501,10 @@ final class SessionStore: ObservableObject {
         do {
             try AppStateIntegrityValidator.validate(normalizedState)
         } catch {
-            lifecycleErrorMessage = "CodePulse could not save because its workspace/project relationships are invalid."
+            lifecycleError = SessionLifecycleErrorPresentation(
+                message: "CodePulse could not save because its workspace/project relationships are invalid.",
+                affectedSessionID: critical ? affectedSessionID : nil
+            )
             if critical {
                 lastCriticalCommitFailed = true
             }
@@ -2487,15 +2520,21 @@ final class SessionStore: ObservableObject {
             } catch {
                 lastCriticalCommitFailed = true
                 if let persistenceError = error as? StatePersistenceError {
-                    lifecycleErrorMessage = persistenceError.errorDescription
-                        ?? "CodePulse couldn't save this lifecycle change. Try again or open Recovery."
+                    lifecycleError = SessionLifecycleErrorPresentation(
+                        message: persistenceError.errorDescription
+                            ?? "CodePulse couldn't save this lifecycle change. Try again or open Recovery.",
+                        affectedSessionID: affectedSessionID
+                    )
                     NSLog(
                         "CodePulse critical lifecycle commit failed (%@): %@",
                         persistenceError.logIdentifier,
                         persistenceError.technicalDescription
                     )
                 } else {
-                    lifecycleErrorMessage = "CodePulse couldn't save this lifecycle change. Your previous session state is unchanged. Try again or dismiss this message."
+                    lifecycleError = SessionLifecycleErrorPresentation(
+                        message: "CodePulse couldn't save this lifecycle change. Your previous session state is unchanged. Try again or dismiss this message.",
+                        affectedSessionID: affectedSessionID
+                    )
                     NSLog("CodePulse critical lifecycle commit failed: %@", error.localizedDescription)
                 }
                 if persistence.loadStatus.requiresRecovery {
@@ -2504,7 +2543,7 @@ final class SessionStore: ObservableObject {
                 return false
             }
             lastCriticalCommitFailed = false
-            lifecycleErrorMessage = nil
+            lifecycleError = nil
         } else {
             persistence.save(normalizedState)
             guard !persistence.loadStatus.requiresRecovery else {
@@ -3247,7 +3286,12 @@ final class SessionStore: ObservableObject {
         // and any overlapping same-root Session, but never changes lifecycle
         // or ownership authority.
         nextState.reconcileGitObservationAttribution()
-        guard commit(nextState, critical: true, normalizeAutomation: false) else { return false }
+        guard commit(
+            nextState,
+            critical: true,
+            normalizeAutomation: false,
+            affectedSessionID: sessionID
+        ) else { return false }
         refreshTerminalGitCaptureStatuses()
         invalidateGitCaptureState(for: sessionID)
         now = clock.now

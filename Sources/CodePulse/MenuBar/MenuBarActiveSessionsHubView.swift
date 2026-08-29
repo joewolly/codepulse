@@ -64,6 +64,10 @@ struct MenuBarActiveSessionsHubView: View {
         MenuBarSessionPresentation.sorted(state: store.state)
     }
 
+    private var newSessionAvailability: MenuBarNewSessionAvailability {
+        MenuBarNewSessionAvailability(activeSessionCount: store.state.activeSessions.count)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -76,7 +80,7 @@ struct MenuBarActiveSessionsHubView: View {
                 Button(action: newSession) {
                     Label("New Session…", systemImage: "plus")
                 }
-                .disabled(store.state.activeSessions.count >= ConcurrentSessionLimits.maximumActiveSessions)
+                .disabled(!newSessionAvailability.canStart)
                 .accessibilityIdentifier("new-session-button")
             }
 
@@ -86,8 +90,8 @@ struct MenuBarActiveSessionsHubView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("active-session-count")
 
-            if store.state.activeSessions.count >= ConcurrentSessionLimits.maximumActiveSessions {
-                Label("Session limit reached (16)", systemImage: "exclamationmark.circle")
+            if let capacityMessage = newSessionAvailability.capacityMessage {
+                Label(capacityMessage, systemImage: "exclamationmark.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

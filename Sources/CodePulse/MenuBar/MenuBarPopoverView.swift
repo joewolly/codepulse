@@ -1,6 +1,72 @@
 import AppKit
 import SwiftUI
 
+enum MenuBarPopoverRoute: Equatable {
+    case idle
+    case soleSession(UUID)
+    case activeSessionsHub
+    case selectedSession(UUID)
+    case newSession
+}
+
+struct MenuBarPopoverPresentation: Equatable {
+    private(set) var selectedSessionID: UUID?
+    private(set) var isPresentingNewSession = false
+
+    mutating func selectSession(_ sessionID: UUID) {
+        selectedSessionID = sessionID
+        isPresentingNewSession = false
+    }
+
+    mutating func showNewSession(activeSessionIDs: [UUID]) {
+        guard MenuBarNewSessionAvailability(activeSessionCount: activeSessionIDs.count).canStart else { return }
+        isPresentingNewSession = true
+        selectedSessionID = nil
+    }
+
+    mutating func closeNewSession() {
+        isPresentingNewSession = false
+    }
+
+    mutating func didCreateSession() {
+        isPresentingNewSession = false
+        selectedSessionID = nil
+    }
+
+    mutating func clearSelection() {
+        selectedSessionID = nil
+    }
+
+    mutating func reconcile(activeSessionIDs: [UUID]) {
+        if let selectedSessionID, !activeSessionIDs.contains(selectedSessionID) {
+            self.selectedSessionID = nil
+        }
+        if activeSessionIDs.isEmpty { isPresentingNewSession = false }
+    }
+
+    func route(activeSessionIDs: [UUID]) -> MenuBarPopoverRoute {
+        if isPresentingNewSession,
+           !activeSessionIDs.isEmpty,
+           MenuBarNewSessionAvailability(activeSessionCount: activeSessionIDs.count).canStart {
+            return .newSession
+        }
+        if let selectedSessionID, activeSessionIDs.contains(selectedSessionID) {
+            return .selectedSession(selectedSessionID)
+        }
+        switch activeSessionIDs.count {
+        case 0: return .idle
+        case 1: return .soleSession(activeSessionIDs[0])
+        default: return .activeSessionsHub
+        }
+    }
+}
+
+struct MenuBarNewSessionAvailability: Equatable {
+    let activeSessionCount: Int
+    var canStart: Bool { activeSessionCount < ConcurrentSessionLimits.maximumActiveSessions }
+    var capacityMessage: String? { canStart ? nil : "Session limit reached (16)" }
+}
+
 struct MenuBarPopoverView: View {
     static let standardWidth: CGFloat = 390
     private static let contentWidth: CGFloat = standardWidth - 32
@@ -9,8 +75,7 @@ struct MenuBarPopoverView: View {
     @EnvironmentObject private var store: SessionStore
     @EnvironmentObject private var windowCoordinator: AppWindowCoordinator
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedSessionID: UUID?
-    @State private var isPresentingNewSession = false
+    @State private var presentation = MenuBarPopoverPresentation()
 
     private let onDismiss: (() -> Void)?
     private let onOpenInsights: (() -> Void)?
@@ -36,10 +101,7 @@ struct MenuBarPopoverView: View {
         .frame(width: Self.standardWidth, alignment: .leading)
         .padding(.vertical, 16)
         .onChange(of: store.state.activeSessions.map(\.id)) { sessionIDs in
-            if let selectedSessionID, !sessionIDs.contains(selectedSessionID) {
-                self.selectedSessionID = nil
-            }
-            if sessionIDs.isEmpty { isPresentingNewSession = false }
+            presentation.reconcile(activeSessionIDs: sessionIDs)
         }
     }
 
@@ -82,35 +144,37 @@ struct MenuBarPopoverView: View {
     @ViewBuilder
     private var routedContent: some View {
         let sessions = store.state.activeSessions
-        if isPresentingNewSession {
-            navigationHeader(title: "New Session") { isPresentingNewSession = false }
+        switch presentation.route(activeSessionIDs: sessions.map(\.id)) {
+        case .newSession:
+            navigationHeader(title: "New Session") { presentation.closeNewSession() }
             MenuBarManualStartView(mode: .concurrent) { _ in
-                isPresentingNewSession = false
-                selectedSessionID = nil
+                presentation.didCreateSession()
             }
-        } else if let selectedSessionID,
-                  let session = store.state.activeSession(id: selectedSessionID),
-                  sessions.count > 1 {
+        case .selectedSession(let sessionID):
+            if let session = store.state.activeSession(id: sessionID) {
             navigationHeader(title: session.projectName ?? "No Project") {
-                self.selectedSessionID = nil
-            }
-            sessionDetail(session)
-        } else if sessions.isEmpty {
-            MenuBarIdleView()
-        } else if sessions.count == 1, let session = sessions.first {
-            HStack {
-                Spacer()
-                Button { isPresentingNewSession = true } label: {
-                    Label("New Session…", systemImage: "plus")
+                    presentation.clearSelection()
                 }
-                .disabled(sessions.count >= ConcurrentSessionLimits.maximumActiveSessions)
-                .accessibilityIdentifier("new-session-button")
+                sessionDetail(session)
             }
-            sessionDetail(session)
-        } else {
+        case .idle:
+            MenuBarIdleView()
+        case .soleSession(let sessionID):
+            if let session = store.state.activeSession(id: sessionID) {
+                HStack {
+                    Spacer()
+                    Button { presentation.showNewSession(activeSessionIDs: sessions.map(\.id)) } label: {
+                        Label("New Session…", systemImage: "plus")
+                    }
+                    .disabled(!MenuBarNewSessionAvailability(activeSessionCount: sessions.count).canStart)
+                    .accessibilityIdentifier("new-session-button")
+                }
+                sessionDetail(session)
+            }
+        case .activeSessionsHub:
             MenuBarActiveSessionsHubView(
-                selectSession: { selectedSessionID = $0 },
-                newSession: { isPresentingNewSession = true }
+                selectSession: { presentation.selectSession($0) },
+                newSession: { presentation.showNewSession(activeSessionIDs: sessions.map(\.id)) }
             )
         }
     }
@@ -164,7 +228,7 @@ private struct MenuBarLifecycleErrorView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .accessibilityLabel("Dismiss lifecycle error")
-            .accessibilityHint("Dismisses this save error without changing the current session")
+            .accessibilityHint("Dismisses this error without changing session state")
         }
         .padding(10)
         .background(

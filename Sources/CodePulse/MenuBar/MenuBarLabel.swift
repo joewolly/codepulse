@@ -15,6 +15,18 @@ enum MenuBarLabelPresentation {
             return duration
         }
     }
+
+    static func shouldRenderText(state: AppState) -> Bool {
+        if state.activeSessions.count > 1 {
+            return state.settings.menuBarDisplay != .iconOnly
+        }
+        switch state.activeSessions.first?.phase ?? .idle {
+        case .idle:
+            return state.settings.idleAppearance == .code
+        case .running, .paused, .finishing:
+            return state.settings.menuBarDisplay != .iconOnly
+        }
+    }
 }
 
 struct MenuBarLabel: View {
@@ -39,15 +51,7 @@ struct MenuBarLabel: View {
     }
 
     private var shouldShowText: Bool {
-        if store.state.activeSessions.count > 1 {
-            return store.state.settings.menuBarDisplay != .iconOnly
-        }
-        switch store.state.activeSessions.first?.phase ?? .idle {
-        case .idle:
-            return store.state.settings.idleAppearance == .code
-        case .running, .paused, .finishing:
-            return store.state.settings.menuBarDisplay != .iconOnly
-        }
+        MenuBarLabelPresentation.shouldRenderText(state: store.state)
     }
 
     private var labelText: String {

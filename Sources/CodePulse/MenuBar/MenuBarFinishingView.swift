@@ -1,5 +1,32 @@
 import SwiftUI
 
+struct MenuBarSessionControlPresentation: Equatable {
+    let phase: SessionPhase
+    let isGitCaptureInProgress: Bool
+
+    var canSave: Bool { phase == .finishing && !isGitCaptureInProgress }
+    var canUseLifecycleControls: Bool { phase == .running || phase == .paused }
+
+    @MainActor
+    static func resolve(sessionID: UUID, store: SessionStore) -> Self? {
+        guard let session = store.state.activeSession(id: sessionID) else { return nil }
+        return Self(
+            phase: session.phase,
+            isGitCaptureInProgress: store.isGitCaptureInProgress(for: sessionID)
+        )
+    }
+}
+
+struct MenuBarOutcomeUpdate: Equatable {
+    let sessionID: UUID
+    let outcome: String
+
+    @MainActor
+    func apply(to store: SessionStore) {
+        _ = store.updateFinishingOutcome(sessionID: sessionID, outcome: outcome)
+    }
+}
+
 struct MenuBarFinishingView: View {
     @EnvironmentObject private var store: SessionStore
     let sessionID: UUID
@@ -102,7 +129,7 @@ struct MenuBarFinishingView: View {
             .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .controlSize(.large)
             .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(isCapturingGit)
+            .disabled(!(MenuBarSessionControlPresentation.resolve(sessionID: sessionID, store: store)?.canSave ?? false))
             .accessibilityLabel(isCapturingGit ? "Collecting Git" : "Save Session")
             .accessibilityValue(isCapturingGit ? "Collecting Git" : "Save Session")
             .accessibilityHint("Saves the finished coding session")
@@ -131,8 +158,9 @@ struct MenuBarFinishingView: View {
         .onChange(of: outcome) { newValue in
             outcomeSaveWorkItem?.cancel()
             let targetSessionID = sessionID
+            let update = MenuBarOutcomeUpdate(sessionID: targetSessionID, outcome: newValue)
             let workItem = DispatchWorkItem {
-                _ = store.updateFinishingOutcome(sessionID: targetSessionID, outcome: newValue)
+                update.apply(to: store)
             }
             outcomeSaveWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
