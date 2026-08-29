@@ -782,7 +782,7 @@ final class SessionPresetAutomationTests: XCTestCase {
         XCTAssertTrue(persistence.state.completedSessions.isEmpty)
     }
 
-    func testApplicationAndDeveloperClaimsCoexistAndKeepOneSessionAlive() throws {
+    func testApplicationAndDeveloperOwnersCoexistAsIndependentSessions() throws {
         let project = try makeProject(name: "Mixed Claims Project")
         let preset = SessionPreset(name: "Mixed Coding", projectID: project.record.id)
         let xcode = ApplicationIdentity(bundleIdentifier: "com.apple.dt.Xcode", displayName: "Xcode")
@@ -832,13 +832,16 @@ final class SessionPresetAutomationTests: XCTestCase {
         ))
         store.refresh()
 
-        XCTAssertEqual(store.activeSession?.id, sessionID)
-        XCTAssertEqual(store.activeSession?.automationMetadata?.claims.count, 2)
+        XCTAssertEqual(store.state.activeSessions.count, 2)
+        let developerSessionID = try XCTUnwrap(store.state.activeSessions.first(where: { $0.id != sessionID })?.id)
+        XCTAssertEqual(store.state.activeSession(id: sessionID)?.automationMetadata?.claims.count, 1)
+        XCTAssertEqual(store.state.activeSession(id: developerSessionID)?.automationMetadata?.claims.count, 1)
 
         monitor.setCurrentApplication(ApplicationIdentity(bundleIdentifier: "com.apple.Safari", displayName: "Safari"))
         clock.now = start.addingTimeInterval(10)
         store.refresh()
-        XCTAssertEqual(store.phase, .running)
+        XCTAssertEqual(store.state.activeSession(id: sessionID)?.phase, .running)
+        XCTAssertEqual(store.state.activeSession(id: developerSessionID)?.phase, .running)
 
         try inbox.write(DeveloperToolEvent(
             tool: .codex,
@@ -849,13 +852,17 @@ final class SessionPresetAutomationTests: XCTestCase {
         ))
         clock.now = start.addingTimeInterval(15)
         store.refresh()
-        XCTAssertEqual(store.phase, .running)
+        XCTAssertEqual(store.state.activeSession(id: sessionID)?.phase, .running)
+        XCTAssertEqual(
+            store.state.activeSession(id: developerSessionID)?.automationMetadata?.claims.first?.isActive,
+            false
+        )
 
         monitor.setCurrentApplication(xcode)
-        XCTAssertEqual(store.phase, .running)
-        XCTAssertEqual(store.activeSession?.id, sessionID)
+        XCTAssertEqual(store.state.activeSession(id: sessionID)?.phase, .running)
+        XCTAssertEqual(store.state.activeSession(id: developerSessionID)?.id, developerSessionID)
         XCTAssertEqual(
-            store.activeSession?.automationMetadata?.claims.first(where: { $0.source == .application(bundleIdentifier: xcode.bundleIdentifier) })?.isActive,
+            store.state.activeSession(id: sessionID)?.automationMetadata?.claims.first(where: { $0.source == .application(bundleIdentifier: xcode.bundleIdentifier) })?.isActive,
             true
         )
     }

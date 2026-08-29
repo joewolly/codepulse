@@ -677,15 +677,20 @@ final class SessionAutomationTests: XCTestCase {
             ))
             store.refresh()
 
-            XCTAssertEqual(store.activeSession?.id, codePulseSessionID)
-            XCTAssertEqual(store.activeSession?.projectID, fixture.codePulse.id)
+            XCTAssertEqual(store.state.activeSessions.count, 2)
+            let original = try XCTUnwrap(store.state.activeSession(id: codePulseSessionID))
+            XCTAssertEqual(original.projectID, fixture.codePulse.id)
             XCTAssertEqual(
-                store.activeSession?.automationMetadata?.claims.map(\.source),
+                original.automationMetadata?.claims.map(\.source),
                 [.developerTool(tool: tool, externalSessionID: "\(tool.rawValue)-codepulse")]
             )
-            XCTAssertFalse(store.activeSession?.developerToolContexts.contains(where: {
+            XCTAssertFalse(original.developerToolContexts.contains(where: {
                 $0.externalSessionID == "\(tool.rawValue)-proxpilot"
-            }) == true)
+            }))
+            XCTAssertEqual(
+                store.state.activeSessions.first(where: { $0.id != codePulseSessionID })?.projectID,
+                fixture.proxPilot.id
+            )
             XCTAssertEqual(store.state.developerToolIntegration?.processedEvents.count, 2)
         }
     }
@@ -764,7 +769,7 @@ final class SessionAutomationTests: XCTestCase {
         let fixture = try makeFixture(tool: .codex, enabled: true, seedEvent: nil, clock: clock)
         XCTAssertTrue(fixture.store.startSession(projectID: fixture.project.id, goal: "Manual", at: start))
         let activity = event(
-            tool: .codex,
+            tool: .opencode,
             sessionID: "manual-context",
             type: .activity,
             path: fixture.projectURL.path,
@@ -820,7 +825,7 @@ final class SessionAutomationTests: XCTestCase {
         XCTAssertNil(coordinator.action(for: deletedProjectEvent, in: state, now: start))
     }
 
-    func testMultipleClaimsShareOneSessionAndOneEndingClaimDoesNotPauseIt() throws {
+    func testDifferentThreadsOwnDifferentSessionsAndOneEndDoesNotPauseTheOther() throws {
         let clock = AutomationTestClock(start)
         let fixture = try makeFixture(tool: .codex, enabled: true, seedEvent: event(
             tool: .codex,
@@ -839,8 +844,9 @@ final class SessionAutomationTests: XCTestCase {
             timestamp: clock.now
         ))
         fixture.store.refresh()
-        XCTAssertEqual(fixture.store.activeSession?.id, sessionID)
-        XCTAssertEqual(fixture.store.activeSession?.automationMetadata?.claims.count, 2)
+        XCTAssertEqual(fixture.store.state.activeSessions.count, 2)
+        let openCodeSessionID = try XCTUnwrap(fixture.store.state.activeSessions.first(where: { $0.id != sessionID })?.id)
+        let openCodeBefore = fixture.store.state.activeSession(id: openCodeSessionID)
 
         clock.now = start.addingTimeInterval(10)
         try fixture.inbox.write(event(
@@ -852,15 +858,12 @@ final class SessionAutomationTests: XCTestCase {
         ))
         fixture.store.refresh()
 
-        XCTAssertEqual(fixture.store.phase, .running)
+        XCTAssertEqual(fixture.store.state.activeSession(id: sessionID)?.phase, .running)
         XCTAssertEqual(
-            fixture.store.activeSession?.automationMetadata?.claims.first(where: { $0.externalSessionID == "codex-a" })?.isActive,
+            fixture.store.state.activeSession(id: sessionID)?.automationMetadata?.claims.first?.isActive,
             false
         )
-        XCTAssertEqual(
-            fixture.store.activeSession?.automationMetadata?.claims.first(where: { $0.externalSessionID == "opencode-c" })?.isActive,
-            true
-        )
+        XCTAssertEqual(fixture.store.state.activeSession(id: openCodeSessionID), openCodeBefore)
     }
 
     func testSecondaryDeveloperToolClaimAdmissionIsAtomicAtCapacityAndRetirementProtection() throws {
