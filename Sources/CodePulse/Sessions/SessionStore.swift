@@ -870,7 +870,12 @@ final class SessionStore: ObservableObject {
               rule.isValid,
               case .application(let bundleIdentifier) = source else { return false }
 
-        guard state.activeSessions.isEmpty,
+        let hasApplicationOwner = state.activeSessions.contains {
+            if case .application = $0.automationMetadata?.startedBySource { return true }
+            return false
+        }
+        guard !hasApplicationOwner,
+              state.activeSessions.count < ConcurrentSessionLimits.maximumActiveSessions,
               let preset = state.sessionPresets.first(where: { $0.id == rule.presetID }),
               let projectID = preset.projectID,
               isPresetUsableForAutomation(preset),
@@ -2537,33 +2542,201 @@ final class SessionStore: ObservableObject {
 
         for item in pending {
             lastCriticalCommitFailed = false
-            if let action = sessionAutomationCoordinator.action(
-                for: item.event,
-                in: state,
+            var candidate = state
+            let postCommitStart = routeDeveloperToolEvent(
+                item.event,
+                in: &candidate,
                 now: scanDate
-            ) {
-                guard applyAutomationAction(action, for: item.event, at: scanDate) ||
-                    !lastCriticalCommitFailed else {
-                    // Keep the inbox event when a lifecycle commit failed.
-                    // It will be retried after the next launch or scan.
-                    return
-                }
-            }
-
-            var acknowledgedState = state
-            _ = developerToolEventConsumer.attach(item.event, to: &acknowledgedState, now: scanDate)
-            _ = developerToolEventConsumer.markProcessed(item, in: &acknowledgedState, at: scanDate)
-            if acknowledgedState != state {
-                // Persist enrichment and acknowledgement together so a crash
-                // cannot reattach the same inbox event on the next launch.
-                guard commit(acknowledgedState, critical: true) else {
-                    // Do not remove the inbox file when either the context or
-                    // its processed acknowledgement was not durably saved.
-                    return
-                }
+            )
+            _ = developerToolEventConsumer.markProcessed(item, in: &candidate, at: scanDate)
+            guard candidate == state || commit(candidate, critical: true, normalizeAutomation: false) else {
+                // Mutation and acknowledgement remain unpublished together;
+                // retaining the inbox file makes the event safely retryable.
+                return
             }
             developerToolEventConsumer.cleanup(item)
+            if let postCommitStart,
+               let session = state.activeSession(id: postCommitStart.sessionID) {
+                scheduleStartGitCaptureIfNeeded(for: session, folderURL: postCommitStart.folderURL)
+            }
         }
+    }
+
+    private struct DeveloperToolPostCommitStart {
+        let sessionID: UUID
+        let folderURL: URL
+    }
+
+    /// Routes one validated event entirely against a candidate AppState. No
+    /// async work is started here; callers publish the candidate and its replay
+    /// acknowledgement in one critical save before scheduling Git discovery.
+    private func routeDeveloperToolEvent(
+        _ event: DeveloperToolEvent,
+        in candidate: inout AppState,
+        now: Date
+    ) -> DeveloperToolPostCommitStart? {
+        guard let canonicalWorkingDirectory = DeveloperToolProjectPathMatcher.canonicalPath(
+            for: event.workingDirectory
+        ),
+        let resolvedProjectID = DeveloperToolProjectResolver.projectID(
+            for: canonicalWorkingDirectory,
+            in: candidate.projects
+        ) else { return nil }
+
+        let identity = DeveloperToolThreadIdentity(
+            tool: event.tool,
+            externalSessionID: event.externalSessionID
+        )
+        guard identity.isValid else { return nil }
+
+        let owners = candidate.activeSessions.filter {
+            $0.developerToolOwnershipIdentities.contains(identity)
+        }
+        guard owners.count <= 1 else { return nil }
+        if let owner = owners.first {
+            guard owner.projectID == resolvedProjectID,
+                  event.timestamp >= owner.startedAt,
+                  event.timestamp <= (owner.endedAt ?? now) else { return nil }
+
+            _ = developerToolEventConsumer.attach(
+                event,
+                toSessionID: owner.id,
+                in: &candidate,
+                now: now
+            )
+            applyDeveloperToolSignal(
+                event,
+                toSessionID: owner.id,
+                in: &candidate,
+                transitionAt: now
+            )
+            return nil
+        }
+
+        candidate.pruneExpiredRetiredDeveloperToolThreads(at: now)
+        if candidate.developerToolIntegration?.retiredDeveloperToolThreads.contains(where: {
+            $0.identity == identity && $0.isProtected(at: now)
+        }) == true { return nil }
+
+        let isStartCapable = event.eventType == .sessionStarted || event.eventType == .activity
+        let matchingRule = (isStartCapable && candidate.settings.automationEnabled) ? sessionAutomationCoordinator.matchingDeveloperRule(
+            for: event.tool,
+            projectID: resolvedProjectID,
+            state: candidate
+        ) : nil
+
+        if let rule = matchingRule {
+            guard event.timestamp <= now,
+                  event.timestamp >= now.addingTimeInterval(-SessionAutomationCoordinator.maximumStartBackdate),
+                  candidate.activeSessions.count < ConcurrentSessionLimits.maximumActiveSessions,
+                  let preset = candidate.sessionPresets.first(where: { $0.id == rule.presetID }) else {
+                return nil
+            }
+            do {
+                try candidate.admitDeveloperToolOwner(
+                    tool: event.tool,
+                    externalSessionID: event.externalSessionID,
+                    at: now
+                )
+            } catch { return nil }
+
+            let source = SessionAutomationClaimSource.developerTool(
+                tool: event.tool,
+                externalSessionID: event.externalSessionID
+            )
+            let metadata = SessionAutomationMetadata(
+                startedByRuleID: rule.id,
+                startedByRuleName: rule.name,
+                startedBySource: source,
+                lastMatchingSignalAt: event.timestamp,
+                pauseEligibleAt: event.timestamp.addingTimeInterval(rule.pauseDelay),
+                finishEligibleAt: event.timestamp.addingTimeInterval(rule.finishDelay),
+                pauseDelay: rule.pauseDelay,
+                finishDelay: rule.finishDelay,
+                minimumSavedDuration: rule.minimumSavedDuration,
+                claims: [SessionAutomationClaim(source: source, isActive: true, lastSignalAt: event.timestamp)]
+            )
+            let project = candidate.projects.first { $0.id == resolvedProjectID }
+            var session = ActiveSession(
+                projectID: resolvedProjectID,
+                projectName: project?.name,
+                type: preset.sessionType,
+                goal: ActiveSession.cleanOptionalText(preset.goal),
+                startedAt: event.timestamp,
+                automationMetadata: metadata
+            )
+            candidate.activeSessions.append(session)
+            _ = developerToolEventConsumer.attach(
+                event,
+                toSessionID: session.id,
+                in: &candidate,
+                now: now
+            )
+            session = candidate.activeSession(id: session.id) ?? session
+            if let projectIndex = candidate.projects.firstIndex(where: { $0.id == resolvedProjectID }) {
+                candidate.projects[projectIndex].lastUsedAt = event.timestamp
+            }
+            return DeveloperToolPostCommitStart(
+                sessionID: session.id,
+                folderURL: URL(fileURLWithPath: canonicalWorkingDirectory, isDirectory: true)
+            )
+        }
+
+        // Unowned events that automation does not claim may context-enrich
+        // exactly one timeline-eligible manual Session. They never create
+        // automation ownership or lifecycle control.
+        let manualTargets = candidate.activeSessions.filter {
+            $0.automationMetadata == nil &&
+            $0.projectID == resolvedProjectID &&
+            event.timestamp >= $0.startedAt &&
+            event.timestamp <= ($0.endedAt ?? now)
+        }
+        guard manualTargets.count == 1, let manualID = manualTargets.first?.id else { return nil }
+        _ = developerToolEventConsumer.attach(
+            event,
+            toSessionID: manualID,
+            in: &candidate,
+            now: now
+        )
+        return nil
+    }
+
+    private func applyDeveloperToolSignal(
+        _ event: DeveloperToolEvent,
+        toSessionID sessionID: UUID,
+        in candidate: inout AppState,
+        transitionAt: Date
+    ) {
+        guard let index = candidate.activeSessionIndex(id: sessionID) else { return }
+        var session = candidate.activeSessions[index]
+        guard session.phase == .running || session.phase == .paused,
+              var metadata = session.automationMetadata,
+              metadata.controlEnabled else { return }
+        let source = SessionAutomationClaimSource.developerTool(
+            tool: event.tool,
+            externalSessionID: event.externalSessionID
+        )
+        guard let claimIndex = metadata.claims.firstIndex(where: { $0.source == source }),
+              event.timestamp >= metadata.claims[claimIndex].lastSignalAt else { return }
+        guard sessionAutomationCoordinator.hasSupportingRule(
+            for: source,
+            projectID: session.projectID,
+            in: candidate
+        ) else { return }
+
+        let isActive = event.eventType == .sessionStarted || event.eventType == .activity
+        let isEnd = event.eventType == .sessionEnded || event.eventType == .sessionIdle
+        guard isActive || isEnd else { return }
+        metadata.claims[claimIndex].isActive = isActive
+        metadata.claims[claimIndex].lastSignalAt = event.timestamp
+        metadata.lastMatchingSignalAt = max(metadata.lastMatchingSignalAt, event.timestamp)
+        metadata.pauseEligibleAt = event.timestamp.addingTimeInterval(metadata.pauseDelay)
+        metadata.finishEligibleAt = event.timestamp.addingTimeInterval(metadata.finishDelay)
+        if isActive, session.phase == .paused {
+            _ = session.resume(at: transitionAt)
+        }
+        session.automationMetadata = metadata
+        candidate.activeSessions[index] = session
     }
 
     private func applyAutomationAction(
@@ -2666,6 +2839,15 @@ final class SessionStore: ObservableObject {
                 signalAt: date,
                 transitionAt: date
             )
+        case .signalSession(let sessionID, let rule, let source, let isActive):
+            return applyAutomationSignal(
+                sessionID: sessionID,
+                rule: rule,
+                source: source,
+                isActive: isActive,
+                signalAt: date,
+                transitionAt: date
+            )
         case .relinquish:
             var nextState = state
             relinquishInvalidAutomation(in: &nextState)
@@ -2683,7 +2865,26 @@ final class SessionStore: ObservableObject {
         signalAt eventDate: Date,
         transitionAt date: Date
     ) -> Bool {
-        guard var session = state.soleActiveSession,
+        guard let sessionID = state.soleActiveSession?.id else { return true }
+        return applyAutomationSignal(
+            sessionID: sessionID,
+            rule: rule,
+            source: source,
+            isActive: isActive,
+            signalAt: eventDate,
+            transitionAt: date
+        )
+    }
+
+    private func applyAutomationSignal(
+        sessionID: UUID,
+        rule: SessionAutomationRule?,
+        source: SessionAutomationClaimSource,
+        isActive: Bool,
+        signalAt eventDate: Date,
+        transitionAt date: Date
+    ) -> Bool {
+        guard var session = state.activeSession(id: sessionID),
               var metadata = session.automationMetadata,
               metadata.controlEnabled,
               session.phase == .running || session.phase == .paused else {

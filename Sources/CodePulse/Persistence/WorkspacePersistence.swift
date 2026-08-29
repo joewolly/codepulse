@@ -96,6 +96,7 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
     case orphanedDeveloperToolReservation(DeveloperTool, String)
     case missingDeveloperToolReservation(DeveloperTool, String)
     case retiredDeveloperToolCapacityExceeded
+    case multipleApplicationAutomationOwners
 
     var errorDescription: String? {
         switch self {
@@ -139,6 +140,8 @@ enum AppStateIntegrityError: LocalizedError, Equatable {
             return "Active developer-tool identity \(tool.rawValue):\(externalSessionID) has no retirement reservation."
         case .retiredDeveloperToolCapacityExceeded:
             return "CodePulse state exceeds the retired/reserved developer-tool capacity."
+        case .multipleApplicationAutomationOwners:
+            return "CodePulse state contains more than one application-trigger-owned active Session."
         }
     }
 }
@@ -171,6 +174,13 @@ enum AppStateIntegrityValidator {
 
         guard state.activeSessions.count <= ConcurrentSessionLimits.maximumActiveSessions else {
             throw AppStateIntegrityError.activeSessionLimitExceeded(state.activeSessions.count)
+        }
+        let applicationOwnerCount = state.activeSessions.filter { session in
+            if case .application = session.automationMetadata?.startedBySource { return true }
+            return false
+        }.count
+        guard applicationOwnerCount <= 1 else {
+            throw AppStateIntegrityError.multipleApplicationAutomationOwners
         }
 
         let activeIDs = state.activeSessions.map(\.id)

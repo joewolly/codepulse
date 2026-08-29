@@ -525,10 +525,7 @@ extension AppState {
         retiredAt: Date,
         lastAcceptedEventAt: Date? = nil
     ) throws {
-        let eventDate = lastAcceptedEventAt ?? retiredAt
-        guard retiredAt.timeIntervalSinceReferenceDate.isFinite,
-              eventDate.timeIntervalSinceReferenceDate.isFinite,
-              eventDate <= retiredAt else {
+        guard retiredAt.timeIntervalSinceReferenceDate.isFinite else {
             throw DeveloperToolThreadAdmissionError.invalidRetirementMetadata
         }
 
@@ -545,6 +542,23 @@ extension AppState {
             - activeOwnersBeingRetired.count
         var newlyRetiredIdentities = Set<DeveloperToolThreadIdentity>()
         for identity in identities {
+            let contextDate = session.developerToolContexts
+                .filter { $0.tool == identity.tool && $0.externalSessionID == identity.externalSessionID }
+                .map(\.lastActivityAt)
+                .max()
+            let claimDate = session.automationMetadata?.claims
+                .filter { $0.source.developerToolThreadIdentity == identity }
+                .map(\.lastSignalAt)
+                .max()
+            let derivedDate = [contextDate, claimDate, session.startedAt]
+                .compactMap { $0 }
+                .filter { $0 <= retiredAt }
+                .max() ?? session.startedAt
+            let eventDate = lastAcceptedEventAt ?? derivedDate
+            guard eventDate.timeIntervalSinceReferenceDate.isFinite,
+                  eventDate <= retiredAt else {
+                throw DeveloperToolThreadAdmissionError.invalidRetirementMetadata
+            }
             if candidate.reservedDeveloperToolOwnershipIdentities.contains(identity) {
                 try candidate.retireDeveloperToolOwner(
                     tool: identity.tool,

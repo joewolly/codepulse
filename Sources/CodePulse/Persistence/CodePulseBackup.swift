@@ -281,7 +281,8 @@ enum CodePulseBackupCodec {
                  .duplicateReservedDeveloperToolThread,
                  .orphanedDeveloperToolReservation,
                  .missingDeveloperToolReservation,
-                 .retiredDeveloperToolCapacityExceeded:
+                 .retiredDeveloperToolCapacityExceeded,
+                 .multipleApplicationAutomationOwners:
                 throw CodePulseBackupError.invalidTimeline
             case .unsupportedSchemaVersion:
                 throw CodePulseBackupError.malformedConfiguration
