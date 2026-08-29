@@ -318,6 +318,191 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
         XCTAssertEqual(distinctState.completedSessions[1].gitContext?.filesChanged, 8)
     }
 
+    func testLoneLegacyGitMetricsSurviveReconciliation() {
+        let legacy = completed(id: UUID(), root: "/repo-a", start: nil, end: nil,
+                               commitCount: 3, filesChanged: 5, insertions: 8, deletions: 2)
+        var state = AppState(completedSessions: [legacy])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions, [legacy])
+    }
+
+    func testLegacyGitMetricsRemainIndependentAcrossCanonicalRoots() {
+        let legacy = completed(id: UUID(), root: "/repo-a", start: nil, end: nil,
+                               commitCount: 3, filesChanged: 5, insertions: 8, deletions: 2)
+        let observed = completed(id: UUID(), root: "/repo-b", start: 10, end: 20,
+                                 commitCount: 1, filesChanged: 2, insertions: 3, deletions: 0)
+        var state = AppState(completedSessions: [legacy, observed])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions[0], legacy)
+        XCTAssertEqual(state.completedSessions[1].id, observed.id)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.deltaAttribution, .attributable)
+    }
+
+    func testLegacySameRootMetricsAreSuppressedOnlyWhenComparisonIsUnsafe() {
+        let legacy = completed(id: UUID(), root: "/repo-a", start: nil, end: nil,
+                               commitCount: 3, filesChanged: 5, insertions: 8, deletions: 2)
+        let observed = completed(id: UUID(), root: "/repo-a", start: 10, end: 20,
+                                 commitCount: 1, filesChanged: 2, insertions: 3, deletions: 0)
+        var state = AppState(completedSessions: [legacy, observed])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions.map(\.id), [legacy.id, observed.id])
+        for session in state.completedSessions {
+            XCTAssertNil(session.gitContext?.commitCount)
+            XCTAssertNil(session.gitContext?.filesChanged)
+            XCTAssertEqual(session.gitContext?.deltaAttribution, .ambiguous)
+        }
+    }
+
+    func testPartialWindowsUseKnownBoundariesToProveStrictSeparation() {
+        assertAttribution(startA: 10, endA: 20, startB: 21, endB: nil, expected: .attributable)
+        assertAttribution(startA: nil, endA: 20, startB: 21, endB: 30, expected: .attributable)
+    }
+
+    func testPartialWindowsRemainAmbiguousWithoutASeparationProof() {
+        assertAttribution(startA: 10, endA: 20, startB: 20, endB: nil, expected: .ambiguous)
+        assertAttribution(startA: 10, endA: nil, startB: 21, endB: 30, expected: .ambiguous)
+        assertAttribution(startA: 10, endA: 30, startB: 20, endB: nil, expected: .ambiguous)
+    }
+
+    func testCompleteWindowsRetainClosedBoundarySafety() {
+        assertAttribution(startA: 10, endA: 20, startB: 21, endB: 30, expected: .attributable)
+        assertAttribution(startA: 10, endA: 20, startB: 20, endB: 30, expected: .ambiguous)
+        assertAttribution(startA: 10, endA: 30, startB: 20, endB: 40, expected: .ambiguous)
+    }
+
+    func testPriorAmbiguityIsRecomputedFromCurrentEvidenceWithoutInventingMetrics() {
+        let first = completed(id: UUID(), root: "/repo-a", start: 10, end: 20,
+                              commitCount: nil, filesChanged: nil, insertions: nil, deletions: nil,
+                              attribution: .ambiguous)
+        let second = completed(id: UUID(), root: "/repo-a", start: 21, end: 30,
+                               commitCount: 2, filesChanged: 3, insertions: 4, deletions: 1,
+                               attribution: .ambiguous)
+        var state = AppState(completedSessions: [first, second])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions.map(\.id), [first.id, second.id])
+        XCTAssertEqual(state.completedSessions.map { $0.gitContext?.deltaAttribution }, [.attributable, .attributable])
+        XCTAssertNil(state.completedSessions[0].gitContext?.commitCount)
+        XCTAssertEqual(state.completedSessions[1].gitContext?.commitCount, 2)
+    }
+
+    func testStaleGitCallbackAfterDiscardIsIgnored() async throws {
+        let root = try makeTemporaryDirectory(named: "discard")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entered = expectation(description: "start entered")
+        let release = DispatchSemaphore(value: 0)
+        let service = Phase2ControlledGitService(startPlans: [root.path: .init(
+            snapshot: startSnapshot(root: root, sha: "discard"), entered: entered, release: release
+        )])
+        let store = makeStore(gitService: service)
+        let project = try XCTUnwrap(store.addProject(name: "Discard", folderURL: root))
+        let id = try XCTUnwrap(store.createManualSession(projectID: project, goal: "Discard"))
+        await fulfillment(of: [entered], timeout: 2)
+        XCTAssertTrue(store.finish(sessionID: id))
+        XCTAssertTrue(store.discardSession(sessionID: id))
+
+        release.signal()
+        try await waitFor { !store.isGitCaptureInProgress(for: id) }
+
+        XCTAssertNil(store.state.activeSession(id: id))
+        XCTAssertFalse(store.state.completedSessions.contains(where: { $0.id == id }))
+    }
+
+    func testTwoFinishingSessionsRemainIndependentlySaveableAndDiscardable() throws {
+        let store = makeStore()
+        let idA = try XCTUnwrap(store.createManualSession(projectID: nil, goal: "A"))
+        let idB = try XCTUnwrap(store.createManualSession(projectID: nil, goal: "B"))
+        XCTAssertTrue(store.finish(sessionID: idA))
+        XCTAssertTrue(store.finish(sessionID: idB))
+        let untouchedB = try XCTUnwrap(store.state.activeSession(id: idB))
+
+        XCTAssertTrue(store.saveFinishedSession(sessionID: idA, outcome: "Saved A"))
+        XCTAssertEqual(store.state.activeSession(id: idB), untouchedB)
+        XCTAssertEqual(store.state.completedSessions.map(\.id), [idA])
+        XCTAssertTrue(store.discardSession(sessionID: idB))
+        XCTAssertEqual(store.state.completedSessions.map(\.id), [idA])
+    }
+
+    func testSessionBCanSaveWhileSessionAGitCaptureIsInProgress() async throws {
+        let root = try makeTemporaryDirectory(named: "independent-save")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entered = expectation(description: "A start entered")
+        let release = DispatchSemaphore(value: 0)
+        let service = Phase2ControlledGitService(startPlans: [root.path: .init(
+            snapshot: startSnapshot(root: root, sha: "a"), entered: entered, release: release
+        )])
+        let store = makeStore(gitService: service)
+        let project = try XCTUnwrap(store.addProject(name: "A", folderURL: root))
+        let idA = try XCTUnwrap(store.createManualSession(projectID: project, goal: "A"))
+        let idB = try XCTUnwrap(store.createManualSession(projectID: nil, goal: "B"))
+        await fulfillment(of: [entered], timeout: 2)
+        XCTAssertTrue(store.finish(sessionID: idB))
+
+        XCTAssertTrue(store.saveFinishedSession(sessionID: idB, outcome: "Saved B"))
+        XCTAssertTrue(store.isGitCaptureInProgress(for: idA))
+        XCTAssertEqual(store.state.completedSessions.map(\.id), [idB])
+        XCTAssertEqual(store.state.activeSession(id: idA)?.goal, "A")
+        release.signal()
+    }
+
+    func testFinishingDuringStartCaptureQueuesFinalCapture() async throws {
+        let root = try makeTemporaryDirectory(named: "serialized")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let startEntered = expectation(description: "start entered")
+        let finalEntered = expectation(description: "final entered")
+        let startRelease = DispatchSemaphore(value: 0)
+        let finalRelease = DispatchSemaphore(value: 0)
+        let startSnapshot = startSnapshot(root: root, sha: "start")
+        let finishSnapshot = GitFinishSnapshot(branch: "main", headSHA: "end",
+                                               isDetached: false, commitCount: 1, statistics: nil,
+                                               observationEndedAt: start.addingTimeInterval(20))
+        let service = Phase2ControlledGitService(
+            startPlans: [root.path: .init(snapshot: startSnapshot, entered: startEntered, release: startRelease)],
+            finishPlans: [root.path: .init(snapshot: finishSnapshot, entered: finalEntered, release: finalRelease)]
+        )
+        let store = makeStore(gitService: service)
+        let project = try XCTUnwrap(store.addProject(name: "Serialized", folderURL: root))
+        let id = try XCTUnwrap(store.createManualSession(projectID: project, goal: nil))
+        await fulfillment(of: [startEntered], timeout: 2)
+
+        XCTAssertTrue(store.finish(sessionID: id))
+        XCTAssertEqual(store.gitCaptureStatus(for: id), .running)
+        startRelease.signal()
+        await fulfillment(of: [finalEntered], timeout: 2)
+        XCTAssertTrue(store.isGitCaptureInProgress(for: id))
+        finalRelease.signal()
+        try await waitFor { !store.isGitCaptureInProgress(for: id) }
+        XCTAssertEqual(store.state.activeSession(id: id)?.gitContext?.endHeadSHA, "end")
+    }
+
+    func testGitFailureForSessionADoesNotMutateSessionB() async throws {
+        let root = try makeTemporaryDirectory(named: "failure")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entered = expectation(description: "failed start entered")
+        let release = DispatchSemaphore(value: 0)
+        let service = Phase2ControlledGitService(startPlans: [root.path: .init(
+            snapshot: nil, entered: entered, release: release
+        )])
+        let store = makeStore(gitService: service)
+        let project = try XCTUnwrap(store.addProject(name: "A", folderURL: root))
+        let idA = try XCTUnwrap(store.createManualSession(projectID: project, goal: "A"))
+        let idB = try XCTUnwrap(store.createManualSession(projectID: nil, goal: "B"))
+        let beforeB = try XCTUnwrap(store.state.activeSession(id: idB))
+        await fulfillment(of: [entered], timeout: 2)
+        release.signal()
+        try await waitFor { store.gitCaptureStatus(for: idA) == .failed }
+
+        XCTAssertEqual(store.state.activeSession(id: idB), beforeB)
+        XCTAssertNil(store.state.activeSession(id: idA)?.gitContext)
+    }
+
     private func makeStore(
         persistence: Phase2TestPersistence = Phase2TestPersistence(),
         gitService: GitServicing = Phase2NoopGitService()
@@ -335,6 +520,11 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
             .appendingPathComponent("CodePulsePhase2-\(name)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func startSnapshot(root: URL, sha: String) -> GitStartSnapshot {
+        GitStartSnapshot(repositoryRoot: root, branch: "main", headSHA: sha, isDetached: false,
+                         preExistingWorkingTreePaths: [], observationStartedAt: start.addingTimeInterval(10))
     }
 
     private func waitFor(
@@ -358,7 +548,8 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
         filesChanged: Int?,
         insertions: Int?,
         deletions: Int?,
-        githubContext: GitHubSessionContext? = nil
+        githubContext: GitHubSessionContext? = nil,
+        attribution: GitDeltaAttribution? = nil
     ) -> CompletedSession {
         let sessionStart = Date(timeIntervalSince1970: 1_800_000_000 + (start ?? 0))
         let sessionEnd = Date(timeIntervalSince1970: 1_800_000_000 + (end ?? 60))
@@ -384,10 +575,43 @@ final class Phase2ConcurrentSessionTests: XCTestCase {
                 insertions: insertions,
                 deletions: deletions,
                 observationStartedAt: start.map { Date(timeIntervalSince1970: 1_700_000_000 + $0) },
-                observationEndedAt: end.map { Date(timeIntervalSince1970: 1_700_000_000 + $0) }
+                observationEndedAt: end.map { Date(timeIntervalSince1970: 1_700_000_000 + $0) },
+                deltaAttribution: attribution
             ),
             githubContext: githubContext
         )
+    }
+
+    private func assertAttribution(
+        startA: TimeInterval?,
+        endA: TimeInterval?,
+        startB: TimeInterval?,
+        endB: TimeInterval?,
+        expected: GitDeltaAttribution,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let first = completed(id: UUID(), root: "/repo-a", start: startA, end: endA,
+                              commitCount: 1, filesChanged: 2, insertions: 3, deletions: 0)
+        let second = completed(id: UUID(), root: "/repo-a", start: startB, end: endB,
+                               commitCount: 4, filesChanged: 5, insertions: 6, deletions: 1)
+        var state = AppState(completedSessions: [first, second])
+
+        state.reconcileGitObservationAttribution()
+
+        XCTAssertEqual(state.completedSessions.map(\.id), [first.id, second.id], file: file, line: line)
+        if expected == .ambiguous {
+            XCTAssertEqual(state.completedSessions.map { $0.gitContext?.deltaAttribution }, [expected, expected], file: file, line: line)
+            XCTAssertTrue(state.completedSessions.allSatisfy { $0.gitContext?.commitCount == nil }, file: file, line: line)
+        } else {
+            let expectedAttributions: [GitDeltaAttribution?] = [
+                startA != nil && endA != nil ? .attributable : nil,
+                startB != nil && endB != nil ? .attributable : nil
+            ]
+            XCTAssertEqual(state.completedSessions.map { $0.gitContext?.deltaAttribution }, expectedAttributions, file: file, line: line)
+            XCTAssertEqual(state.completedSessions[0].gitContext?.commitCount, 1, file: file, line: line)
+            XCTAssertEqual(state.completedSessions[1].gitContext?.commitCount, 4, file: file, line: line)
+        }
     }
 }
 

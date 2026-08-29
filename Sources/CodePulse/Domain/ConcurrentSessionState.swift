@@ -621,16 +621,18 @@ enum GitObservationAttributionResolver {
             )
         }
 
-        var ambiguousIDs = Set(observations.filter { $0.attribution == .ambiguous }.map(\.id))
-        for leftIndex in observations.indices {
-            guard leftIndex + 1 < observations.count else { continue }
-            let left = observations[leftIndex]
-            for right in observations[(leftIndex + 1)...] {
-                guard left.repositoryRoot == right.repositoryRoot else { continue }
-                guard left.id != right.id else { continue }
-                if windowsMayOverlap(left, right) {
-                    ambiguousIDs.insert(left.id)
-                    ambiguousIDs.insert(right.id)
+        var ambiguousIDs = Set<UUID>()
+        let observationsByRoot = Dictionary(grouping: observations, by: \.repositoryRoot)
+        for sameRootObservations in observationsByRoot.values where sameRootObservations.count > 1 {
+            for leftIndex in sameRootObservations.indices {
+                guard leftIndex + 1 < sameRootObservations.count else { continue }
+                let left = sameRootObservations[leftIndex]
+                for right in sameRootObservations[(leftIndex + 1)...] {
+                    guard left.id != right.id else { continue }
+                    if windowsMayOverlap(left, right) {
+                        ambiguousIDs.insert(left.id)
+                        ambiguousIDs.insert(right.id)
+                    }
                 }
             }
         }
@@ -641,33 +643,24 @@ enum GitObservationAttributionResolver {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.deltaAttribution == .indeterminate {
                 suppressNumericDeltas(in: &context, attribution: .indeterminate)
-            } else if !context.hasCompleteObservationWindow,
-                      context.deltaAttribution == .attributable || hasNumericDelta(in: context) {
-                suppressNumericDeltas(in: &context, attribution: .indeterminate)
-            } else if context.deltaAttribution == nil,
-                      context.hasCompleteObservationWindow {
+            } else if context.hasCompleteObservationWindow {
                 context.deltaAttribution = .attributable
+            } else if context.deltaAttribution == .ambiguous {
+                context.deltaAttribution = nil
             }
             state.activeSessions[index].gitContext = context
         }
 
         for index in state.completedSessions.indices {
             guard var context = state.completedSessions[index].gitContext else { continue }
-            guard ambiguousIDs.contains(state.completedSessions[index].id) ||
-                    context.deltaAttribution == .indeterminate ||
-                    (context.deltaAttribution == nil && context.hasCompleteObservationWindow) ||
-                    !context.hasCompleteObservationWindow else {
-                continue
-            }
-
             if ambiguousIDs.contains(state.completedSessions[index].id) {
                 suppressNumericDeltas(in: &context, attribution: .ambiguous)
             } else if context.deltaAttribution == .indeterminate {
                 suppressNumericDeltas(in: &context, attribution: .indeterminate)
-            } else if !context.hasCompleteObservationWindow {
-                suppressNumericDeltas(in: &context, attribution: .indeterminate)
-            } else if context.deltaAttribution == nil {
+            } else if context.hasCompleteObservationWindow {
                 context.deltaAttribution = .attributable
+            } else if context.deltaAttribution == .ambiguous {
+                context.deltaAttribution = nil
             }
             let existing = state.completedSessions[index]
             state.completedSessions[index] = CompletedSession(
@@ -688,9 +681,21 @@ enum GitObservationAttributionResolver {
     }
 
     private static func windowsMayOverlap(_ left: Observation, _ right: Observation) -> Bool {
-        // A missing or failed boundary is indeterminate. The conservative
-        // answer is ambiguity whenever another Session observes the same
-        // canonical repository.
+        // Known opposite boundaries can prove strict separation even when the
+        // other two boundaries are absent. Check that proof before treating a
+        // partial window as ambiguous. Boundaries are closed, so equality is
+        // deliberately not separation.
+        if let leftEnd = validDate(left.endedAt),
+           let rightStart = validDate(right.startedAt),
+           leftEnd < rightStart {
+            return false
+        }
+        if let rightEnd = validDate(right.endedAt),
+           let leftStart = validDate(left.startedAt),
+           rightEnd < leftStart {
+            return false
+        }
+
         guard let leftStart = left.startedAt,
               let leftEnd = left.endedAt,
               let rightStart = right.startedAt,
@@ -710,6 +715,11 @@ enum GitObservationAttributionResolver {
         return leftStart <= rightEnd && rightStart <= leftEnd
     }
 
+    private static func validDate(_ date: Date?) -> Date? {
+        guard let date, date.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        return date
+    }
+
     private static func canonicalRoot(_ value: String) -> String {
         let url = URL(fileURLWithPath: value, isDirectory: true)
         return url.standardizedFileURL.resolvingSymlinksInPath().path
@@ -724,13 +734,6 @@ enum GitObservationAttributionResolver {
         context.insertions = nil
         context.deletions = nil
         context.deltaAttribution = attribution
-    }
-
-    private static func hasNumericDelta(in context: GitSessionContext) -> Bool {
-        context.commitCount != nil ||
-            context.filesChanged != nil ||
-            context.insertions != nil ||
-            context.deletions != nil
     }
 }
 
