@@ -60,6 +60,20 @@ final class GitServiceTests: XCTestCase {
         XCTAssertNotNil(snapshot?.headSHA)
     }
 
+    func testSuccessfulSnapshotsRecordObservationBoundaries() throws {
+        let repository = try makeRepository()
+        let beforeStartCapture = Date()
+        let service = SystemGitService()
+
+        let start = try XCTUnwrap(service.captureStartSnapshot(at: repository))
+        let startBoundary = try XCTUnwrap(start.observationStartedAt)
+        XCTAssertGreaterThanOrEqual(startBoundary, beforeStartCapture)
+
+        let finish = try XCTUnwrap(service.captureFinishSnapshot(for: start))
+        let endBoundary = try XCTUnwrap(finish.observationEndedAt)
+        XCTAssertGreaterThanOrEqual(endBoundary, startBoundary)
+    }
+
     func testConfiguredRemotesAreCapturedWithOriginFirst() throws {
         let repository = try makeRepository()
         try runGit(["remote", "add", "upstream", "https://example.com/upstream/repo.git"], at: repository)

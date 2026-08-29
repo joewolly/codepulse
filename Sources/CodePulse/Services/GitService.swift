@@ -108,6 +108,9 @@ struct GitStartSnapshot: Equatable {
     let isDetached: Bool?
     let preExistingWorkingTreePaths: Set<String>?
     let remotes: [GitRemote]
+    /// The instant at which the repository observation completed. This is
+    /// deliberately distinct from the CodePulse Session start timestamp.
+    let observationStartedAt: Date?
 
     init(
         repositoryRoot: URL,
@@ -115,7 +118,8 @@ struct GitStartSnapshot: Equatable {
         headSHA: String?,
         isDetached: Bool?,
         preExistingWorkingTreePaths: Set<String>?,
-        remotes: [GitRemote] = []
+        remotes: [GitRemote] = [],
+        observationStartedAt: Date? = nil
     ) {
         self.repositoryRoot = repositoryRoot
         self.branch = branch
@@ -123,6 +127,7 @@ struct GitStartSnapshot: Equatable {
         self.isDetached = isDetached
         self.preExistingWorkingTreePaths = preExistingWorkingTreePaths
         self.remotes = remotes
+        self.observationStartedAt = observationStartedAt
     }
 }
 
@@ -132,6 +137,25 @@ struct GitFinishSnapshot: Equatable {
     let isDetached: Bool?
     let commitCount: Int?
     let statistics: GitDiffStatistics?
+    /// The instant at which the final repository observation completed. This
+    /// is deliberately distinct from the visible Session end timestamp.
+    let observationEndedAt: Date?
+
+    init(
+        branch: String?,
+        headSHA: String?,
+        isDetached: Bool?,
+        commitCount: Int?,
+        statistics: GitDiffStatistics?,
+        observationEndedAt: Date? = nil
+    ) {
+        self.branch = branch
+        self.headSHA = headSHA
+        self.isDetached = isDetached
+        self.commitCount = commitCount
+        self.statistics = statistics
+        self.observationEndedAt = observationEndedAt
+    }
 }
 
 struct GitRemote: Equatable, Sendable {
@@ -266,7 +290,8 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
             headSHA: reference.headSHA,
             isDetached: reference.isDetached,
             preExistingWorkingTreePaths: preExistingPaths,
-            remotes: readRemotes(in: repositoryRoot)
+            remotes: readRemotes(in: repositoryRoot),
+            observationStartedAt: Date()
         )
     }
 
@@ -292,7 +317,8 @@ final class SystemGitService: GitServicing, @unchecked Sendable {
             headSHA: reference.headSHA,
             isDetached: reference.isDetached,
             commitCount: commitCount,
-            statistics: statistics
+            statistics: statistics,
+            observationEndedAt: Date()
         )
     }
 

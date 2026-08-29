@@ -38,6 +38,17 @@ enum SessionType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum GitDeltaAttribution: String, Codable, Equatable, Sendable {
+    /// Numeric deltas were observed over a complete, non-overlapping window.
+    case attributable
+    /// A same-repository comparison could include the same mutation in more
+    /// than one Session, so numeric values are intentionally suppressed.
+    case ambiguous
+    /// A required observation boundary failed or is absent. Numeric values
+    /// are not safe to present as attributable.
+    case indeterminate
+}
+
 struct GitSessionContext: Codable, Equatable {
     let repositoryRoot: String
     let branchAtStart: String?
@@ -51,6 +62,12 @@ struct GitSessionContext: Codable, Equatable {
     var filesChanged: Int?
     var insertions: Int?
     var deletions: Int?
+    /// Actual successful repository observation boundaries. These are
+    /// optional so schema-1/schema-2/schema-3 historical records continue to
+    /// decode without backfilling from Session timer timestamps.
+    var observationStartedAt: Date?
+    var observationEndedAt: Date?
+    var deltaAttribution: GitDeltaAttribution?
 
     init(
         repositoryRoot: String,
@@ -64,7 +81,10 @@ struct GitSessionContext: Codable, Equatable {
         commitCount: Int? = nil,
         filesChanged: Int? = nil,
         insertions: Int? = nil,
-        deletions: Int? = nil
+        deletions: Int? = nil,
+        observationStartedAt: Date? = nil,
+        observationEndedAt: Date? = nil,
+        deltaAttribution: GitDeltaAttribution? = nil
     ) {
         self.repositoryRoot = repositoryRoot
         self.branchAtStart = branchAtStart
@@ -78,6 +98,21 @@ struct GitSessionContext: Codable, Equatable {
         self.filesChanged = filesChanged
         self.insertions = insertions
         self.deletions = deletions
+        self.observationStartedAt = observationStartedAt
+        self.observationEndedAt = observationEndedAt
+        self.deltaAttribution = deltaAttribution
+    }
+
+    var isDeltaAmbiguous: Bool { deltaAttribution == .ambiguous }
+
+    var hasCompleteObservationWindow: Bool {
+        guard let observationStartedAt,
+              let observationEndedAt,
+              observationStartedAt.timeIntervalSinceReferenceDate.isFinite,
+              observationEndedAt.timeIntervalSinceReferenceDate.isFinite else {
+            return false
+        }
+        return observationStartedAt <= observationEndedAt
     }
 
     var branchDisplay: String? {
