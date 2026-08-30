@@ -38,10 +38,15 @@ struct MenuBarPopoverPresentation: Equatable {
     }
 
     mutating func reconcile(activeSessionIDs: [UUID]) {
-        if let selectedSessionID, !activeSessionIDs.contains(selectedSessionID) {
+        if activeSessionIDs.count <= 1 {
+            selectedSessionID = nil
+        } else if let selectedSessionID, !activeSessionIDs.contains(selectedSessionID) {
             self.selectedSessionID = nil
         }
-        if activeSessionIDs.isEmpty { isPresentingNewSession = false }
+        if activeSessionIDs.isEmpty ||
+            !MenuBarNewSessionAvailability(activeSessionCount: activeSessionIDs.count).canStart {
+            isPresentingNewSession = false
+        }
     }
 
     func route(activeSessionIDs: [UUID]) -> MenuBarPopoverRoute {
@@ -50,7 +55,9 @@ struct MenuBarPopoverPresentation: Equatable {
            MenuBarNewSessionAvailability(activeSessionCount: activeSessionIDs.count).canStart {
             return .newSession
         }
-        if let selectedSessionID, activeSessionIDs.contains(selectedSessionID) {
+        if activeSessionIDs.count > 1,
+           let selectedSessionID,
+           activeSessionIDs.contains(selectedSessionID) {
             return .selectedSession(selectedSessionID)
         }
         switch activeSessionIDs.count {

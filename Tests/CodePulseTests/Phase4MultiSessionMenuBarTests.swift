@@ -43,6 +43,27 @@ final class Phase4MultiSessionMenuBarTests: XCTestCase {
         XCTAssertEqual(p.route(activeSessionIDs: [c, a, b]), .selectedSession(b))
     }
 
+    func testSurvivingSelectionClearsWhenCollectionCollapsesToOne() {
+        let a = uuid(1), b = uuid(2)
+        var p = MenuBarPopoverPresentation()
+        p.selectSession(a)
+        XCTAssertEqual(p.route(activeSessionIDs: [a, b]), .selectedSession(a))
+
+        p.reconcile(activeSessionIDs: [a])
+
+        XCTAssertNil(p.selectedSessionID)
+        XCTAssertEqual(p.route(activeSessionIDs: [a]), .soleSession(a))
+    }
+
+    func testRouteIgnoresStaleSelectionForSoleSessionWithoutReconcile() {
+        let a = uuid(1)
+        var p = MenuBarPopoverPresentation()
+        p.selectSession(a)
+
+        XCTAssertEqual(p.selectedSessionID, a)
+        XCTAssertEqual(p.route(activeSessionIDs: [a]), .soleSession(a))
+    }
+
     func testSelectedRunningSessionFinishesWithoutLosingIdentity() throws {
         let store = makeStore(AppState())
         let a = try XCTUnwrap(store.createManualSession(projectID: nil, goal: "A"))
@@ -132,11 +153,30 @@ final class Phase4MultiSessionMenuBarTests: XCTestCase {
         XCTAssertEqual(store.state, before)
     }
 
+    func testNewSessionComposerDoesNotResurrectAfterCapacityReturns() {
+        let fifteen = (1...15).map(uuid)
+        let sixteen = fifteen + [uuid(16)]
+        var p = MenuBarPopoverPresentation()
+        p.showNewSession(activeSessionIDs: fifteen)
+        XCTAssertEqual(p.route(activeSessionIDs: fifteen), .newSession)
+
+        p.reconcile(activeSessionIDs: sixteen)
+        XCTAssertFalse(p.isPresentingNewSession)
+        XCTAssertNotEqual(p.route(activeSessionIDs: sixteen), .newSession)
+
+        p.reconcile(activeSessionIDs: fifteen)
+        XCTAssertFalse(p.isPresentingNewSession)
+        XCTAssertEqual(p.route(activeSessionIDs: fifteen), .activeSessionsHub)
+    }
+
     func testSelectedSessionInvalidationKeepsExistingAndClearsRemovedForEveryBaseCount() {
         let a = uuid(1), b = uuid(2), c = uuid(3)
         var kept = MenuBarPopoverPresentation(); kept.selectSession(b); kept.reconcile(activeSessionIDs: [c, b, a])
         XCTAssertEqual(kept.selectedSessionID, b)
         XCTAssertEqual(kept.route(activeSessionIDs: [c, b, a]), .selectedSession(b))
+        kept.reconcile(activeSessionIDs: [b, a])
+        XCTAssertEqual(kept.selectedSessionID, b)
+        XCTAssertEqual(kept.route(activeSessionIDs: [b, a]), .selectedSession(b))
         let cases: [([UUID], MenuBarPopoverRoute)] = [([b, c], .activeSessionsHub), ([b], .soleSession(b)), ([], .idle)]
         for (remaining, expected) in cases {
             var removed = MenuBarPopoverPresentation(); removed.selectSession(a); removed.reconcile(activeSessionIDs: remaining)
