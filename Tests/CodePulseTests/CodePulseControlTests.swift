@@ -107,6 +107,7 @@ final class CodePulseControlTests: XCTestCase {
         }
 
         let response = CodePulseControlResponse(
+            schemaVersion: 1,
             commandID: command.id,
             result: .success,
             message: "ok",
@@ -124,12 +125,38 @@ final class CodePulseControlTests: XCTestCase {
         statusObject["elapsedSeconds"] = -1
         responseObject["status"] = statusObject
         let negativeElapsed = try JSONSerialization.data(withJSONObject: responseObject)
-        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(negativeElapsed))
+        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(negativeElapsed)) { error in
+            XCTAssertEqual(error as? CodePulseControlValidationError, .invalidValue("response status"))
+        }
 
-        responseObject["status"] = statusObject.merging(["elapsedSeconds": 1]) { _, new in new }
+        statusObject["elapsedSeconds"] = 1
+        responseObject["status"] = statusObject
         responseObject["message"] = String(repeating: "x", count: CodePulseControlLimits.maximumMessageLength + 1)
         let oversizedMessage = try JSONSerialization.data(withJSONObject: responseObject)
-        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(oversizedMessage))
+        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(oversizedMessage)) { error in
+            XCTAssertEqual(error as? CodePulseControlValidationError, .invalidValue("response message"))
+        }
+
+        responseObject["message"] = "ok"
+        statusObject["unexpected"] = true
+        responseObject["status"] = statusObject
+        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(
+            JSONSerialization.data(withJSONObject: responseObject)
+        )) { error in
+            XCTAssertEqual(error as? CodePulseControlValidationError, .unexpectedField("unexpected"))
+        }
+
+        let v2Status = CodePulseControlStatus(sessions: [])
+        let hybrid = CodePulseControlResponse(
+            schemaVersion: 1,
+            commandID: UUID(),
+            result: .success,
+            message: "ok",
+            status: v2Status
+        )
+        XCTAssertThrowsError(try CodePulseControlResponseCodec.encode(hybrid)) { error in
+            XCTAssertEqual(error as? CodePulseControlValidationError, .invalidEnvelope)
+        }
     }
 
     func testTransportRejectsSymlinkedManagedParentAndBoundsPendingCommands() throws {
@@ -171,6 +198,7 @@ final class CodePulseControlTests: XCTestCase {
 
         let responseID = UUID()
         try transport.writeResponse(CodePulseControlResponse(
+            schemaVersion: 1,
             commandID: responseID,
             result: .success,
             message: "done",

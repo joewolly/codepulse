@@ -182,14 +182,232 @@ final class Phase5InsightsControlTests: XCTestCase {
         for forbidden in ["goal", "outcome", "prompt", "transcript", "command", "source", "diff", "token", "key"] { XCTAssertFalse(text.contains(forbidden)) }
     }
 
+    func test40ForeignConcurrentProjectDoesNotSplitGracePeriodFocusBlock() {
+        let a = UUID(), b = UUID()
+        let value = summary(completed: [
+            completed(0, 1_200, projectID: a),
+            completed(900, 1_500, projectID: b),
+            completed(1_800, 3_600, projectID: a)
+        ])
+        XCTAssertEqual(value.focusInsights.longestFocusBlockDuration, 3_000)
+        XCTAssertEqual(value.focusInsights.sustainedFocusDuration, 3_000)
+        XCTAssertLessThanOrEqual(value.focusInsights.sustainedFocusDuration, value.activeTime)
+    }
+
+    func test41PauseInterleavingUsesActualActiveSegmentsForSwitches() {
+        let a = UUID(), b = UUID()
+        let pausedA = completed(
+            0, 3_600, projectID: a,
+            pauses: [PauseInterval(startedAt: base.addingTimeInterval(600), endedAt: base.addingTimeInterval(3_000))]
+        )
+        let value = summary(completed: [pausedA, completed(1_200, 1_800, projectID: b)])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 1)
+    }
+
+    func test42TiedConcurrentCandidatesDoNotCreateUUIDOrderSwitches() {
+        let value = summary(completed: [
+            completed(0, 600, projectID: UUID()),
+            completed(600, 1_200, projectID: UUID()),
+            completed(600, 1_200, projectID: UUID())
+        ])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 0)
+    }
+
+    func test43SustainedHourlyAndDayMetricsAreUnionBased() {
+        let value = summary(completed: [completed(0, 3_600, projectID: UUID()), completed(0, 3_600, projectID: UUID())])
+        XCTAssertEqual(value.focusInsights.sustainedFocusDuration, 3_600)
+        XCTAssertEqual(value.focusInsights.hourlySustainedFocus.reduce(0) { $0 + $1.duration }, 3_600)
+        XCTAssertEqual(value.focusInsights.bestFocusDay?.duration, 3_600)
+        XCTAssertLessThanOrEqual(value.focusInsights.sustainedFocusDuration, value.activeTime)
+    }
+
+    func test44DirectControlStartCreatesConcurrentSessionAndReturnsExactUUID() throws {
+        let project = ProjectRecord(name: "B", createdAt: base)
+        var state = AppState(projects: [project]); let existing = UUID()
+        state.activeSessions = [active(0, id: existing)]
+        let store = makeStore(state: state, now: base.addingTimeInterval(60))
+        let response = store.processControlCommand(CodePulseControlCommand(issuedAt: base.addingTimeInterval(60), action: .startManual(projectName: "B", sessionType: "coding", goal: nil)), at: base.addingTimeInterval(60))
+        XCTAssertEqual(response.result, .success)
+        let newID = try XCTUnwrap(response.sessionID)
+        XCTAssertNotEqual(newID, existing)
+        XCTAssertEqual(Set(store.state.activeSessions.map(\.id)), [existing, newID])
+        XCTAssertEqual(response.status?.sessions.count, 2)
+        XCTAssertEqual(store.state.projects.first?.lastUsedAt, base.addingTimeInterval(60))
+    }
+
+    func test45PresetNameControlStartCreatesConcurrentSession() throws {
+        let (store, existing, preset) = concurrentPresetStore()
+        let response = store.processControlCommand(CodePulseControlCommand(issuedAt: base, action: .startPreset(name: preset.name)), at: base)
+        XCTAssertEqual(response.result, .success)
+        XCTAssertNotEqual(try XCTUnwrap(response.sessionID), existing)
+        XCTAssertEqual(store.state.activeSessions.count, 2)
+    }
+
+    func test46PresetIDControlStartCreatesConcurrentSession() throws {
+        let (store, existing, preset) = concurrentPresetStore()
+        let response = store.processControlCommand(CodePulseControlCommand(issuedAt: base, action: .startPresetID(preset.id)), at: base)
+        XCTAssertEqual(response.result, .success)
+        XCTAssertNotEqual(try XCTUnwrap(response.sessionID), existing)
+        XCTAssertEqual(response.status?.sessions.count, 2)
+    }
+
+    func test47SeventeenthControlStartRejectsWithoutMutatingSixteen() {
+        let project = ProjectRecord(name: "P", createdAt: base)
+        var state = AppState(projects: [project])
+        state.activeSessions = (0..<16).map { active(TimeInterval($0), id: UUID()) }
+        let before = state.activeSessions
+        let store = makeStore(state: state, now: base)
+        let response = store.processControlCommand(CodePulseControlCommand(issuedAt: base, action: .startManual(projectName: "P", sessionType: "coding", goal: nil)), at: base)
+        XCTAssertEqual(response.result, .invalidStateTransition)
+        XCTAssertEqual(store.state.activeSessions, before)
+    }
+
+    func test48TargetedMissingAndWrongPhaseNeverFallBack() {
+        let running = UUID(), paused = UUID()
+        var pausedSession = active(0, id: paused)
+        pausedSession.phase = .paused
+        pausedSession.pauseIntervals = [PauseInterval(startedAt: base)]
+        var state = AppState(); state.activeSessions = [active(0, id: running), pausedSession]
+        let store = makeStore(state: state, now: base)
+        XCTAssertEqual(store.processControlCommand(CodePulseControlCommand(issuedAt: base, action: .pauseSession(UUID())), at: base).result, .invalidStateTransition)
+        XCTAssertEqual(store.processControlCommand(CodePulseControlCommand(issuedAt: base, action: .pauseSession(paused)), at: base).result, .invalidStateTransition)
+        XCTAssertEqual(store.state.activeSession(id: running)?.phase, .running)
+    }
+
+    func test49NoIDEligibilityZeroOneManyContract() {
+        let empty = makeStore(state: AppState(), now: base)
+        XCTAssertEqual(empty.processControlCommand(CodePulseControlCommand(issuedAt: base, action: .pause), at: base).result, .invalidStateTransition)
+        var oneState = AppState(); oneState.activeSessions = [active(0, id: UUID())]
+        XCTAssertEqual(makeStore(state: oneState, now: base).processControlCommand(CodePulseControlCommand(issuedAt: base, action: .pause), at: base).result, .success)
+        var manyState = AppState(); manyState.activeSessions = [active(0, id: UUID()), active(0, id: UUID())]
+        XCTAssertEqual(makeStore(state: manyState, now: base).processControlCommand(CodePulseControlCommand(issuedAt: base, action: .pause), at: base).result, .ambiguousSession)
+    }
+
+    func test50V1LifecycleSuccessFailureAmbiguityAndReplayStayV1() throws {
+        let id = UUID(); var state = AppState(); state.activeSessions = [active(0, id: id)]
+        let store = makeStore(state: state, now: base)
+        let pause = CodePulseControlCommand(schemaVersion: 1, id: UUID(), issuedAt: base, action: .pause)
+        let success = store.processControlCommand(pause, at: base)
+        XCTAssertEqual(success.schemaVersion, 1)
+        XCTAssertNil(success.sessionID)
+        XCTAssertEqual(success.status?.schemaVersion, 1)
+        XCTAssertEqual(try CodePulseControlResponseCodec.decode(CodePulseControlResponseCodec.encode(success)), success)
+        XCTAssertEqual(store.processControlCommand(pause, at: base), success)
+
+        let failure = store.processControlCommand(CodePulseControlCommand(schemaVersion: 1, issuedAt: base, action: .pause), at: base)
+        XCTAssertEqual(failure.schemaVersion, 1)
+        XCTAssertEqual(failure.result, .invalidStateTransition)
+
+        var concurrent = AppState(); concurrent.activeSessions = [active(0, id: UUID()), active(0, id: UUID())]
+        let ambiguous = makeStore(state: concurrent, now: base).processControlCommand(CodePulseControlCommand(schemaVersion: 1, issuedAt: base, action: .pause), at: base)
+        XCTAssertEqual(ambiguous.schemaVersion, 1)
+        XCTAssertEqual(ambiguous.result, .commandRejected)
+        XCTAssertNil(ambiguous.status)
+        XCTAssertNil(ambiguous.sessionID)
+    }
+
+    func test51CodecRejectsHybridStatusesAndImpossibleV1Fields() throws {
+        let v1 = CodePulseControlStatus(phase: "idle", elapsedSeconds: 0, automationControlled: false)
+        let v2 = CodePulseControlStatus(sessions: [])
+        for response in [
+            CodePulseControlResponse(schemaVersion: 1, commandID: UUID(), result: .success, message: "ok", status: v2),
+            CodePulseControlResponse(schemaVersion: 2, commandID: UUID(), result: .success, message: "ok", status: v1),
+            CodePulseControlResponse(schemaVersion: 1, commandID: UUID(), result: .success, message: "ok", sessionID: UUID()),
+            CodePulseControlResponse(schemaVersion: 1, commandID: UUID(), result: .ambiguousSession, message: "no")
+        ] {
+            XCTAssertThrowsError(try CodePulseControlResponseCodec.encode(response))
+        }
+        XCTAssertEqual(v1.schemaVersion, 1)
+    }
+
+    func test52StatusWorkspaceAndHumanZeroOneManyRemainTruthful() {
+        let workspace = WorkspaceRecord(name: "Actual")
+        let project = ProjectRecord(workspaceID: workspace.id, name: "P", createdAt: base)
+        var state = AppState(workspaces: [workspace], projects: [project])
+        state.activeSessions = [active(0, id: fixedID, project: project)]
+        let status = makeStore(state: state, now: base).controlStatus()
+        XCTAssertEqual(status.sessions.first?.workspaceName, "Actual")
+        XCTAssertTrue(CodePulseControlCLIFormatter.humanStatus(CodePulseControlStatus(sessions: [])).contains("idle"))
+        XCTAssertTrue(CodePulseControlCLIFormatter.humanStatus(status).contains(fixedID.uuidString))
+        let many = CodePulseControlStatus(sessions: status.sessions + [CodePulseControlSessionStatus(sessionID: UUID(), sessionType: "coding", phase: "running", elapsedSeconds: 0, automationControlled: false)])
+        XCTAssertTrue(CodePulseControlCLIFormatter.humanStatus(many).contains("2 active sessions"))
+    }
+
+    func test53DigestOverlapCarriesActiveTimeUnionAndSessionActivitySum() {
+        let period = DigestPeriod(kind: .daily, interval: span(0, 120), comparisonInterval: nil)
+        let value = DigestCalculator.summary(
+            state: AppState(completedSessions: [completed(0, 60), completed(30, 90)]),
+            period: period,
+            referenceDate: base.addingTimeInterval(120),
+            calendar: calendar
+        )
+        XCTAssertEqual(value.totalActiveTime, 90)
+        XCTAssertEqual(value.sessionActivity, 120)
+    }
+
+    func test54MarkdownNamesBothMetricClassesAndSessionActivityTables() {
+        let report = InsightsMarkdownExporter.markdown(
+            summary: summary(completed: [completed(0, 60, projectID: UUID()), completed(30, 90, projectID: UUID())]),
+            projectTitle: "All Projects",
+            calendar: calendar
+        )
+        XCTAssertTrue(report.contains("Active Time"))
+        XCTAssertTrue(report.contains("Session Activity"))
+        XCTAssertTrue(report.contains("| Type | Session Activity |"))
+        XCTAssertTrue(report.contains("| Project | Session Activity |"))
+    }
+
+    func test55WorkspaceLargestProjectShareUsesSessionActivityDenominator() throws {
+        let workspace = WorkspaceRecord(name: "W")
+        let a = ProjectRecord(workspaceID: workspace.id, name: "A", createdAt: base)
+        let b = ProjectRecord(workspaceID: workspace.id, name: "B", createdAt: base)
+        let state = AppState(workspaces: [workspace], projects: [a, b], completedSessions: [
+            completed(0, 60, projectID: a.id),
+            completed(0, 60, projectID: a.id),
+            completed(0, 60, projectID: b.id)
+        ])
+        let value = try XCTUnwrap(WorkspaceIntelligenceCalculator.snapshot(
+            state: state, calendar: calendar, referenceDate: base.addingTimeInterval(120),
+            workspaceID: workspace.id, timeframe: .allTime
+        ))
+        XCTAssertEqual(value.patterns.largestProjectTimeShare ?? -1, 2.0 / 3.0, accuracy: 0.000_001)
+    }
+
+    func test56LocalDayDSTActiveTimeRemainsUnionBased() throws {
+        var local = Calendar(identifier: .gregorian)
+        local.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Denver"))
+        let start = try XCTUnwrap(local.date(from: DateComponents(year: 2023, month: 3, day: 12, hour: 1, minute: 30)))
+        let end = try XCTUnwrap(local.date(from: DateComponents(year: 2023, month: 3, day: 12, hour: 3, minute: 30)))
+        let reference = try XCTUnwrap(local.date(from: DateComponents(year: 2023, month: 3, day: 13, hour: 12)))
+        let session = CompletedSession(
+            id: UUID(), projectID: nil, projectName: nil, type: .coding, goal: nil, outcome: nil,
+            startedAt: start, endedAt: end, pauseIntervals: []
+        )
+        let value = InsightsCalculator.summary(
+            state: AppState(completedSessions: [session, session]),
+            calendar: local, referenceDate: reference, timeframe: .thisMonth
+        )
+        XCTAssertEqual(value.activeTime, 3_600)
+        XCTAssertEqual(value.sessionActivity, 7_200)
+        XCTAssertEqual(try XCTUnwrap(value.dailyActivity.first { local.isDate($0.date, inSameDayAs: start) }).duration, 3_600)
+    }
+
     private var fixedID: UUID { UUID(uuidString: "00000000-0000-0000-0000-000000000001")! }
     private func span(_ start: TimeInterval, _ end: TimeInterval) -> DateInterval { DateInterval(start: base.addingTimeInterval(start), end: base.addingTimeInterval(end)) }
-    private func completed(_ start: TimeInterval, _ end: TimeInterval, projectID: UUID? = nil) -> CompletedSession { CompletedSession(id: UUID(), projectID: projectID, projectName: projectID == nil ? nil : "P", goal: nil, outcome: nil, startedAt: base.addingTimeInterval(start), endedAt: base.addingTimeInterval(end), pauseIntervals: []) }
+    private func completed(_ start: TimeInterval, _ end: TimeInterval, projectID: UUID? = nil, pauses: [PauseInterval] = []) -> CompletedSession { CompletedSession(id: UUID(), projectID: projectID, projectName: projectID == nil ? nil : "P", goal: nil, outcome: nil, startedAt: base.addingTimeInterval(start), endedAt: base.addingTimeInterval(end), pauseIntervals: pauses) }
     private func active(_ start: TimeInterval, id: UUID, project: ProjectRecord? = nil) -> ActiveSession { ActiveSession(id: id, projectID: project?.id, projectName: project?.name, startedAt: base.addingTimeInterval(start)) }
     private func summary(completed: [CompletedSession]) -> InsightsSummary { InsightsCalculator.summary(state: AppState(completedSessions: completed), calendar: calendar, referenceDate: base.addingTimeInterval(3_600), interval: span(-3_600, 3_600), comparisonInterval: nil, timeframe: .allTime) }
     private func assertMetrics(_ values: [(TimeInterval, TimeInterval)], active: TimeInterval, activity: TimeInterval) { let value = summary(completed: values.map { completed($0.0, $0.1) }); XCTAssertEqual(value.activeTime, active); XCTAssertEqual(value.sessionActivity, activity) }
     private func json<T: Encodable>(_ value: T) throws -> [String: Any] { try JSONSerialization.jsonObject(with: JSONEncoder.iso8601.encode(value)) as! [String: Any] }
     private func makeStore(state: AppState, now: Date) -> SessionStore { SessionStore(persistence: Phase5Persistence(state), clock: Phase5Clock(now), calendar: calendar, automaticallyRefresh: false) }
+    private func concurrentPresetStore() -> (SessionStore, UUID, SessionPreset) {
+        let project = ProjectRecord(name: "B", createdAt: base)
+        let preset = SessionPreset(name: "B Coding", projectID: project.id, sessionType: .coding)
+        let existing = UUID()
+        var state = AppState(projects: [project], sessionPresets: [preset])
+        state.activeSessions = [active(-60, id: existing)]
+        return (makeStore(state: state, now: base), existing, preset)
+    }
 }
 
 private final class Phase5Persistence: StatePersisting {
