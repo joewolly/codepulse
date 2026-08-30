@@ -66,7 +66,7 @@ struct CodePulseControlCLI {
         case .success: return .success
         case .invalidStateTransition: return .invalidStateTransition
         case .presetOrProjectNotFound: return .presetOrProjectNotFound
-        case .commandRejected: return .commandRejected
+        case .commandRejected, .ambiguousSession: return .commandRejected
         case .internalFailure: return .internalTransportFailure
         }
     }

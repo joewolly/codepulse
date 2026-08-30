@@ -242,7 +242,8 @@ final class CodePulseControlTests: XCTestCase {
         XCTAssertEqual(idle.result, .success)
         XCTAssertEqual(idle.status?.phase, "idle")
         let idleJSON = try XCTUnwrap(idle.status).jsonObject()
-        XCTAssertEqual(Set(idleJSON.keys), ["automationControlled", "elapsedSeconds", "phase", "schemaVersion"])
+        XCTAssertEqual(Set(idleJSON.keys), ["sessions", "schemaVersion"])
+        XCTAssertEqual((idleJSON["sessions"] as? [[String: Any]])?.count, 0)
 
         let startCommand = CodePulseControlCommand(issuedAt: start, action: .startPreset(name: preset.name))
         let started = try send(startCommand, to: store, through: transport)
