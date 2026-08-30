@@ -210,6 +210,51 @@ final class Phase4MultiSessionMenuBarTests: XCTestCase {
         persistence.failCritical = false; XCTAssertTrue(store.pause(sessionID: uuid(1))); XCTAssertNil(store.lifecycleError)
     }
 
+    func testSuccessfulCommitForAnotherSessionPreservesTargetedError() {
+        let persistence = Phase4Persistence(stateWithSessions([running(1), running(2)])), store = makeStore(persistence: persistence)
+        persistence.failCritical = true
+        XCTAssertFalse(store.pause(sessionID: uuid(1)))
+        let error = store.lifecycleError
+        XCTAssertEqual(error?.affectedSessionID, uuid(1))
+
+        persistence.failCritical = false
+        XCTAssertTrue(store.pause(sessionID: uuid(2)))
+        XCTAssertEqual(store.lifecycleError, error)
+        XCTAssertEqual(store.lifecycleError?.affectedSessionID, uuid(1))
+    }
+
+    func testSuccessfulGeneralCommitPreservesTargetedError() {
+        let persistence = Phase4Persistence(stateWithSessions([running(1)])), store = makeStore(persistence: persistence)
+        persistence.failCritical = true
+        XCTAssertFalse(store.pause(sessionID: uuid(1)))
+        let error = store.lifecycleError
+        XCTAssertEqual(error?.affectedSessionID, uuid(1))
+
+        persistence.failCritical = false
+        XCTAssertNotNil(store.createManualSession(projectID: nil, goal: "General success"))
+        XCTAssertEqual(store.lifecycleError, error)
+        XCTAssertEqual(store.lifecycleError?.affectedSessionID, uuid(1))
+    }
+
+    func testSuccessfulGeneralRetryClearsGeneralError() {
+        let persistence = Phase4Persistence(AppState()), store = makeStore(persistence: persistence)
+        persistence.failCritical = true
+        XCTAssertNil(store.createManualSession(projectID: nil, goal: "General failure"))
+        XCTAssertNotNil(store.lifecycleError)
+        XCTAssertNil(store.lifecycleError?.affectedSessionID)
+
+        persistence.failCritical = false
+        XCTAssertNotNil(store.createManualSession(projectID: nil, goal: "General retry"))
+        XCTAssertNil(store.lifecycleError)
+    }
+
+    func testStatusBadgeAccessibilityTimerStateIsPhaseSpecific() {
+        XCTAssertEqual(MenuBarSessionStatusBadge.accessibilityTimerState(for: .running), "Timer running")
+        XCTAssertEqual(MenuBarSessionStatusBadge.accessibilityTimerState(for: .paused), "Timer frozen")
+        XCTAssertEqual(MenuBarSessionStatusBadge.accessibilityTimerState(for: .finishing), "Timer finished")
+        XCTAssertEqual(MenuBarSessionStatusBadge.accessibilityTimerState(for: .idle), "Timer idle")
+    }
+
     func testNoOpOutcomeUpdateLeavesExistingAtomicErrorCoherent() {
         let persistence = Phase4Persistence(stateWithSessions([running(1), finishing(2, outcome: "Done")])), store = makeStore(persistence: persistence)
         persistence.failCritical = true; XCTAssertFalse(store.pause(sessionID: uuid(1)))

@@ -2543,7 +2543,9 @@ final class SessionStore: ObservableObject {
                 return false
             }
             lastCriticalCommitFailed = false
-            lifecycleError = nil
+            if lifecycleError?.affectedSessionID == affectedSessionID {
+                lifecycleError = nil
+            }
         } else {
             persistence.save(normalizedState)
             guard !persistence.loadStatus.requiresRecovery else {

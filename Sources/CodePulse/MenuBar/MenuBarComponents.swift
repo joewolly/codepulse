@@ -72,6 +72,15 @@ struct MenuBarSessionStatusBadge: View {
     let phase: SessionPhase
     let type: SessionType
 
+    static func accessibilityTimerState(for phase: SessionPhase) -> String {
+        switch phase {
+        case .running: return "Timer running"
+        case .paused: return "Timer frozen"
+        case .finishing: return "Timer finished"
+        case .idle: return "Timer idle"
+        }
+    }
+
     private var stateTitle: String {
         switch phase {
         case .paused: return "Paused"
@@ -119,7 +128,7 @@ struct MenuBarSessionStatusBadge: View {
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(type.title), \(stateTitle)")
-        .accessibilityValue(phase == .running ? "Timer running" : "Timer fixed")
+        .accessibilityValue(Self.accessibilityTimerState(for: phase))
     }
 }
 
