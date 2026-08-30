@@ -887,71 +887,80 @@ enum InsightsCalculator {
 
     private static func focusBlocks(from segments: [ActiveSegment]) -> [FocusBlock] {
         var blocks: [FocusBlock] = []
-        for segment in segments {
-            guard var last = blocks.last else {
-                blocks.append(FocusBlock(context: segment.context, end: segment.end, segments: [segment]))
-                continue
+        for (context, contextSegments) in Dictionary(grouping: segments, by: \.context) {
+            let normalized = ActivityCoverageCalculator.union(contextSegments.map {
+                DateInterval(start: $0.start, end: $0.end)
+            })
+            var contextBlocks: [FocusBlock] = []
+            for interval in normalized {
+                let segment = ActiveSegment(
+                    sourceID: contextSegments[0].sourceID,
+                    context: context,
+                    start: interval.start,
+                    end: interval.end
+                )
+                if var last = contextBlocks.last,
+                   interval.start.timeIntervalSince(last.end) <= FocusDefinition.interruptionGrace {
+                    last.segments.append(segment)
+                    last.end = max(last.end, interval.end)
+                    contextBlocks[contextBlocks.count - 1] = last
+                } else {
+                    contextBlocks.append(FocusBlock(context: context, end: interval.end, segments: [segment]))
+                }
             }
-
-            let gap = segment.start.timeIntervalSince(last.end)
-            if last.context == segment.context, gap <= FocusDefinition.interruptionGrace {
-                last.segments.append(segment)
-                last.end = max(last.end, segment.end)
-                blocks[blocks.count - 1] = last
-            } else {
-                blocks.append(FocusBlock(context: segment.context, end: segment.end, segments: [segment]))
-            }
+            blocks.append(contentsOf: contextBlocks)
         }
-        return blocks
+        return blocks.sorted { lhs, rhs in
+            let lhsStart = lhs.segments[0].start
+            let rhsStart = rhs.segments[0].start
+            if lhsStart != rhsStart { return lhsStart < rhsStart }
+            return lhs.end < rhs.end
+        }
     }
 
     private static func projectSwitchCount(
         from segments: [ActiveSegment],
         grace: TimeInterval
     ) -> Int {
-        struct SourceActivity {
-            let firstStart: Date
-            let lastEnd: Date
+        struct ProjectActivity {
+            let start: Date
+            let end: Date
             let identity: ProjectIdentity?
-            let id: UUID
         }
-
-        var bySource: [UUID: SourceActivity] = [:]
-        for segment in segments {
-            if let existing = bySource[segment.sourceID] {
-                bySource[segment.sourceID] = SourceActivity(
-                    firstStart: min(existing.firstStart, segment.start),
-                    lastEnd: max(existing.lastEnd, segment.end),
-                    identity: existing.identity,
-                    id: existing.id
-                )
-            } else {
-                bySource[segment.sourceID] = SourceActivity(
-                    firstStart: segment.start,
-                    lastEnd: segment.end,
-                    identity: segment.context.projectIdentity,
-                    id: segment.sourceID
-                )
+        let activities = Dictionary(grouping: segments, by: \.context).flatMap { context, values in
+            ActivityCoverageCalculator.union(values.map {
+                DateInterval(start: $0.start, end: $0.end)
+            }).map {
+                ProjectActivity(start: $0.start, end: $0.end, identity: context.projectIdentity)
             }
         }
-
-        let activities = bySource.values.sorted { lhs, rhs in
-            if lhs.firstStart != rhs.firstStart { return lhs.firstStart < rhs.firstStart }
-            if lhs.lastEnd != rhs.lastEnd { return lhs.lastEnd < rhs.lastEnd }
-            return false
+        let byStart = activities.sorted { lhs, rhs in
+            if lhs.start != rhs.start { return lhs.start < rhs.start }
+            return lhs.end < rhs.end
         }
-        return zip(activities, activities.dropFirst()).reduce(into: 0) { count, pair in
-            let (previous, next) = pair
-            let gap = next.firstStart.timeIntervalSince(previous.lastEnd)
-            guard let previousIdentity = previous.identity,
+        let startCounts = Dictionary(grouping: activities, by: \.start).mapValues(\.count)
+        let endCounts = Dictionary(grouping: activities, by: \.end).mapValues(\.count)
+
+        return activities.reduce(into: 0) { count, previous in
+            var lower = 0
+            var upper = byStart.count
+            while lower < upper {
+                let middle = lower + (upper - lower) / 2
+                if byStart[middle].start < previous.end {
+                    lower = middle + 1
+                } else {
+                    upper = middle
+                }
+            }
+            guard lower < byStart.count else { return }
+            let next = byStart[lower]
+            let gap = next.start.timeIntervalSince(previous.end)
+            guard gap <= grace,
+                  startCounts[next.start] == 1,
+                  endCounts[previous.end] == 1,
+                  let previousIdentity = previous.identity,
                   let nextIdentity = next.identity,
-                  previousIdentity != nextIdentity,
-                  gap >= 0,
-                  gap <= grace,
-                  activities.filter({ $0.firstStart == next.firstStart }).count == 1,
-                  activities.filter({ $0.lastEnd == previous.lastEnd }).count == 1 else {
-                return
-            }
+                  previousIdentity != nextIdentity else { return }
             count += 1
         }
     }

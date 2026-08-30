@@ -235,7 +235,7 @@ public struct CodePulseControlStatus: Codable, Equatable, Sendable {
     }
 
     public init(
-        schemaVersion: Int = CodePulseControlStatus.currentSchemaVersion,
+        schemaVersion: Int = 1,
         phase: String,
         project: String? = nil,
         sessionType: String? = nil,
@@ -528,6 +528,7 @@ public enum CodePulseControlResponseCodec {
     ]
 
     public static func encode(_ response: CodePulseControlResponse) throws -> Data {
+        try validate(response)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
@@ -590,6 +591,19 @@ public enum CodePulseControlResponseCodec {
     }
 
     private static func validate(_ response: CodePulseControlResponse) throws {
+        guard response.schemaVersion == 1 || response.schemaVersion == 2 else {
+            throw CodePulseControlValidationError.unsupportedSchemaVersion(response.schemaVersion)
+        }
+        if response.schemaVersion == 1 {
+            guard response.sessionID == nil,
+                  response.result != .ambiguousSession else {
+                throw CodePulseControlValidationError.invalidEnvelope
+            }
+        }
+        if let status = response.status,
+           status.schemaVersion != response.schemaVersion {
+            throw CodePulseControlValidationError.invalidEnvelope
+        }
         guard response.message.count <= CodePulseControlLimits.maximumMessageLength,
               isSafeString(response.message) else {
             throw CodePulseControlValidationError.invalidValue("response message")
