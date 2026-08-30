@@ -37,6 +37,9 @@ final class MenuBarPopoverVisualTests: XCTestCase {
             ("running-light", activeState(phase: .running, includeMetadata: true), referenceDate, .light),
             ("paused-dark", activeState(phase: .paused, includeMetadata: true), referenceDate, .dark),
             ("finishing-light", activeState(phase: .finishing, includeMetadata: true), referenceDate, .light),
+            ("phase4-multiple-light", multiSessionState(count: 3), referenceDate, .light),
+            ("phase4-multiple-dark", multiSessionState(count: 3), referenceDate, .dark),
+            ("phase4-sixteen-rows-dark", multiSessionState(count: 16), referenceDate, .dark),
             ("missing-metadata-light", activeState(phase: .running, includeMetadata: false), referenceDate, .light),
             ("long-content-dark", longContentState(), referenceDate, .dark)
         ]
@@ -57,6 +60,7 @@ final class MenuBarPopoverVisualTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: outputDirectory.appendingPathComponent("running-light.png").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: outputDirectory.appendingPathComponent("finishing-light.png").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: outputDirectory.appendingPathComponent("long-content-dark.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputDirectory.appendingPathComponent("phase4-sixteen-rows-dark.png").path))
     }
 
     func testFinishingAccessibilityUsesFinishingTerminology() {
@@ -64,6 +68,30 @@ final class MenuBarPopoverVisualTests: XCTestCase {
 
         XCTAssertTrue(store.menuBarAccessibilityText.contains("finishing"))
         XCTAssertFalse(store.menuBarAccessibilityText.contains("session complete"))
+    }
+
+    func testPhase4SelectedDetailsRenderAtStableWidth() throws {
+        let outputDirectory = try outputDirectory()
+        for phase in [SessionPhase.running, .finishing] {
+            let state = activeState(phase: phase, includeMetadata: true)
+            let store = makeStore(state: state, now: referenceDate)
+            let sessionID = try XCTUnwrap(store.state.activeSessions.first?.id)
+            if phase == .running {
+                try render(
+                    MenuBarActiveView(sessionID: sessionID).environmentObject(store),
+                    name: "phase4-selected-running-light",
+                    colorScheme: .light,
+                    outputDirectory: outputDirectory
+                )
+            } else {
+                try render(
+                    MenuBarFinishingView(sessionID: sessionID).environmentObject(store),
+                    name: "phase4-selected-finishing-dark",
+                    colorScheme: .dark,
+                    outputDirectory: outputDirectory
+                )
+            }
+        }
     }
 
     func testMetadataBoundsMultipleDeveloperToolContextsAtPopoverWidth() throws {
@@ -147,6 +175,35 @@ final class MenuBarPopoverVisualTests: XCTestCase {
         var state = AppState()
         state.activeSession = session
         return state
+    }
+
+    private func multiSessionState(count: Int) -> AppState {
+        let alpha = WorkspaceRecord(name: "A Workspace With A Long Name", createdAt: referenceDate)
+        let beta = WorkspaceRecord(name: "Beta", createdAt: referenceDate)
+        let projects = (0..<count).map { index in
+            ProjectRecord(
+                workspaceID: index.isMultiple(of: 2) ? alpha.id : beta.id,
+                name: "Project \(index + 1) With Enough Text To Exercise Truncation",
+                createdAt: referenceDate
+            )
+        }
+        let sessions = projects.enumerated().map { index, project -> ActiveSession in
+            var session = ActiveSession(
+                projectID: project.id,
+                projectName: project.name,
+                type: SessionType.allCases[index % SessionType.allCases.count],
+                goal: "Phase 4 visual session \(index + 1)",
+                startedAt: referenceDate.addingTimeInterval(TimeInterval(-3_600 - index * 120))
+            )
+            if index % 3 == 1 {
+                _ = session.pause(at: referenceDate.addingTimeInterval(-300))
+            } else if index % 3 == 2 {
+                _ = session.finish(at: referenceDate.addingTimeInterval(-120))
+            }
+            session.developerToolContexts = developerToolContexts(start: session.startedAt, count: 1)
+            return session
+        }
+        return AppState(workspaces: [beta, alpha], projects: projects, activeSessions: sessions)
     }
 
     private func gitContext() -> GitSessionContext {

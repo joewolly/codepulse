@@ -72,16 +72,40 @@ struct MenuBarSessionStatusBadge: View {
     let phase: SessionPhase
     let type: SessionType
 
+    static func accessibilityTimerState(for phase: SessionPhase) -> String {
+        switch phase {
+        case .running: return "Timer running"
+        case .paused: return "Timer frozen"
+        case .finishing: return "Timer finished"
+        case .idle: return "Timer idle"
+        }
+    }
+
     private var stateTitle: String {
-        phase == .paused ? "Paused" : "Running"
+        switch phase {
+        case .paused: return "Paused"
+        case .finishing: return "Finishing"
+        case .running: return "Running"
+        case .idle: return "Idle"
+        }
     }
 
     private var systemImage: String {
-        phase == .paused ? "pause.fill" : "play.fill"
+        switch phase {
+        case .paused: return "pause.fill"
+        case .finishing: return "flag.checkered"
+        case .running: return "play.fill"
+        case .idle: return "circle"
+        }
     }
 
     private var color: Color {
-        phase == .paused ? .orange : .green
+        switch phase {
+        case .paused: return .orange
+        case .finishing: return .blue
+        case .running: return .green
+        case .idle: return .secondary
+        }
     }
 
     var body: some View {
@@ -104,7 +128,7 @@ struct MenuBarSessionStatusBadge: View {
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(type.title), \(stateTitle)")
-        .accessibilityValue(phase == .paused ? "Timer frozen" : "Timer running")
+        .accessibilityValue(Self.accessibilityTimerState(for: phase))
     }
 }
 
@@ -234,7 +258,16 @@ struct MenuBarSessionContextHeader: View {
             MenuBarSessionStatusBadge(phase: phase, type: type)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("CodePulse, \(displayProjectName), \(type.title), \(phase == .paused ? "Paused" : "Running")")
+        .accessibilityLabel("CodePulse, \(displayProjectName), \(type.title), \(phaseTitle)")
+    }
+
+    private var phaseTitle: String {
+        switch phase {
+        case .running: return "Running"
+        case .paused: return "Paused"
+        case .finishing: return "Finishing"
+        case .idle: return "Idle"
+        }
     }
 }
 

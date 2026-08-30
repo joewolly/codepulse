@@ -3,78 +3,76 @@ import SwiftUI
 
 struct MenuBarActiveView: View {
     @EnvironmentObject private var store: SessionStore
+    let sessionID: UUID
 
-    private var sessionType: SessionType {
-        store.activeSession?.type ?? .coding
-    }
+    private var session: ActiveSession? { store.state.activeSession(id: sessionID) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            MenuBarSessionContextHeader(
-                projectName: store.activeSession?.projectName,
-                type: sessionType,
-                phase: store.phase,
-                automationLabel: store.activeAutomationStatusLabel,
-                hasAutomationMetadata: store.activeSession?.automationMetadata != nil
-            )
-
-            MenuBarTimerView(duration: store.elapsedDuration, phase: store.phase)
-                .accessibilityIdentifier("elapsed-timer")
-
-            MenuBarGoalBlock(goal: store.activeSession?.goal)
-
-            if hasMetadata {
-                MenuBarMetadataViews(
-                    gitContext: store.activeSession?.gitContext,
-                    developerToolContexts: store.activeSession?.developerToolContexts ?? []
+            if let session {
+                MenuBarSessionContextHeader(
+                    projectName: session.projectName,
+                    type: session.type,
+                    phase: session.phase,
+                    automationLabel: store.automationStatusLabel(for: sessionID),
+                    hasAutomationMetadata: session.automationMetadata != nil
                 )
-            }
 
-            HStack(spacing: 10) {
-                Button {
-                    if store.phase == .paused {
-                        _ = store.resume()
-                    } else {
-                        _ = store.pause()
-                    }
-                } label: {
-                    Label(
-                        store.phase == .paused ? "Resume" : "Pause",
-                        systemImage: store.phase == .paused ? "play.fill" : "pause.fill"
+                MenuBarTimerView(duration: store.elapsedDuration(for: sessionID), phase: session.phase)
+                    .accessibilityIdentifier("elapsed-timer")
+
+                MenuBarGoalBlock(goal: session.goal)
+
+                if session.gitContext != nil || !session.developerToolContexts.isEmpty {
+                    MenuBarMetadataViews(
+                        gitContext: session.gitContext,
+                        developerToolContexts: session.developerToolContexts
                     )
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .keyboardShortcut(.space, modifiers: [])
-                .accessibilityLabel(store.phase == .paused ? "Resume" : "Pause")
-                .accessibilityValue(store.phase == .paused ? "Resume" : "Pause")
-                .accessibilityHint(store.phase == .paused ? "Resumes the coding session" : "Pauses the coding session")
-                .accessibilityIdentifier("pause-resume-button")
 
-                Button {
-                    _ = store.finish()
-                } label: {
-                    Label("Finish", systemImage: "checkmark")
+                HStack(spacing: 10) {
+                    Button {
+                        if session.phase == .paused {
+                            _ = store.resume(sessionID: sessionID)
+                        } else {
+                            _ = store.pause(sessionID: sessionID)
+                        }
+                    } label: {
+                        Label(
+                            session.phase == .paused ? "Resume" : "Pause",
+                            systemImage: session.phase == .paused ? "play.fill" : "pause.fill"
+                        )
                         .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .keyboardShortcut(.space, modifiers: [])
+                    .accessibilityLabel(session.phase == .paused ? "Resume" : "Pause")
+                    .accessibilityValue(session.phase == .paused ? "Resume" : "Pause")
+                    .accessibilityHint(session.phase == .paused ? "Resumes this session" : "Pauses this session")
+                    .accessibilityIdentifier("pause-resume-button")
+
+                    Button {
+                        _ = store.finish(sessionID: sessionID)
+                    } label: {
+                        Label("Finish", systemImage: "checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.accentColor)
+                    .foregroundStyle(.white)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .controlSize(.large)
+                    .keyboardShortcut("f", modifiers: [.command])
+                    .accessibilityLabel("Finish")
+                    .accessibilityValue("Finish")
+                    .accessibilityHint("Moves the coding session into the finishing workflow")
+                    .accessibilityIdentifier("finish-session-button")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.accentColor)
-                .foregroundStyle(.white)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .controlSize(.large)
-                .keyboardShortcut("f", modifiers: [.command])
-                .accessibilityLabel("Finish")
-                .accessibilityValue("Finish")
-                .accessibilityHint("Moves the coding session into the finishing workflow")
-                .accessibilityIdentifier("finish-session-button")
+
             }
-
         }
-    }
-
-    private var hasMetadata: Bool {
-        store.activeSession?.gitContext != nil || !(store.activeSession?.developerToolContexts.isEmpty ?? true)
+        .accessibilityIdentifier("selected-session-detail")
     }
 }
 

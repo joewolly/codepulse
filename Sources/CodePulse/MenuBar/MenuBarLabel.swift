@@ -1,11 +1,42 @@
 import SwiftUI
 
+enum MenuBarLabelPresentation {
+    static func text(state: AppState, now: Date) -> String {
+        if state.activeSessions.count > 1 { return "\(state.activeSessions.count) sessions" }
+        guard let session = state.activeSessions.first else { return "Code" }
+        let duration = CodePulseFormatting.menuBarDuration(session.activeDuration(at: now))
+        switch state.settings.menuBarDisplay {
+        case .projectAndTimer:
+            if let projectName = session.projectName, !projectName.isEmpty {
+                return "\(projectName) · \(duration)"
+            }
+            return duration
+        case .timerOnly, .iconOnly:
+            return duration
+        }
+    }
+
+    static func shouldRenderText(state: AppState) -> Bool {
+        if state.activeSessions.count > 1 {
+            return state.settings.menuBarDisplay != .iconOnly
+        }
+        switch state.activeSessions.first?.phase ?? .idle {
+        case .idle:
+            return state.settings.idleAppearance == .code
+        case .running, .paused, .finishing:
+            return state.settings.menuBarDisplay != .iconOnly
+        }
+    }
+}
+
 struct MenuBarLabel: View {
     @EnvironmentObject private var store: SessionStore
 
     var body: some View {
-        let phase = store.phase
-        let symbol = phase == .paused ? "pause.fill" : (phase == .idle ? "circle" : "circle.fill")
+        let phase = store.state.activeSessions.first?.phase ?? .idle
+        let symbol = store.state.activeSessions.count > 1
+            ? "circle.fill"
+            : (phase == .paused ? "pause.fill" : (phase == .idle ? "circle" : "circle.fill"))
 
         HStack(spacing: 4) {
             Image(systemName: symbol)
@@ -20,30 +51,11 @@ struct MenuBarLabel: View {
     }
 
     private var shouldShowText: Bool {
-        switch store.phase {
-        case .idle:
-            return store.state.settings.idleAppearance == .code
-        case .running, .paused, .finishing:
-            return store.state.settings.menuBarDisplay != .iconOnly
-        }
+        MenuBarLabelPresentation.shouldRenderText(state: store.state)
     }
 
     private var labelText: String {
-        switch store.phase {
-        case .idle:
-            return "Code"
-        case .running, .paused, .finishing:
-            let duration = CodePulseFormatting.menuBarDuration(store.elapsedDuration)
-            switch store.state.settings.menuBarDisplay {
-            case .projectAndTimer:
-                if let projectName = store.activeSession?.projectName, !projectName.isEmpty {
-                    return "\(projectName) · \(duration)"
-                }
-                return duration
-            case .timerOnly, .iconOnly:
-                return duration
-            }
-        }
+        MenuBarLabelPresentation.text(state: store.state, now: store.now)
     }
 
     private var accessibilityText: String {

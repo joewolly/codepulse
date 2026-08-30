@@ -1,10 +1,41 @@
 import SwiftUI
 
+struct MenuBarSessionControlPresentation: Equatable {
+    let phase: SessionPhase
+    let isGitCaptureInProgress: Bool
+
+    var canSave: Bool { phase == .finishing && !isGitCaptureInProgress }
+    var canUseLifecycleControls: Bool { phase == .running || phase == .paused }
+
+    @MainActor
+    static func resolve(sessionID: UUID, store: SessionStore) -> Self? {
+        guard let session = store.state.activeSession(id: sessionID) else { return nil }
+        return Self(
+            phase: session.phase,
+            isGitCaptureInProgress: store.isGitCaptureInProgress(for: sessionID)
+        )
+    }
+}
+
+struct MenuBarOutcomeUpdate: Equatable {
+    let sessionID: UUID
+    let outcome: String
+
+    @MainActor
+    func apply(to store: SessionStore) {
+        _ = store.updateFinishingOutcome(sessionID: sessionID, outcome: outcome)
+    }
+}
+
 struct MenuBarFinishingView: View {
     @EnvironmentObject private var store: SessionStore
+    let sessionID: UUID
 
     @State private var outcome = ""
     @State private var outcomeSaveWorkItem: DispatchWorkItem?
+
+    private var session: ActiveSession? { store.state.activeSession(id: sessionID) }
+    private var isCapturingGit: Bool { store.isGitCaptureInProgress(for: sessionID) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -14,12 +45,12 @@ struct MenuBarFinishingView: View {
 
                 Spacer(minLength: 8)
 
-                Text(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
+                Text(CodePulseFormatting.duration(store.elapsedDuration(for: sessionID), includeSeconds: true))
                     .font(.system(.subheadline, design: .monospaced).weight(.medium))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Elapsed time")
-                    .accessibilityValue(CodePulseFormatting.duration(store.elapsedDuration, includeSeconds: true))
+                    .accessibilityValue(CodePulseFormatting.duration(store.elapsedDuration(for: sessionID), includeSeconds: true))
             }
 
             Text("Review the session details, add an outcome, then save or discard it.")
@@ -28,20 +59,20 @@ struct MenuBarFinishingView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(store.activeSession?.projectName.flatMap { $0.isEmpty ? nil : $0 } ?? "No Project")
+                Text(session?.projectName.flatMap { $0.isEmpty ? nil : $0 } ?? "No Project")
                     .font(.headline)
                     .lineLimit(2)
                     .truncationMode(.tail)
 
                 Label(
-                    store.activeSession?.type.title ?? SessionType.coding.title,
-                    systemImage: store.activeSession?.type.systemImage ?? SessionType.coding.systemImage
+                    session?.type.title ?? SessionType.coding.title,
+                    systemImage: session?.type.systemImage ?? SessionType.coding.systemImage
                 )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
 
-            MenuBarGoalBlock(goal: store.activeSession?.goal)
+            MenuBarGoalBlock(goal: session?.goal)
 
             if hasMetadata {
                 VStack(alignment: .leading, spacing: 6) {
@@ -50,13 +81,13 @@ struct MenuBarFinishingView: View {
                         .foregroundStyle(.secondary)
 
                     MenuBarMetadataViews(
-                        gitContext: store.activeSession?.gitContext,
-                        developerToolContexts: store.activeSession?.developerToolContexts ?? []
+                        gitContext: session?.gitContext,
+                        developerToolContexts: session?.developerToolContexts ?? []
                     )
                 }
             }
 
-            if let githubContext = store.activeSession?.githubContext {
+            if let githubContext = session?.githubContext {
                 GitHubContextView(context: githubContext, compact: true)
             }
 
@@ -72,22 +103,23 @@ struct MenuBarFinishingView: View {
                     .accessibilityIdentifier("outcome-field")
             }
 
-            if store.gitCaptureInProgress {
+            if isCapturingGit {
                 MenuBarGitCaptureStatus()
             }
 
             Button {
-                _ = store.saveFinishedSession(outcome: outcome)
+                outcomeSaveWorkItem?.cancel()
+                _ = store.saveFinishedSession(sessionID: sessionID, outcome: outcome)
             } label: {
                 HStack(spacing: 7) {
-                    if store.gitCaptureInProgress {
+                    if isCapturingGit {
                         ProgressView()
                             .controlSize(.small)
                     } else {
                         Image(systemName: "square.and.arrow.down")
                     }
 
-                    Text(store.gitCaptureInProgress ? "Collecting Git…" : "Save Session")
+                    Text(isCapturingGit ? "Collecting Git…" : "Save Session")
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -97,14 +129,15 @@ struct MenuBarFinishingView: View {
             .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .controlSize(.large)
             .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(store.gitCaptureInProgress)
-            .accessibilityLabel(store.gitCaptureInProgress ? "Collecting Git" : "Save Session")
-            .accessibilityValue(store.gitCaptureInProgress ? "Collecting Git" : "Save Session")
+            .disabled(!(MenuBarSessionControlPresentation.resolve(sessionID: sessionID, store: store)?.canSave ?? false))
+            .accessibilityLabel(isCapturingGit ? "Collecting Git" : "Save Session")
+            .accessibilityValue(isCapturingGit ? "Collecting Git" : "Save Session")
             .accessibilityHint("Saves the finished coding session")
             .accessibilityIdentifier("save-session-button")
 
             Button("Discard Session", role: .destructive) {
-                _ = store.discardSession()
+                outcomeSaveWorkItem?.cancel()
+                _ = store.discardSession(sessionID: sessionID)
             }
             .buttonStyle(.bordered)
             .controlSize(.large)
@@ -115,12 +148,19 @@ struct MenuBarFinishingView: View {
             .accessibilityIdentifier("discard-session-button")
         }
         .onAppear {
-            outcome = store.activeSession?.outcome ?? ""
+            outcome = session?.outcome ?? ""
+        }
+        .onChange(of: sessionID) { newSessionID in
+            outcomeSaveWorkItem?.cancel()
+            outcomeSaveWorkItem = nil
+            outcome = store.state.activeSession(id: newSessionID)?.outcome ?? ""
         }
         .onChange(of: outcome) { newValue in
             outcomeSaveWorkItem?.cancel()
+            let targetSessionID = sessionID
+            let update = MenuBarOutcomeUpdate(sessionID: targetSessionID, outcome: newValue)
             let workItem = DispatchWorkItem {
-                _ = store.updateFinishingOutcome(newValue)
+                update.apply(to: store)
             }
             outcomeSaveWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: workItem)
@@ -128,11 +168,12 @@ struct MenuBarFinishingView: View {
         .onDisappear {
             outcomeSaveWorkItem?.cancel()
             outcomeSaveWorkItem = nil
-            _ = store.updateFinishingOutcome(outcome)
+            _ = store.updateFinishingOutcome(sessionID: sessionID, outcome: outcome)
         }
+        .accessibilityIdentifier("selected-session-detail")
     }
 
     private var hasMetadata: Bool {
-        store.activeSession?.gitContext != nil || !(store.activeSession?.developerToolContexts.isEmpty ?? true)
+        session?.gitContext != nil || !(session?.developerToolContexts.isEmpty ?? true)
     }
 }

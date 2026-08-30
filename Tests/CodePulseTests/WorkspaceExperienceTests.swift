@@ -153,7 +153,10 @@ final class WorkspaceExperienceTests: XCTestCase {
         XCTAssertEqual(selectionStore.selectedWorkspaceID, first.id)
 
         XCTAssertTrue(store.startSession(projectID: project.id, goal: nil, at: now))
-        XCTAssertFalse(store.selectWorkspace(id: second.id))
+        let activeSessionsBeforeSelection = store.state.activeSessions
+        XCTAssertTrue(store.selectWorkspace(id: second.id))
+        XCTAssertEqual(store.selectedWorkspaceID, second.id)
+        XCTAssertEqual(store.state.activeSessions, activeSessionsBeforeSelection)
         XCTAssertFalse(store.moveProject(id: project.id, to: second.id))
         XCTAssertEqual(store.state.projects.first?.workspaceID, first.id)
 
