@@ -8,11 +8,15 @@ struct WorkspaceDashboardSnapshot: Equatable {
     /// Dashboard renders `intelligence.resumeItems` instead.
     let recentProjects: [ProjectRecord]
     let recentSessions: [CompletedSession]
-    let activeSession: ActiveSession?
-    let totalTrackedDuration: TimeInterval
+    let activeSessions: [ActiveSession]
+    let activeSessionCount: Int
+    let activeTime: TimeInterval
+    let sessionActivity: TimeInterval
     let sessionCount: Int
     let projectBreakdown: [InsightsBreakdown]
     let intelligence: WorkspaceIntelligenceSnapshot
+
+    var totalTrackedDuration: TimeInterval { sessionActivity }
 }
 
 enum WorkspaceDashboardCalculator {
@@ -46,10 +50,10 @@ enum WorkspaceDashboardCalculator {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
             .prefix(5)
-        let activeSession: ActiveSession? = state.soleActiveSession.flatMap { session in
-            guard let projectID = session.projectID, projectIDs.contains(projectID) else { return nil }
-            return session
-        }
+        let activeSessions = state.activeSessions.filter { session in
+            guard let projectID = session.projectID else { return false }
+            return projectIDs.contains(projectID)
+        }.sorted { $0.id.uuidString < $1.id.uuidString }
         let summary = InsightsCalculator.summary(
             state: state,
             calendar: calendar,
@@ -71,8 +75,10 @@ enum WorkspaceDashboardCalculator {
             archivedProjectCount: projects.filter(\.isArchived).count,
             recentProjects: Array(recentProjects),
             recentSessions: Array(recentSessions),
-            activeSession: activeSession,
-            totalTrackedDuration: summary.totalDuration,
+            activeSessions: activeSessions,
+            activeSessionCount: activeSessions.count,
+            activeTime: summary.activeTime,
+            sessionActivity: summary.sessionActivity,
             sessionCount: summary.sessionCount,
             projectBreakdown: summary.projectBreakdown,
             intelligence: intelligence
@@ -95,8 +101,8 @@ struct WorkspaceDashboardView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         header(snapshot)
                         overview(snapshot)
-                        if let activeSession = snapshot.activeSession {
-                            activeSessionContext(activeSession)
+                        if !snapshot.activeSessions.isEmpty {
+                            activeSessionContext(snapshot.activeSessions)
                         }
                         resumeContext(snapshot)
                         continuationHints(snapshot)
@@ -155,16 +161,18 @@ struct WorkspaceDashboardView: View {
             if snapshot.activeProjectCount == 0,
                snapshot.archivedProjectCount == 0,
                snapshot.sessionCount == 0,
-               snapshot.activeSession == nil {
+               snapshot.activeSessions.isEmpty {
                 Text("No recorded Workspace activity yet.")
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("workspace-empty-state")
             } else {
-                HStack(spacing: 12) {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     dashboardMetric("Active Projects", value: snapshot.activeProjectCount.formatted(), identifier: "active-projects")
-                    dashboardMetric("Archived Projects", value: snapshot.archivedProjectCount.formatted(), identifier: "archived-projects")
-                    dashboardMetric("Tracked Time", value: CodePulseFormatting.duration(snapshot.totalTrackedDuration), identifier: "tracked-time")
+                    dashboardMetric("Active Sessions", value: snapshot.activeSessionCount.formatted(), identifier: "active-sessions")
+                    dashboardMetric("Active Time", value: CodePulseFormatting.duration(snapshot.activeTime), identifier: "active-time")
+                    dashboardMetric("Session Activity", value: CodePulseFormatting.duration(snapshot.sessionActivity), identifier: "session-activity")
                     dashboardMetric("Sessions", value: snapshot.sessionCount.formatted(), identifier: "sessions")
+                    dashboardMetric("Archived Projects", value: snapshot.archivedProjectCount.formatted(), identifier: "archived-projects")
                 }
             }
         }
@@ -320,7 +328,7 @@ struct WorkspaceDashboardView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     dashboardMetric("Projects Touched", value: patterns.projectsTouched.formatted(), identifier: "projects-touched")
                     dashboardMetric(
-                        "Largest Time Share",
+                        "Largest Session Activity Share",
                         value: patterns.largestProjectTimeShare.map { Self.percent($0) } ?? "Unavailable",
                         identifier: "largest-time-share"
                     )
@@ -346,23 +354,29 @@ struct WorkspaceDashboardView: View {
     }
 
     @ViewBuilder
-    private func activeSessionContext(_ session: ActiveSession) -> some View {
+    private func activeSessionContext(_ sessions: [ActiveSession]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Active Session")
+            Text("Active Sessions")
                 .font(.headline)
                 .accessibilityIdentifier("workspace-active-session")
-            HStack(spacing: 8) {
-                Image(systemName: "play.circle.fill")
-                    .foregroundStyle(.green)
-                Text(session.projectName ?? "No Project")
-                    .lineLimit(1)
-                Text(session.type.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(CodePulseFormatting.duration(session.activeDuration(at: store.now), includeSeconds: true))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            ForEach(sessions) { session in
+                HStack(spacing: 8) {
+                    Image(systemName: session.phase == .paused ? "pause.circle.fill" : "play.circle.fill")
+                        .foregroundStyle(session.phase == .paused ? .orange : .green)
+                    Text(session.projectName ?? "No Project")
+                        .lineLimit(1)
+                    Text(session.type.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(session.id.uuidString)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(CodePulseFormatting.duration(session.activeDuration(at: store.now), includeSeconds: true))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

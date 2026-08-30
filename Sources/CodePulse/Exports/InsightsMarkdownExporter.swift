@@ -35,7 +35,11 @@ struct InsightsMarkdownExporter {
         }
 
         lines += ["", "## Summary"]
-        lines.append("- Active Time: \(CodePulseFormatting.duration(summary.totalDuration))")
+        lines.append("- Active Time: \(CodePulseFormatting.duration(summary.activeTime))")
+        lines.append("- Session Activity: \(CodePulseFormatting.duration(summary.sessionActivity))")
+        if abs(summary.sessionActivity - summary.activeTime) > 0.001 {
+            lines.append("- Overlapping Sessions count once in Active Time and individually in Session Activity.")
+        }
         lines.append("- Sessions: \(summary.sessionCount)")
         lines.append("- Average Session: \(summary.sessionCount == 0 ? "—" : CodePulseFormatting.duration(summary.averageSessionDuration))")
         lines.append("- Longest Session: \(summary.sessionCount == 0 ? "—" : CodePulseFormatting.duration(summary.longestSessionDuration))")
@@ -217,7 +221,7 @@ struct InsightsMarkdownExporter {
         lines += [
             "",
             "## \(title)",
-            "| \(columnTitle) | Active Time |",
+            "| \(columnTitle) | Session Activity |",
             "| --- | ---: |"
         ]
         for value in values {
@@ -291,7 +295,7 @@ struct InsightsMarkdownExporter {
         ]
 
         guard !insights.repositoryBreakdown.isEmpty else { return }
-        lines += ["", "### Repository Time", "| Repository | Active Time |", "| --- | ---: |"]
+        lines += ["", "### Repository Session Activity", "| Repository | Session Activity |", "| --- | ---: |"]
         for value in insights.repositoryBreakdown {
             lines.append("| \(escape(value.label)) | \(CodePulseFormatting.duration(value.duration)) |")
         }

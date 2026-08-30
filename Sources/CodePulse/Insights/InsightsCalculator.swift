@@ -212,8 +212,10 @@ struct InsightsSummary: Equatable {
     let timeframe: InsightsTimeframe
     let interval: DateInterval
     let comparisonInterval: DateInterval?
-    let totalDuration: TimeInterval
-    let comparisonDuration: TimeInterval
+    let activeTime: TimeInterval
+    let sessionActivity: TimeInterval
+    let comparisonActiveTime: TimeInterval
+    let comparisonSessionActivity: TimeInterval
     let sessionCount: Int
     let comparisonSessionCount: Int?
     let averageSessionDuration: TimeInterval
@@ -228,6 +230,52 @@ struct InsightsSummary: Equatable {
     let projectOutcomeInsights: [ProjectOutcomeInsights]
     let focusInsights: FocusInsights
     let comparisonFocusInsights: FocusInsights?
+
+    init(
+        timeframe: InsightsTimeframe,
+        interval: DateInterval,
+        comparisonInterval: DateInterval?,
+        activeTime: TimeInterval,
+        sessionActivity: TimeInterval,
+        comparisonActiveTime: TimeInterval,
+        comparisonSessionActivity: TimeInterval,
+        sessionCount: Int,
+        comparisonSessionCount: Int?,
+        averageSessionDuration: TimeInterval,
+        longestSessionDuration: TimeInterval,
+        projectBreakdown: [InsightsBreakdown],
+        typeBreakdown: [InsightsBreakdown],
+        dailyActivity: [DailyActivity],
+        developerToolInsights: DeveloperToolInsights,
+        gitInsights: GitInsights,
+        githubInsights: GitHubInsights,
+        goalOutcomeInsights: GoalOutcomeInsights = .empty,
+        projectOutcomeInsights: [ProjectOutcomeInsights] = [],
+        focusInsights: FocusInsights = .empty,
+        comparisonFocusInsights: FocusInsights? = nil
+    ) {
+        self.timeframe = timeframe
+        self.interval = interval
+        self.comparisonInterval = comparisonInterval
+        self.activeTime = activeTime
+        self.sessionActivity = sessionActivity
+        self.comparisonActiveTime = comparisonActiveTime
+        self.comparisonSessionActivity = comparisonSessionActivity
+        self.sessionCount = sessionCount
+        self.comparisonSessionCount = comparisonSessionCount
+        self.averageSessionDuration = averageSessionDuration
+        self.longestSessionDuration = longestSessionDuration
+        self.projectBreakdown = projectBreakdown
+        self.typeBreakdown = typeBreakdown
+        self.dailyActivity = dailyActivity
+        self.developerToolInsights = developerToolInsights
+        self.gitInsights = gitInsights
+        self.githubInsights = githubInsights
+        self.goalOutcomeInsights = goalOutcomeInsights
+        self.projectOutcomeInsights = projectOutcomeInsights
+        self.focusInsights = focusInsights
+        self.comparisonFocusInsights = comparisonFocusInsights
+    }
 
     init(
         timeframe: InsightsTimeframe,
@@ -250,40 +298,53 @@ struct InsightsSummary: Equatable {
         focusInsights: FocusInsights = .empty,
         comparisonFocusInsights: FocusInsights? = nil
     ) {
-        self.timeframe = timeframe
-        self.interval = interval
-        self.comparisonInterval = comparisonInterval
-        self.totalDuration = totalDuration
-        self.comparisonDuration = comparisonDuration
-        self.sessionCount = sessionCount
-        self.comparisonSessionCount = comparisonSessionCount
-        self.averageSessionDuration = averageSessionDuration
-        self.longestSessionDuration = longestSessionDuration
-        self.projectBreakdown = projectBreakdown
-        self.typeBreakdown = typeBreakdown
-        self.dailyActivity = dailyActivity
-        self.developerToolInsights = developerToolInsights
-        self.gitInsights = gitInsights
-        self.githubInsights = githubInsights
-        self.goalOutcomeInsights = goalOutcomeInsights
-        self.projectOutcomeInsights = projectOutcomeInsights
-        self.focusInsights = focusInsights
-        self.comparisonFocusInsights = comparisonFocusInsights
+        self.init(
+            timeframe: timeframe,
+            interval: interval,
+            comparisonInterval: comparisonInterval,
+            activeTime: totalDuration,
+            sessionActivity: totalDuration,
+            comparisonActiveTime: comparisonDuration,
+            comparisonSessionActivity: comparisonDuration,
+            sessionCount: sessionCount,
+            comparisonSessionCount: comparisonSessionCount,
+            averageSessionDuration: averageSessionDuration,
+            longestSessionDuration: longestSessionDuration,
+            projectBreakdown: projectBreakdown,
+            typeBreakdown: typeBreakdown,
+            dailyActivity: dailyActivity,
+            developerToolInsights: developerToolInsights,
+            gitInsights: gitInsights,
+            githubInsights: githubInsights,
+            goalOutcomeInsights: goalOutcomeInsights,
+            projectOutcomeInsights: projectOutcomeInsights,
+            focusInsights: focusInsights,
+            comparisonFocusInsights: comparisonFocusInsights
+        )
     }
 
     var hasComparison: Bool { comparisonInterval != nil }
 
-    /// Kept as a non-optional compatibility convenience. Callers should use
-    /// `durationDifference` when they need to distinguish All Time.
-    var difference: TimeInterval { durationDifference ?? 0 }
+    /// Source-compatible aliases for tests and non-concurrent legacy callers.
+    /// Phase 5 production surfaces use the explicit metrics above.
+    var totalDuration: TimeInterval { sessionActivity }
+    var comparisonDuration: TimeInterval { comparisonSessionActivity }
+    var difference: TimeInterval { sessionActivityDifference ?? 0 }
 
-    var durationDifference: TimeInterval? {
+    var activeTimeDifference: TimeInterval? {
         guard hasComparison else { return nil }
-        return totalDuration - comparisonDuration
+        return activeTime - comparisonActiveTime
     }
 
+    var sessionActivityDifference: TimeInterval? {
+        guard hasComparison else { return nil }
+        return sessionActivity - comparisonSessionActivity
+    }
+
+    var durationDifference: TimeInterval? { sessionActivityDifference }
+
     var hasActivity: Bool {
-        totalDuration > 0
+        activeTime > 0 || sessionActivity > 0
     }
 }
 
@@ -365,8 +426,12 @@ enum InsightsCalculator {
             timeframe: timeframe,
             interval: interval,
             comparisonInterval: comparisonInterval,
-            totalDuration: metrics.totalDuration,
-            comparisonDuration: comparisonMetrics?.totalDuration ?? 0,
+            activeTime: activeTime(from: sources, in: interval, referenceDate: referenceDate),
+            sessionActivity: metrics.totalDuration,
+            comparisonActiveTime: comparisonInterval.map {
+                activeTime(from: sources, in: $0, referenceDate: referenceDate)
+            } ?? 0,
+            comparisonSessionActivity: comparisonMetrics?.totalDuration ?? 0,
             sessionCount: metrics.sessionCount,
             comparisonSessionCount: comparisonMetrics?.sessionCount,
             averageSessionDuration: metrics.averageDuration,
@@ -414,8 +479,7 @@ enum InsightsCalculator {
             referenceDate: referenceDate,
             workspace: workspace
         )
-        return records(from: sources, in: interval, referenceDate: referenceDate)
-            .reduce(into: 0) { total, record in total += record.duration }
+        return activeTime(from: sources, in: interval, referenceDate: referenceDate)
     }
 
     static func interval(
@@ -489,7 +553,7 @@ enum InsightsCalculator {
         referenceDate: Date
     ) -> DateInterval {
         let referenceDay = calendar.startOfDay(for: referenceDate)
-        let earliestSessionDate = (state.completedSessions.map(\.startedAt) + [state.soleActiveSession?.startedAt].compactMap { $0 })
+        let earliestSessionDate = (state.completedSessions.map(\.startedAt) + state.activeSessions.map(\.startedAt))
             .min()
         let start = min(referenceDay, calendar.startOfDay(for: earliestSessionDate ?? referenceDate))
         let end = calendar.date(byAdding: .day, value: 1, to: referenceDay) ?? referenceDate
@@ -548,71 +612,17 @@ enum InsightsCalculator {
             in range: DateInterval,
             referenceDate: Date
         ) -> [DateInterval] {
-            guard let normalized = normalizedPauseIntervals(in: range, referenceDate: referenceDate) else {
-                return []
-            }
-
-            var segments: [DateInterval] = []
-            var cursor = normalized.effectiveRange.start
-            for pause in normalized.pauses {
-                if pause.start > cursor {
-                    segments.append(DateInterval(start: cursor, end: pause.start))
-                }
-                cursor = max(cursor, pause.end)
-            }
-            if cursor < normalized.effectiveRange.end {
-                segments.append(DateInterval(start: cursor, end: normalized.effectiveRange.end))
-            }
-            return segments.filter { $0.duration > 0 }
+            ActivityCoverageCalculator.activeIntervals(
+                startedAt: startedAt,
+                endedAt: endedAt,
+                pauseIntervals: pauseIntervals,
+                in: range,
+                referenceDate: referenceDate
+            )
         }
 
         func activeDuration(in range: DateInterval, referenceDate: Date) -> TimeInterval {
-            guard let normalized = normalizedPauseIntervals(in: range, referenceDate: referenceDate) else {
-                return 0
-            }
-            let paused = normalized.pauses.reduce(into: 0) { total, pause in
-                total += pause.duration
-            }
-            return max(0, normalized.effectiveRange.duration - paused)
-        }
-
-        private func normalizedPauseIntervals(
-            in range: DateInterval,
-            referenceDate: Date
-        ) -> (effectiveRange: DateInterval, pauses: [DateInterval])? {
-            let sessionEnd = endedAt ?? referenceDate
-            let end = min(sessionEnd, referenceDate, range.end)
-            let start = max(startedAt, range.start)
-            guard end > start else { return nil }
-
-            let effectiveRange = DateInterval(start: start, end: end)
-            let clippedPauses = pauseIntervals.compactMap { pause -> DateInterval? in
-                let pauseStart = max(pause.startedAt, effectiveRange.start)
-                let pauseEnd = min(pause.endedAt ?? effectiveRange.end, effectiveRange.end)
-                guard pauseEnd > pauseStart else { return nil }
-                return DateInterval(start: pauseStart, end: pauseEnd)
-            }.sorted { lhs, rhs in
-                if lhs.start != rhs.start { return lhs.start < rhs.start }
-                return lhs.end < rhs.end
-            }
-
-            var normalizedPauses: [DateInterval] = []
-            for pause in clippedPauses {
-                guard let last = normalizedPauses.last else {
-                    normalizedPauses.append(pause)
-                    continue
-                }
-                if pause.start <= last.end {
-                    normalizedPauses[normalizedPauses.count - 1] = DateInterval(
-                        start: last.start,
-                        end: max(last.end, pause.end)
-                    )
-                } else {
-                    normalizedPauses.append(pause)
-                }
-            }
-
-            return (effectiveRange: effectiveRange, pauses: normalizedPauses)
+            activeSegments(in: range, referenceDate: referenceDate).reduce(0) { $0 + $1.duration }
         }
     }
 
@@ -692,9 +702,9 @@ enum InsightsCalculator {
         var segments: [ActiveSegment]
 
         var activeDuration: TimeInterval {
-            segments.reduce(into: 0) { total, segment in
-                total += segment.duration
-            }
+            ActivityCoverageCalculator.unionDuration(
+                segments.map { DateInterval(start: $0.start, end: $0.end) }
+            )
         }
     }
 
@@ -740,8 +750,8 @@ enum InsightsCalculator {
                 developerToolContexts: session.developerToolContexts
             )
         }
-        let active: [SessionSource] = state.soleActiveSession.map { session in
-            [SessionSource(
+        let active: [SessionSource] = state.activeSessions.map { session in
+            SessionSource(
                 id: session.id,
                 projectID: session.projectID,
                 projectName: session.projectName,
@@ -755,8 +765,8 @@ enum InsightsCalculator {
                 gitContext: session.gitContext,
                 githubContext: session.githubContext,
                 developerToolContexts: session.developerToolContexts
-            )]
-        } ?? []
+            )
+        }
         return (completed + active).filter { source in
             guard source.matches(project) else { return false }
             guard let workspaceProjectIDs else { return true }
@@ -777,6 +787,16 @@ enum InsightsCalculator {
         }
     }
 
+    private static func activeTime(
+        from sources: [SessionSource],
+        in interval: DateInterval,
+        referenceDate: Date
+    ) -> TimeInterval {
+        ActivityCoverageCalculator.unionDuration(sources.flatMap {
+            $0.activeSegments(in: interval, referenceDate: referenceDate)
+        })
+    }
+
     private static func focusInsights(
         from sources: [SessionSource],
         in interval: DateInterval,
@@ -791,24 +811,27 @@ enum InsightsCalculator {
         guard !segments.isEmpty else { return .empty }
 
         let blocks = focusBlocks(from: segments)
-        let totalActiveDuration = segments.reduce(into: 0) { total, segment in
-            total += segment.duration
-        }
+        let totalActiveDuration = ActivityCoverageCalculator.unionDuration(
+            segments.map { DateInterval(start: $0.start, end: $0.end) }
+        )
         let sustainedBlocks = blocks.filter {
             $0.activeDuration >= FocusDefinition.sustainedThreshold
         }
         var hourlyTotals = Array(repeating: 0.0, count: 24)
         var dailyTotals: [Date: TimeInterval] = [:]
 
-        for block in sustainedBlocks {
-            for segment in block.segments {
-                bucketSustainedSegment(
-                    segment,
-                    calendar: calendar,
-                    hourlyTotals: &hourlyTotals,
-                    dailyTotals: &dailyTotals
-                )
+        let sustainedCoverage = ActivityCoverageCalculator.union(
+            sustainedBlocks.flatMap(\.segments).map {
+                DateInterval(start: $0.start, end: $0.end)
             }
+        )
+        for interval in sustainedCoverage {
+            bucketSustainedInterval(
+                interval,
+                calendar: calendar,
+                hourlyTotals: &hourlyTotals,
+                dailyTotals: &dailyTotals
+            )
         }
 
         let hourly = hourlyTotals.enumerated().map { hour, duration in
@@ -831,7 +854,7 @@ enum InsightsCalculator {
                 ? 0
                 : blocks.reduce(0) { $0 + $1.activeDuration } / Double(blocks.count),
             sustainedFocusBlockCount: sustainedBlocks.count,
-            sustainedFocusDuration: sustainedBlocks.reduce(0) { $0 + $1.activeDuration },
+            sustainedFocusDuration: ActivityCoverageCalculator.unionDuration(sustainedCoverage),
             projectSwitchCount: projectSwitchCount(
                 from: segments,
                 grace: FocusDefinition.interruptionGrace
@@ -915,31 +938,35 @@ enum InsightsCalculator {
         let activities = bySource.values.sorted { lhs, rhs in
             if lhs.firstStart != rhs.firstStart { return lhs.firstStart < rhs.firstStart }
             if lhs.lastEnd != rhs.lastEnd { return lhs.lastEnd < rhs.lastEnd }
-            return lhs.id.uuidString < rhs.id.uuidString
+            return false
         }
         return zip(activities, activities.dropFirst()).reduce(into: 0) { count, pair in
             let (previous, next) = pair
+            let gap = next.firstStart.timeIntervalSince(previous.lastEnd)
             guard let previousIdentity = previous.identity,
                   let nextIdentity = next.identity,
                   previousIdentity != nextIdentity,
-                  next.firstStart.timeIntervalSince(previous.lastEnd) <= grace else {
+                  gap >= 0,
+                  gap <= grace,
+                  activities.filter({ $0.firstStart == next.firstStart }).count == 1,
+                  activities.filter({ $0.lastEnd == previous.lastEnd }).count == 1 else {
                 return
             }
             count += 1
         }
     }
 
-    private static func bucketSustainedSegment(
-        _ segment: ActiveSegment,
+    private static func bucketSustainedInterval(
+        _ interval: DateInterval,
         calendar: Calendar,
         hourlyTotals: inout [TimeInterval],
         dailyTotals: inout [Date: TimeInterval]
     ) {
-        var cursor = segment.start
-        while cursor < segment.end {
+        var cursor = interval.start
+        while cursor < interval.end {
             let hour = calendar.component(.hour, from: cursor)
             let nextHour = nextLocalHourBoundary(after: cursor, calendar: calendar)
-            let sliceEnd = min(segment.end, nextHour)
+            let sliceEnd = min(interval.end, nextHour)
             guard sliceEnd > cursor else { break }
             let duration = sliceEnd.timeIntervalSince(cursor)
             hourlyTotals[hour] += duration
@@ -1147,29 +1174,18 @@ enum InsightsCalculator {
             dayStart = next
         }
 
-        var totals: [Date: TimeInterval] = [:]
-        for source in sources {
-            let sessionEnd = min(source.endedAt ?? referenceDate, referenceDate, interval.end)
-            let sessionStart = max(source.startedAt, interval.start)
-            guard sessionEnd > sessionStart else { continue }
-
-            var bucketStart = calendar.startOfDay(for: sessionStart)
-            while bucketStart < sessionEnd, bucketStart < interval.end {
-                guard let bucketEnd = calendar.date(byAdding: .day, value: 1, to: bucketStart) else { break }
-                let dayInterval = DateInterval(
-                    start: max(bucketStart, interval.start),
-                    end: min(bucketEnd, interval.end)
-                )
-                let duration = source.activeDuration(in: dayInterval, referenceDate: referenceDate)
-                if duration > 0 {
-                    totals[bucketStart, default: 0] += duration
-                }
-                bucketStart = bucketEnd
-            }
-        }
-
         return dayStarts.map { day in
-            DailyActivity(date: day, duration: totals[day] ?? 0)
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else {
+                return DailyActivity(date: day, duration: 0)
+            }
+            let dayInterval = DateInterval(
+                start: max(day, interval.start),
+                end: min(nextDay, interval.end)
+            )
+            return DailyActivity(
+                date: day,
+                duration: activeTime(from: sources, in: dayInterval, referenceDate: referenceDate)
+            )
         }
     }
 
