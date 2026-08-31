@@ -16,9 +16,10 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.4.0 (build 1400)**. It introduces
-Multi-Project Workspaces with a Workspace foundation and persistence, workspace
-switching, workspace-scoped History and Insights, and a Workspace Dashboard.
+The current release candidate is CodePulse **1.5.0 (build 1500)**. It includes
+Multi-Project Workspaces, concurrent active Sessions with stable UUIDs, and
+thread-native Codex/OpenCode ownership across the same Project or different
+Workspaces.
 Workspace Intelligence adds deterministic cross-project activity patterns,
 Resume Context, and local continuation suggestions. Projects remain the
 ownership and identity boundary; Workspaces are an organizational aggregate
@@ -26,21 +27,21 @@ scope. These capabilities, like the existing Actionable Insights experience,
 remain native macOS, local-first, privacy-conscious, and free of telemetry or
 cloud analytics; all intelligence is deterministic and local.
 
-### Planned for v1.5 — Concurrent Sessions & Thread-Native Tracking
+### v1.5 — Concurrent Sessions & Thread-Native Tracking
 
-The accepted next milestone is documented in the normative
+The implemented design is documented in the frozen normative
 [`v1.5 Concurrent Sessions & Thread-Native Tracking specification`](docs/v1.5-concurrent-sessions.md).
-It plans first-class concurrent CodePulse Sessions, thread-native Codex/OpenCode
+It provides first-class concurrent CodePulse Sessions, thread-native Codex/OpenCode
 ownership by `(tool, externalSessionID)`, same-Project and cross-Workspace
 tracking, independent manual/automated lifecycle and Git capture, a multi-session
 menu-bar hub, overlap-safe Insights, schema/backup migration, and local
-metadata-only privacy. Its planned `codepulsectl` additions are Session-ID
+metadata-only privacy. The `codepulsectl` lifecycle is Session-ID
 targeted pause/resume/finish and all-active status; save, discard, and outcome
 editing remain in-app lifecycle operations rather than new CLI verbs. v1.5 also
 freezes application-trigger automation at one application-owned Session while
-allowing it to coexist with manual and Developer-Tool Sessions. This is a
-future direction; it is not implemented or shipped in the current 1.4-era
-release.
+allowing it to coexist with manual and Developer-Tool Sessions. Active Time is
+overlap-safe wall-clock coverage, while Session Activity is the sum of each
+Session's activity; Focus calculations use the same overlap-safe foundation.
 
 <p align="center">
   <img src="docs/images/menu-bar-session.png" alt="CodePulse menu-bar timer with a running coding session" width="420">
@@ -68,11 +69,9 @@ release.
 - Captures best-effort local Git context without changing the repository.
 - GitHub context — associates local sessions with their GitHub repository and
   optionally their current pull request when the repository has a GitHub remote.
-- In the current 1.4-era implementation, optionally records that Codex and/or
-  OpenCode participated in the one currently active selected-project session
-  using only local lifecycle metadata. A Developer-Tool Thread identifier is
-  metadata and is not the same thing as Project identity; concurrent routing is
-  planned for v1.5.
+- Records Codex and/or OpenCode participation across concurrent Sessions using
+  only local lifecycle metadata. A Developer-Tool Thread identifier is routing
+  metadata and is not the same thing as Project identity.
 - Optionally starts, pauses, resumes, and saves a session from configured Codex
   or OpenCode lifecycle signals. Session Automation is disabled by default and
   never takes control of a manually started session.
@@ -163,11 +162,12 @@ Use **Settings → Data → Backup & Restore** and choose **Export Backup…** t
 a portable, pretty-printed JSON backup of local CodePulse projects, settings,
 presets, automation rules, saved sessions, captured Git/GitHub context,
 developer-tool session context, and any active-session timeline. The current
-format is `codepulse-backup` version 2 with at most one active Session.
-CodePulse 1.4.0 imports and restores legacy version-1 backups for
-compatibility; the planned v1.5 format-3 collection and migrations are
-specified in [`docs/v1.5-concurrent-sessions.md`](docs/v1.5-concurrent-sessions.md)
-and are not shipped yet.
+format is `codepulse-backup` version 3 with schema 3 and an explicit
+`activeSessions` collection, including when it is empty. CodePulse imports
+backup versions 1, 2, and 3 and migrates them in memory while preserving active
+Session UUIDs and timelines. Multiple active Session timelines may be included.
+Machine-local replay ledgers, retired-Thread tombstones, reservations, control
+processing, and transient capture state are not exported.
 
 Use **Settings → Data → Backup & Restore** and choose **Restore Backup…** to
 inspect the selected backup before confirming. Restore replaces the current
@@ -200,9 +200,8 @@ again. A backup moved to another Mac may contain project names and saved
 folder-path snapshots whose security-scoped bookmarks no longer resolve; those
 projects remain in CodePulse and are marked **Needs Relink** rather than being
 deleted or silently bound to another folder. Restore is blocked while the
-current installation has a running, paused, or finishing Session. In 1.4 this
-is the single active Session; v1.5 will retain the same safety rule for any
-active/finishing Session and any in-progress per-Session Git capture.
+current installation has any running, paused, or finishing Session or relevant
+per-Session Git capture in progress.
 
 ## CSV and Markdown exports
 
@@ -268,15 +267,14 @@ The preferred form starts a configured Session Preset by its unique name:
 /Applications/CodePulse.app/Contents/Helpers/codepulsectl status
 /Applications/CodePulse.app/Contents/Helpers/codepulsectl status --json
 /Applications/CodePulse.app/Contents/Helpers/codepulsectl start --preset "CodePulse Coding"
-/Applications/CodePulse.app/Contents/Helpers/codepulsectl pause
-/Applications/CodePulse.app/Contents/Helpers/codepulsectl resume
-/Applications/CodePulse.app/Contents/Helpers/codepulsectl finish
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl pause --session-id <uuid>
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl resume --session-id <uuid>
+/Applications/CodePulse.app/Contents/Helpers/codepulsectl finish --session-id <uuid>
 ```
 
-These no-ID lifecycle examples document the current 1.4-era compatibility
-surface, where at most one active Session exists. The planned v1.5 control
-surface adds explicit `--session-id <uuid>` targeting and rejects an otherwise
-ambiguous no-ID mutation when more than one Session is eligible. It does not add
+UUID targeting is preferred. A no-ID lifecycle mutation is invalid with zero
+eligible Sessions, works with exactly one eligible Session, and is rejected as
+ambiguous when more than one Session is eligible. The CLI does not add
 `codepulsectl` save, discard, or outcome commands; those remain in-app
 SessionStore/UI operations. See the normative specification.
 
@@ -327,7 +325,7 @@ prompts, messages, responses, transcripts, source code, terminal command
 contents, command output, tool-call arguments or results, permission decisions,
 reasoning, conversation summaries, or credentials. Application automation, when
 explicitly enabled, observes only which application is frontmost and compares
-its bundle identifier with local rules. In planned v1.5, a separate bounded
+its bundle identifier with local rules. In v1.5, a separate bounded
 retired-Thread ledger protects recently completed/discarded Developer-Tool
 identities for seven days; it is local processing metadata, omitted from
 portable backups, and reset on restore. CodePulse does not collect or retain
@@ -370,11 +368,11 @@ privacy-safe sample data. Regenerate them with:
 
 ## Design notes
 
-In the current 1.4-era implementation, `SessionStore` owns one optional idle,
-running, paused, or finishing Session. Session duration is derived from
+In v1.5, `SessionStore` owns a bounded collection of independently identified
+running, paused, or finishing Sessions. Session duration is derived from
 timestamps and pause intervals rather than an incrementing counter, which keeps
-recovery and calendar-boundary calculations stable. Planned v1.5 changes the
-canonical state to a bounded collection of independently identified Sessions;
+recovery and calendar-boundary calculations stable. The canonical state is a
+bounded collection of independently identified Sessions;
 the selected Project and Workspace remain presentation/organization context,
 not Developer-Tool Thread identity.
 
@@ -400,27 +398,28 @@ gh auth status
 CodePulse 0.6 adds optional Developer Integrations for Codex and OpenCode. A
 small local helper writes validated, versioned events to the CodePulse-owned
 inbox at `~/Library/Application Support/CodePulse/Integrations/Inbox/`.
-In the current 1.4-era implementation, CodePulse associates an event only with
-the one currently active selected Project when the canonical working directory
-is that Project's folder or a child directory. A Developer-Tool external
+CodePulse associates an event with its exact Thread-owned Session after the
+canonical working directory resolves to that Session's Project folder or a
+child directory. A Developer-Tool external
 session ID is retained as participation metadata, not as a replacement for
 Project identity. No Project sessions and unrelated Projects are ignored;
 Integration context enrichment remains independent from Session Automation.
-The planned v1.5 routing rules allow multiple independent Thread owners and are
+The v1.5 routing rules allow multiple independent Thread owners and are
 defined in [`docs/v1.5-concurrent-sessions.md`](docs/v1.5-concurrent-sessions.md).
 
 CodePulse 0.8 adds optional Session Automation for Codex, OpenCode, and explicit
 frontmost-application rules. Session Presets hold reusable project, work type,
 and goal values; automation rules reference presets by stable ID. In the
-current 1.4-era implementation, a matching developer-tool lifecycle signal or
-configured application bundle can start one locally owned Session; later claims
+current v1.5 implementation, matching developer-tool lifecycle signals can
+start independent Thread-owned Sessions, while a configured application bundle
+can start at most one application-owned Session; later claims
 can keep it alive, resume an automatic pause, and finish and save it after the
 configured grace periods. Existing active Sessions are never switched to
 another Project, manual lifecycle actions take control immediately, and
 neither app activation changes nor raw event files are retained as an activity
 history. The global automation setting is off by default. `codepulsectl` adds
-bounded local manual control for status and the normal single-Session lifecycle;
-it does not add a cloud API, webhook, or network control path. v1.5 will scope
+bounded local manual control for status and UUID-targeted Session lifecycle;
+it does not add a cloud API, webhook, or network control path. v1.5 scopes
 those lifecycle claims, deadlines, and saves to independent Session UUIDs
 without broadening application-trigger semantics.
 

@@ -57,9 +57,9 @@ a period after relaunch.
 
 ## Data portability
 
-Continuation of the v0.9 data-portability thread. The current 1.4-era backup
-format is `codepulse-backup` version 2; the planned concurrent-session
-milestone adds version 3 as described above.
+Continuation of the v0.9 data-portability thread. The current portable format
+is `codepulse-backup` version 3 with a bounded `activeSessions` collection and
+strict v1/v2/v3 import.
 
 | Feature | Status | Notes |
 | --- | --- | --- |
@@ -135,13 +135,11 @@ assign productivity scores, or analyze data in the cloud.
 
 ## Concurrent Sessions & Thread-Native Tracking
 
-**Status:** Accepted
+**Status:** Implemented
 **Target:** v1.5.0
 **Normative specification:** [`docs/v1.5-concurrent-sessions.md`](v1.5-concurrent-sessions.md)
 
-CodePulse currently has a single globally active Session even though Projects
-can be organized into multiple Workspaces. The accepted v1.5 direction makes
-active Sessions first-class and independent:
+CodePulse v1.5 makes active Sessions first-class and independent:
 
 - multiple concurrent active Sessions, including same-Project work;
 - thread-native Developer-Tool identity using `(tool, externalSessionID)`;
@@ -159,8 +157,8 @@ active Sessions first-class and independent:
 - local, bounded, metadata-only privacy with no prompt, transcript, command,
   source, cloud, or telemetry collection.
 
-The linked document is the reviewed product and technical contract for a later
-implementation branch. v1.5 is not implemented by this roadmap entry.
+The linked document remains the frozen reviewed product and technical contract;
+the living release evidence map is `docs/v1.5-release-validation.md`.
 
 ---
 
