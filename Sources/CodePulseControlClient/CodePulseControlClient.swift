@@ -243,6 +243,9 @@ public enum CodePulseControlCLIFormatter {
             if let workspace = session.workspaceName { lines.append("Workspace: \(workspace)") }
             lines.append("Type: \(sessionTypeDisplayName(session.sessionType))")
             lines.append("Elapsed: \(duration(session.elapsedSeconds))")
+            if session.phase == "running" {
+                lines.append("Control: \(session.automationControlled ? "automatic" : "manual")")
+            }
             return lines.joined(separator: "\n")
         }
         var lines = ["CodePulse: \(status.phase)"]

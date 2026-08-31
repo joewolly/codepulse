@@ -159,6 +159,122 @@ final class CodePulseControlTests: XCTestCase {
         }
     }
 
+    func testV2SingleSessionHumanStatusIncludesAutomaticControlAndNormalFields() {
+        let sessionID = UUID()
+        let status = CodePulseControlStatus(sessions: [CodePulseControlSessionStatus(
+            sessionID: sessionID,
+            projectName: "CodePulse",
+            workspaceName: "Development",
+            sessionType: "coding",
+            phase: "running",
+            elapsedSeconds: 42,
+            automationControlled: true
+        )])
+
+        let output = CodePulseControlCLIFormatter.humanStatus(status)
+
+        XCTAssertTrue(output.contains("Session: \(sessionID.uuidString)"))
+        XCTAssertTrue(output.contains("Project: CodePulse"))
+        XCTAssertTrue(output.contains("Workspace: Development"))
+        XCTAssertTrue(output.contains("Type: Coding"))
+        XCTAssertTrue(output.contains("Elapsed:"))
+        XCTAssertTrue(output.contains("Control: automatic"))
+    }
+
+    func testV2SingleSessionHumanStatusIncludesManualControlAndNormalFields() {
+        let sessionID = UUID()
+        let status = CodePulseControlStatus(sessions: [CodePulseControlSessionStatus(
+            sessionID: sessionID,
+            projectName: "CodePulse",
+            workspaceName: "Development",
+            sessionType: "coding",
+            phase: "running",
+            elapsedSeconds: 42,
+            automationControlled: false
+        )])
+
+        let output = CodePulseControlCLIFormatter.humanStatus(status)
+
+        XCTAssertTrue(output.contains("Session: \(sessionID.uuidString)"))
+        XCTAssertTrue(output.contains("Project: CodePulse"))
+        XCTAssertTrue(output.contains("Workspace: Development"))
+        XCTAssertTrue(output.contains("Type: Coding"))
+        XCTAssertTrue(output.contains("Elapsed:"))
+        XCTAssertTrue(output.contains("Control: manual"))
+    }
+
+    func testV2ResponseCodecRejectsOversizedSessionType() throws {
+        let response = CodePulseControlResponse(
+            commandID: UUID(),
+            result: .success,
+            message: "ok",
+            status: CodePulseControlStatus(sessions: [CodePulseControlSessionStatus(
+                sessionID: UUID(),
+                sessionType: String(
+                    repeating: "s",
+                    count: CodePulseControlLimits.maximumSessionTypeLength + 1
+                ),
+                phase: "running",
+                elapsedSeconds: 1,
+                automationControlled: false,
+                developerTools: ["Codex"]
+            )])
+        )
+        let data = try JSONEncoder().encode(response)
+
+        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(data)) { error in
+            XCTAssertEqual(error as? CodePulseControlValidationError, .invalidValue("response status"))
+        }
+    }
+
+    func testV2ResponseCodecRejectsOversizedDeveloperTool() throws {
+        let response = CodePulseControlResponse(
+            commandID: UUID(),
+            result: .success,
+            message: "ok",
+            status: CodePulseControlStatus(sessions: [CodePulseControlSessionStatus(
+                sessionID: UUID(),
+                sessionType: "coding",
+                phase: "running",
+                elapsedSeconds: 1,
+                automationControlled: false,
+                developerTools: [String(
+                    repeating: "t",
+                    count: CodePulseControlLimits.maximumSessionTypeLength + 1
+                )]
+            )])
+        )
+        let data = try JSONEncoder().encode(response)
+
+        XCTAssertThrowsError(try CodePulseControlResponseCodec.decode(data)) { error in
+            XCTAssertEqual(error as? CodePulseControlValidationError, .invalidValue("response status"))
+        }
+    }
+
+    func testV2ResponseCodecAcceptsMetadataAtLengthBounds() throws {
+        let boundedValue = String(
+            repeating: "b",
+            count: CodePulseControlLimits.maximumSessionTypeLength
+        )
+        let response = CodePulseControlResponse(
+            commandID: UUID(),
+            result: .success,
+            message: "ok",
+            status: CodePulseControlStatus(sessions: [CodePulseControlSessionStatus(
+                sessionID: UUID(),
+                sessionType: boundedValue,
+                phase: "running",
+                elapsedSeconds: 1,
+                automationControlled: false,
+                developerTools: [boundedValue]
+            )])
+        )
+
+        let data = try CodePulseControlResponseCodec.encode(response)
+
+        XCTAssertEqual(try CodePulseControlResponseCodec.decode(data), response)
+    }
+
     func testTransportRejectsSymlinkedManagedParentAndBoundsPendingCommands() throws {
         let temporaryDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: temporaryDirectory) }

@@ -614,8 +614,12 @@ public enum CodePulseControlResponseCodec {
                 guard ["running", "paused", "finishing"].contains(session.phase),
                       session.elapsedSeconds >= 0,
                       isSafeString(session.sessionType),
+                      session.sessionType.count <= CodePulseControlLimits.maximumSessionTypeLength,
                       isSafeString(session.phase),
-                      session.developerTools.allSatisfy(isSafeString) else {
+                      session.developerTools.allSatisfy({
+                          isSafeString($0)
+                              && $0.count <= CodePulseControlLimits.maximumSessionTypeLength
+                      }) else {
                     throw CodePulseControlValidationError.invalidValue("response status")
                 }
                 for value in [session.projectName, session.workspaceName, session.gitCaptureStatus].compactMap({ $0 }) {
