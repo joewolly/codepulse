@@ -134,7 +134,7 @@ enum WorkspaceIntelligenceCalculator {
             projectBreakdown: summary.projectBreakdown,
             largestProjectTimeShare: largestProjectTimeShare(
                 from: summary.projectBreakdown,
-                totalDuration: summary.totalDuration
+                totalDuration: summary.sessionActivity
             ),
             rapidProjectSwitches: summary.focusInsights.projectSwitchCount,
             sustainedFocusShare: summary.focusInsights.sustainedFocusShare

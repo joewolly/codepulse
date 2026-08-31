@@ -1289,8 +1289,8 @@ final class InsightsTests: XCTestCase {
             timeframe: .allTime
         )
 
-        XCTAssertEqual(summary.focusInsights.totalActiveDuration, 5_400, accuracy: 0.001)
-        XCTAssertEqual(summary.focusInsights.totalActiveDuration, summary.totalDuration, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, 3_600, accuracy: 0.001)
+        XCTAssertEqual(summary.focusInsights.totalActiveDuration, summary.activeTime, accuracy: 0.001)
 
         let fullyPaused = makeSession(
             projectID: UUID(),

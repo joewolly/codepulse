@@ -321,11 +321,21 @@ private struct InsightSummarySection: View {
                 systemImage: "clock",
                 accent: .blue,
                 title: "Active Time",
-                value: CodePulseFormatting.duration(summary.totalDuration),
-                detail: summary.durationDifference.flatMap {
+                value: CodePulseFormatting.duration(summary.activeTime),
+                detail: summary.activeTimeDifference.flatMap {
                     guard let label = InsightsPresentation.comparisonLabel(for: summary.timeframe) else {
                         return nil
                     }
+                    return "\(CodePulseFormatting.signedDuration($0)) \(label)"
+                }
+            )
+            InsightSummaryCard(
+                systemImage: "rectangle.stack.fill",
+                accent: .purple,
+                title: "Session Activity",
+                value: CodePulseFormatting.duration(summary.sessionActivity),
+                detail: summary.sessionActivityDifference.flatMap {
+                    guard let label = InsightsPresentation.comparisonLabel(for: summary.timeframe) else { return nil }
                     return "\(CodePulseFormatting.signedDuration($0)) \(label)"
                 }
             )
@@ -354,6 +364,11 @@ private struct InsightSummarySection: View {
                     : CodePulseFormatting.duration(summary.longestSessionDuration),
                 detail: nil
             )
+        }
+        if abs(summary.sessionActivity - summary.activeTime) > 0.001 {
+            Text("Overlapping Sessions count once in Active Time and individually in Session Activity.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -995,7 +1010,7 @@ private struct WorkTypeSection: View {
     let typeBreakdown: [InsightsBreakdown]
 
     var body: some View {
-        InsightSection(title: "Work Type Breakdown", systemImage: "square.grid.2x2") {
+        InsightSection(title: "Work Type Session Activity", systemImage: "square.grid.2x2") {
             InsightBreakdownBars(values: typeBreakdown)
         }
     }
@@ -1005,7 +1020,7 @@ private struct ProjectDistributionSection: View {
     let projectBreakdown: [InsightsBreakdown]
 
     var body: some View {
-        InsightSection(title: "Project Distribution", systemImage: "folder") {
+        InsightSection(title: "Project Session Activity", systemImage: "folder") {
             InsightBreakdownBars(
                 values: projectBreakdown,
                 limit: InsightsPresentation.projectBreakdownLimit,
@@ -1339,7 +1354,7 @@ private struct GitHubInsightSection: View {
 
             if !insights.repositoryBreakdown.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Repository Time")
+                    Text("Repository Session Activity")
                         .font(.subheadline.weight(.semibold))
                         .padding(.top, 2)
                     InsightBreakdownBars(

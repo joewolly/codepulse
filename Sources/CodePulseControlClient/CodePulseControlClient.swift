@@ -41,9 +41,9 @@ public enum CodePulseControlCLIParser {
       codepulsectl start --preset <name>
       codepulsectl start --preset-id <uuid>
       codepulsectl start --project <name> --type <coding|debugging|planning|review|research> [--goal <text>]
-      codepulsectl pause
-      codepulsectl resume
-      codepulsectl finish
+      codepulsectl pause [--session-id <uuid>]
+      codepulsectl resume [--session-id <uuid>]
+      codepulsectl finish [--session-id <uuid>]
 
     Exit codes:
       0  success
@@ -81,14 +81,11 @@ public enum CodePulseControlCLIParser {
         case "start":
             return try parseStart(arguments: rest, issuedAt: issuedAt)
         case "pause":
-            try requireNoArguments(rest, for: "pause")
-            return invocation(action: .pause, issuedAt: issuedAt)
+            return try parseLifecycle(arguments: rest, command: "pause", issuedAt: issuedAt)
         case "resume":
-            try requireNoArguments(rest, for: "resume")
-            return invocation(action: .resume, issuedAt: issuedAt)
+            return try parseLifecycle(arguments: rest, command: "resume", issuedAt: issuedAt)
         case "finish":
-            try requireNoArguments(rest, for: "finish")
-            return invocation(action: .finish, issuedAt: issuedAt)
+            return try parseLifecycle(arguments: rest, command: "finish", issuedAt: issuedAt)
         default:
             throw CodePulseControlCLIParseError.invalidArguments("Unknown command '\(commandName)'. Use --help for usage.")
         }
@@ -182,6 +179,30 @@ public enum CodePulseControlCLIParser {
         "coding", "debugging", "planning", "review", "research"
     ]
 
+    private static func parseLifecycle(
+        arguments: [String],
+        command: String,
+        issuedAt: Date
+    ) throws -> CodePulseControlCLIInvocation {
+        guard !arguments.isEmpty else {
+            let action: CodePulseControlAction = command == "pause" ? .pause : (command == "resume" ? .resume : .finish)
+            return invocation(action: action, issuedAt: issuedAt)
+        }
+        guard arguments.count == 2, arguments[0] == "--session-id" else {
+            if arguments.filter({ $0 == "--session-id" }).count > 1 {
+                throw duplicate("--session-id")
+            }
+            throw CodePulseControlCLIParseError.invalidArguments("\(command) accepts only --session-id <uuid>.")
+        }
+        guard let id = UUID(uuidString: arguments[1]) else {
+            throw CodePulseControlCLIParseError.invalidArguments("--session-id must be a UUID.")
+        }
+        let action: CodePulseControlAction = command == "pause"
+            ? .pauseSession(id)
+            : (command == "resume" ? .resumeSession(id) : .finishSession(id))
+        return invocation(action: action, issuedAt: issuedAt)
+    }
+
     private static func invocation(
         action: CodePulseControlAction,
         issuedAt: Date
@@ -207,6 +228,26 @@ public enum CodePulseControlCLIParser {
 
 public enum CodePulseControlCLIFormatter {
     public static func humanStatus(_ status: CodePulseControlStatus) -> String {
+        if status.schemaVersion == 2 {
+            guard !status.sessions.isEmpty else { return "CodePulse: idle" }
+            if status.sessions.count > 1 {
+                var lines = ["CodePulse: \(status.sessions.count) active sessions"]
+                for session in status.sessions {
+                    lines.append("\(session.sessionID.uuidString) · \(session.phase) · \(session.projectName ?? "No Project") · \(sessionTypeDisplayName(session.sessionType)) · \(duration(session.elapsedSeconds))")
+                }
+                return lines.joined(separator: "\n")
+            }
+            let session = status.sessions[0]
+            var lines = ["CodePulse: \(session.phase)", "Session: \(session.sessionID.uuidString)"]
+            if let project = session.projectName { lines.append("Project: \(project)") }
+            if let workspace = session.workspaceName { lines.append("Workspace: \(workspace)") }
+            lines.append("Type: \(sessionTypeDisplayName(session.sessionType))")
+            lines.append("Elapsed: \(duration(session.elapsedSeconds))")
+            if session.phase == "running" {
+                lines.append("Control: \(session.automationControlled ? "automatic" : "manual")")
+            }
+            return lines.joined(separator: "\n")
+        }
         var lines = ["CodePulse: \(status.phase)"]
         if let project = status.project {
             lines.append("Project: \(project)")

@@ -42,6 +42,10 @@ enum DigestComposer {
         first += "."
         sentences.append(first)
 
+        if abs(summary.sessionActivity - summary.totalActiveTime) > 0.001 {
+            sentences.append("Session Activity was \(CodePulseFormatting.duration(summary.sessionActivity)); overlapping Sessions count once in Active Time.")
+        }
+
         if let followUp = goalFollowUpSentence(summary.goalOutcomeInsights) {
             sentences.append(followUp)
         }

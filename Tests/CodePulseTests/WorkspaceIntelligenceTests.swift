@@ -101,7 +101,7 @@ final class WorkspaceIntelligenceTests: XCTestCase {
         ])
         XCTAssertEqual(intelligence.patterns.largestProjectTimeShare ?? -1, 1_860.0 / 1_920.0, accuracy: 0.000_001)
         XCTAssertEqual(intelligence.patterns.rapidProjectSwitches, 2)
-        XCTAssertEqual(intelligence.patterns.sustainedFocusShare ?? -1, 1_800.0 / 1_920.0, accuracy: 0.000_001)
+        XCTAssertEqual(intelligence.patterns.sustainedFocusShare ?? -1, 1_860.0 / 1_920.0, accuracy: 0.000_001)
     }
 
     func testResumeContextIsNewestFirstBoundedAndExcludesArchivedAndActiveProjects() throws {

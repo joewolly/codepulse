@@ -50,32 +50,38 @@ struct DigestDeveloperToolParticipation: Equatable {
 struct DigestSummary: Equatable {
     let period: DigestPeriod
     let totalActiveTime: TimeInterval
+    let sessionActivity: TimeInterval
     let sessionCount: Int
     let topProject: DigestTopItem?
     let topType: DigestTopItem?
     let developerToolParticipation: DigestDeveloperToolParticipation
     let comparisonTotalActiveTime: TimeInterval?
+    let comparisonSessionActivity: TimeInterval?
     let comparisonSessionCount: Int?
     let goalOutcomeInsights: GoalOutcomeInsights
 
     init(
         period: DigestPeriod,
         totalActiveTime: TimeInterval,
+        sessionActivity: TimeInterval? = nil,
         sessionCount: Int,
         topProject: DigestTopItem?,
         topType: DigestTopItem?,
         developerToolParticipation: DigestDeveloperToolParticipation,
         comparisonTotalActiveTime: TimeInterval?,
+        comparisonSessionActivity: TimeInterval? = nil,
         comparisonSessionCount: Int?,
         goalOutcomeInsights: GoalOutcomeInsights = .empty
     ) {
         self.period = period
         self.totalActiveTime = totalActiveTime
+        self.sessionActivity = sessionActivity ?? totalActiveTime
         self.sessionCount = sessionCount
         self.topProject = topProject
         self.topType = topType
         self.developerToolParticipation = developerToolParticipation
         self.comparisonTotalActiveTime = comparisonTotalActiveTime
+        self.comparisonSessionActivity = comparisonSessionActivity ?? comparisonTotalActiveTime
         self.comparisonSessionCount = comparisonSessionCount
         self.goalOutcomeInsights = goalOutcomeInsights
     }

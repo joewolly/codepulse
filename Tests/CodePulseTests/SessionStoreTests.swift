@@ -854,10 +854,9 @@ final class SessionStoreTests: XCTestCase {
             persistence: persistence
         )
 
-        // Completed history remains included, but two overlapping live
-        // sessions contribute no summed wall-clock duration in this Phase 1
-        // compatibility metric.
-        XCTAssertEqual(store.todayTotal(), 600, accuracy: 0.001)
+        // Completed and live coverage share the Phase 5 wall-clock union, so
+        // the two fully overlapping live Sessions count once.
+        XCTAssertEqual(store.todayTotal(), 3_600, accuracy: 0.001)
     }
 
     func testWallClockJumpUsesDatesInsteadOfTickCount() {

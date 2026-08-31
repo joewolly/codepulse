@@ -152,7 +152,8 @@ enum DigestCalculator {
         )
         return DigestSummary(
             period: period,
-            totalActiveTime: insights.totalDuration,
+            totalActiveTime: insights.activeTime,
+            sessionActivity: insights.sessionActivity,
             sessionCount: insights.sessionCount,
             topProject: insights.projectBreakdown
                 .first { $0.id != "no-project" }
@@ -164,7 +165,8 @@ enum DigestCalculator {
                 sessionsWithCodex: insights.developerToolInsights.sessionsWithCodex,
                 sessionsWithOpenCode: insights.developerToolInsights.sessionsWithOpenCode
             ),
-            comparisonTotalActiveTime: insights.comparisonInterval.map { _ in insights.comparisonDuration },
+            comparisonTotalActiveTime: insights.comparisonInterval.map { _ in insights.comparisonActiveTime },
+            comparisonSessionActivity: insights.comparisonInterval.map { _ in insights.comparisonSessionActivity },
             comparisonSessionCount: insights.comparisonSessionCount,
             goalOutcomeInsights: insights.goalOutcomeInsights
         )

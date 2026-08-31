@@ -52,8 +52,11 @@ public enum CodePulseControlAction: Codable, Equatable, Sendable {
     case startPresetID(UUID)
     case startManual(projectName: String, sessionType: String, goal: String?)
     case pause
+    case pauseSession(UUID)
     case resume
+    case resumeSession(UUID)
     case finish
+    case finishSession(UUID)
 
     private enum CodingKeys: String, CodingKey {
         case kind
@@ -62,6 +65,7 @@ public enum CodePulseControlAction: Codable, Equatable, Sendable {
         case projectName
         case sessionType
         case goal
+        case sessionID
     }
 
     private enum Kind: String, Codable {
@@ -90,11 +94,11 @@ public enum CodePulseControlAction: Codable, Equatable, Sendable {
                 goal: try container.decodeIfPresent(String.self, forKey: .goal)
             )
         case .pause:
-            self = .pause
+            self = try container.decodeIfPresent(UUID.self, forKey: .sessionID).map(Self.pauseSession) ?? .pause
         case .resume:
-            self = .resume
+            self = try container.decodeIfPresent(UUID.self, forKey: .sessionID).map(Self.resumeSession) ?? .resume
         case .finish:
-            self = .finish
+            self = try container.decodeIfPresent(UUID.self, forKey: .sessionID).map(Self.finishSession) ?? .finish
         }
     }
 
@@ -116,16 +120,25 @@ public enum CodePulseControlAction: Codable, Equatable, Sendable {
             try container.encodeIfPresent(goal, forKey: .goal)
         case .pause:
             try container.encode(Kind.pause, forKey: .kind)
+        case .pauseSession(let id):
+            try container.encode(Kind.pause, forKey: .kind)
+            try container.encode(id, forKey: .sessionID)
         case .resume:
             try container.encode(Kind.resume, forKey: .kind)
+        case .resumeSession(let id):
+            try container.encode(Kind.resume, forKey: .kind)
+            try container.encode(id, forKey: .sessionID)
         case .finish:
             try container.encode(Kind.finish, forKey: .kind)
+        case .finishSession(let id):
+            try container.encode(Kind.finish, forKey: .kind)
+            try container.encode(id, forKey: .sessionID)
         }
     }
 }
 
 public struct CodePulseControlCommand: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public let schemaVersion: Int
     public let id: UUID
@@ -150,21 +163,79 @@ public enum CodePulseControlResultCode: String, Codable, Equatable, Sendable {
     case invalidStateTransition
     case presetOrProjectNotFound
     case commandRejected
+    case ambiguousSession
     case internalFailure
 }
 
-public struct CodePulseControlStatus: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
-
-    public let schemaVersion: Int
+public struct CodePulseControlSessionStatus: Codable, Equatable, Sendable {
+    public let sessionID: UUID
+    public let projectID: UUID?
+    public let projectName: String?
+    public let workspaceID: UUID?
+    public let workspaceName: String?
+    public let sessionType: String
     public let phase: String
-    public let project: String?
-    public let sessionType: String?
     public let elapsedSeconds: Int
     public let automationControlled: Bool
+    public let developerTools: [String]
+    public let gitCaptureStatus: String?
 
     public init(
-        schemaVersion: Int = CodePulseControlStatus.currentSchemaVersion,
+        sessionID: UUID,
+        projectID: UUID? = nil,
+        projectName: String? = nil,
+        workspaceID: UUID? = nil,
+        workspaceName: String? = nil,
+        sessionType: String,
+        phase: String,
+        elapsedSeconds: Int,
+        automationControlled: Bool,
+        developerTools: [String] = [],
+        gitCaptureStatus: String? = nil
+    ) {
+        self.sessionID = sessionID
+        self.projectID = projectID
+        self.projectName = projectName
+        self.workspaceID = workspaceID
+        self.workspaceName = workspaceName
+        self.sessionType = sessionType
+        self.phase = phase
+        self.elapsedSeconds = max(0, elapsedSeconds)
+        self.automationControlled = automationControlled
+        self.developerTools = developerTools.sorted()
+        self.gitCaptureStatus = gitCaptureStatus
+    }
+}
+
+public struct CodePulseControlStatus: Codable, Equatable, Sendable {
+    public static let currentSchemaVersion = 2
+
+    public let schemaVersion: Int
+    public let sessions: [CodePulseControlSessionStatus]
+    public let legacyPhase: String?
+    public let legacyProject: String?
+    public let legacySessionType: String?
+    public let legacyElapsedSeconds: Int?
+    public let legacyAutomationControlled: Bool?
+
+    public var phase: String { legacyPhase ?? sessions.first?.phase ?? "idle" }
+    public var project: String? { legacyProject ?? sessions.first?.projectName }
+    public var sessionType: String? { legacySessionType ?? sessions.first?.sessionType }
+    public var elapsedSeconds: Int { legacyElapsedSeconds ?? sessions.first?.elapsedSeconds ?? 0 }
+    public var automationControlled: Bool { legacyAutomationControlled ?? sessions.first?.automationControlled ?? false }
+
+    public init(sessions: [CodePulseControlSessionStatus]) {
+        schemaVersion = Self.currentSchemaVersion
+        self.sessions = sessions.sorted { $0.sessionID.uuidString < $1.sessionID.uuidString }
+        legacyPhase = nil
+        legacyProject = nil
+        legacySessionType = nil
+        legacyElapsedSeconds = nil
+        legacyAutomationControlled = nil
+    }
+
+    public init(
+        schemaVersion: Int = 1,
         phase: String,
         project: String? = nil,
         sessionType: String? = nil,
@@ -172,35 +243,79 @@ public struct CodePulseControlStatus: Codable, Equatable, Sendable {
         automationControlled: Bool
     ) {
         self.schemaVersion = schemaVersion
-        self.phase = phase
-        self.project = project
-        self.sessionType = sessionType
-        self.elapsedSeconds = max(0, elapsedSeconds)
-        self.automationControlled = automationControlled
+        sessions = []
+        legacyPhase = phase
+        legacyProject = project
+        legacySessionType = sessionType
+        legacyElapsedSeconds = max(0, elapsedSeconds)
+        legacyAutomationControlled = automationControlled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, sessions, phase, project, sessionType, elapsedSeconds, automationControlled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        if schemaVersion == 2 {
+            sessions = try container.decode([CodePulseControlSessionStatus].self, forKey: .sessions)
+            legacyPhase = nil
+            legacyProject = nil
+            legacySessionType = nil
+            legacyElapsedSeconds = nil
+            legacyAutomationControlled = nil
+        } else if schemaVersion == 1 {
+            sessions = []
+            legacyPhase = try container.decode(String.self, forKey: .phase)
+            legacyProject = try container.decodeIfPresent(String.self, forKey: .project)
+            legacySessionType = try container.decodeIfPresent(String.self, forKey: .sessionType)
+            legacyElapsedSeconds = try container.decode(Int.self, forKey: .elapsedSeconds)
+            legacyAutomationControlled = try container.decode(Bool.self, forKey: .automationControlled)
+        } else {
+            throw CodePulseControlValidationError.unsupportedSchemaVersion(schemaVersion)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        if schemaVersion == 2 {
+            try container.encode(sessions, forKey: .sessions)
+        } else {
+            try container.encode(phase, forKey: .phase)
+            try container.encodeIfPresent(project, forKey: .project)
+            try container.encodeIfPresent(sessionType, forKey: .sessionType)
+            try container.encode(elapsedSeconds, forKey: .elapsedSeconds)
+            try container.encode(automationControlled, forKey: .automationControlled)
+        }
     }
 }
 
 public struct CodePulseControlResponse: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public let schemaVersion: Int
     public let commandID: UUID
     public let result: CodePulseControlResultCode
     public let message: String
     public let status: CodePulseControlStatus?
+    public let sessionID: UUID?
 
     public init(
         schemaVersion: Int = CodePulseControlResponse.currentSchemaVersion,
         commandID: UUID,
         result: CodePulseControlResultCode,
         message: String,
-        status: CodePulseControlStatus? = nil
+        status: CodePulseControlStatus? = nil,
+        sessionID: UUID? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.commandID = commandID
         self.result = result
         self.message = String(message.prefix(CodePulseControlLimits.maximumMessageLength))
         self.status = status
+        self.sessionID = sessionID
     }
 }
 
@@ -220,7 +335,7 @@ public enum CodePulseControlCommandCodec {
     private static let allowedCommandFields: Set<String> = [
         "schemaVersion", "id", "issuedAt", "action"
     ]
-    private static let allowedActionFields: [String: Set<String>] = [
+    private static let v1AllowedActionFields: [String: Set<String>] = [
         "status": ["kind"],
         "startPreset": ["kind", "name"],
         "startPresetID": ["kind", "presetID"],
@@ -228,6 +343,15 @@ public enum CodePulseControlCommandCodec {
         "pause": ["kind"],
         "resume": ["kind"],
         "finish": ["kind"]
+    ]
+    private static let v2AllowedActionFields: [String: Set<String>] = [
+        "status": ["kind"],
+        "startPreset": ["kind", "name"],
+        "startPresetID": ["kind", "presetID"],
+        "startManual": ["kind", "projectName", "sessionType", "goal"],
+        "pause": ["kind", "sessionID"],
+        "resume": ["kind", "sessionID"],
+        "finish": ["kind", "sessionID"]
     ]
 
     public static func encode(_ command: CodePulseControlCommand) throws -> Data {
@@ -249,9 +373,14 @@ public enum CodePulseControlCommandCodec {
             throw CodePulseControlValidationError.invalidEnvelope
         }
         try requireOnly(allowedCommandFields, in: root)
+        guard let schemaVersion = root["schemaVersion"] as? Int,
+              schemaVersion == 1 || schemaVersion == 2 else {
+            throw CodePulseControlValidationError.unsupportedSchemaVersion(root["schemaVersion"] as? Int ?? -1)
+        }
+        let allowedByKind = schemaVersion == 1 ? v1AllowedActionFields : v2AllowedActionFields
         guard let action = root["action"] as? [String: Any],
               let kind = action["kind"] as? String,
-              let allowedFields = allowedActionFields[kind] else {
+              let allowedFields = allowedByKind[kind] else {
             throw CodePulseControlValidationError.invalidEnvelope
         }
         try requireOnly(allowedFields, in: action)
@@ -288,7 +417,7 @@ public enum CodePulseControlCommandValidator {
         _ command: CodePulseControlCommand,
         now: Date = Date()
     ) throws -> CodePulseControlCommand {
-        guard command.schemaVersion == CodePulseControlCommand.currentSchemaVersion else {
+        guard command.schemaVersion == 1 || command.schemaVersion == CodePulseControlCommand.currentSchemaVersion else {
             throw CodePulseControlValidationError.unsupportedSchemaVersion(command.schemaVersion)
         }
 
@@ -302,7 +431,7 @@ public enum CodePulseControlCommandValidator {
 
         let action: CodePulseControlAction
         switch command.action {
-        case .status, .pause, .resume, .finish, .startPresetID:
+        case .status, .pause, .pauseSession, .resume, .resumeSession, .finish, .finishSession, .startPresetID:
             action = command.action
         case .startPreset(let name):
             action = .startPreset(name: try cleanRequired(
@@ -383,14 +512,23 @@ public enum CodePulseControlCommandValidator {
 }
 
 public enum CodePulseControlResponseCodec {
-    private static let allowedResponseFields: Set<String> = [
+    private static let v2AllowedResponseFields: Set<String> = [
+        "schemaVersion", "commandID", "result", "message", "status", "sessionID"
+    ]
+    private static let v1AllowedResponseFields: Set<String> = [
         "schemaVersion", "commandID", "result", "message", "status"
     ]
-    private static let allowedStatusFields: Set<String> = [
+    private static let v1AllowedStatusFields: Set<String> = [
         "schemaVersion", "phase", "project", "sessionType", "elapsedSeconds", "automationControlled"
+    ]
+    private static let v2AllowedStatusFields: Set<String> = ["schemaVersion", "sessions"]
+    private static let allowedSessionStatusFields: Set<String> = [
+        "sessionID", "projectID", "projectName", "workspaceID", "workspaceName", "sessionType",
+        "phase", "elapsedSeconds", "automationControlled", "developerTools", "gitCaptureStatus"
     ]
 
     public static func encode(_ response: CodePulseControlResponse) throws -> Data {
+        try validate(response)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
@@ -408,9 +546,17 @@ public enum CodePulseControlResponseCodec {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CodePulseControlValidationError.invalidEnvelope
         }
-        try requireOnly(allowedResponseFields, in: root)
+        guard let schemaVersion = root["schemaVersion"] as? Int,
+              schemaVersion == 1 || schemaVersion == 2 else {
+            throw CodePulseControlValidationError.unsupportedSchemaVersion(root["schemaVersion"] as? Int ?? -1)
+        }
+        try requireOnly(schemaVersion == 1 ? v1AllowedResponseFields : v2AllowedResponseFields, in: root)
         if let status = root["status"] as? [String: Any] {
-            try requireOnly(allowedStatusFields, in: status)
+            let statusVersion = status["schemaVersion"] as? Int
+            try requireOnly(statusVersion == 1 ? v1AllowedStatusFields : v2AllowedStatusFields, in: status)
+            if statusVersion == 2, let sessions = status["sessions"] as? [[String: Any]] {
+                for session in sessions { try requireOnly(allowedSessionStatusFields, in: session) }
+            }
         } else if root["status"] != nil {
             throw CodePulseControlValidationError.invalidEnvelope
         }
@@ -418,11 +564,11 @@ public enum CodePulseControlResponseCodec {
         decoder.dateDecodingStrategy = .iso8601
         do {
             let response = try decoder.decode(CodePulseControlResponse.self, from: data)
-            guard response.schemaVersion == CodePulseControlResponse.currentSchemaVersion else {
+            guard response.schemaVersion == 1 || response.schemaVersion == CodePulseControlResponse.currentSchemaVersion else {
                 throw CodePulseControlValidationError.unsupportedSchemaVersion(response.schemaVersion)
             }
             if let status = response.status,
-               status.schemaVersion != CodePulseControlStatus.currentSchemaVersion {
+               status.schemaVersion != 1 && status.schemaVersion != CodePulseControlStatus.currentSchemaVersion {
                 throw CodePulseControlValidationError.unsupportedSchemaVersion(status.schemaVersion)
             }
             try validate(response)
@@ -445,11 +591,45 @@ public enum CodePulseControlResponseCodec {
     }
 
     private static func validate(_ response: CodePulseControlResponse) throws {
+        guard response.schemaVersion == 1 || response.schemaVersion == 2 else {
+            throw CodePulseControlValidationError.unsupportedSchemaVersion(response.schemaVersion)
+        }
+        if response.schemaVersion == 1 {
+            guard response.sessionID == nil,
+                  response.result != .ambiguousSession else {
+                throw CodePulseControlValidationError.invalidEnvelope
+            }
+        }
+        if let status = response.status,
+           status.schemaVersion != response.schemaVersion {
+            throw CodePulseControlValidationError.invalidEnvelope
+        }
         guard response.message.count <= CodePulseControlLimits.maximumMessageLength,
               isSafeString(response.message) else {
             throw CodePulseControlValidationError.invalidValue("response message")
         }
         guard let status = response.status else { return }
+        if status.schemaVersion == 2 {
+            for session in status.sessions {
+                guard ["running", "paused", "finishing"].contains(session.phase),
+                      session.elapsedSeconds >= 0,
+                      isSafeString(session.sessionType),
+                      session.sessionType.count <= CodePulseControlLimits.maximumSessionTypeLength,
+                      isSafeString(session.phase),
+                      session.developerTools.allSatisfy({
+                          isSafeString($0)
+                              && $0.count <= CodePulseControlLimits.maximumSessionTypeLength
+                      }) else {
+                    throw CodePulseControlValidationError.invalidValue("response status")
+                }
+                for value in [session.projectName, session.workspaceName, session.gitCaptureStatus].compactMap({ $0 }) {
+                    guard value.count <= CodePulseControlLimits.maximumProjectNameLength, isSafeString(value) else {
+                        throw CodePulseControlValidationError.invalidValue("response status")
+                    }
+                }
+            }
+            return
+        }
         guard ["idle", "running", "paused", "finishing"].contains(status.phase),
               status.phase.count <= CodePulseControlLimits.maximumSessionTypeLength,
               isSafeString(status.phase),

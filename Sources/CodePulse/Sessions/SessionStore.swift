@@ -1280,13 +1280,15 @@ final class SessionStore: ObservableObject {
         let isMutation = isControlMutation(rawCommand.action)
         if isInRecoveryMode {
             controlCommandNeedsRetry = isMutation
-            return CodePulseControlResponse(
+            return controlResponse(
+                schemaVersion: rawCommand.schemaVersion,
                 commandID: rawCommand.id,
                 result: .internalFailure,
                 message: isMutation
                     ? "CodePulse saved data is unavailable; recover it before sending lifecycle commands."
                     : "CodePulse saved data is unavailable; recover it before requesting status.",
-                status: controlStatus(at: date)
+                statusState: state,
+                date: date
             )
         }
         if isMutation,
@@ -1298,20 +1300,24 @@ final class SessionStore: ObservableObject {
         do {
             command = try CodePulseControlCommandValidator.sanitized(rawCommand, now: date)
         } catch let error as CodePulseControlValidationError {
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: rawCommand.schemaVersion,
                 commandID: rawCommand.id,
                 result: .commandRejected,
                 message: controlValidationMessage(error),
-                status: controlStatus(at: date)
+                statusState: state,
+                date: date
             )
             recordControlResponseIfNeeded(response, for: rawCommand.action, at: date)
             return response
         } catch {
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: rawCommand.schemaVersion,
                 commandID: rawCommand.id,
                 result: .internalFailure,
                 message: "CodePulse could not validate the local control command.",
-                status: controlStatus(at: date)
+                statusState: state,
+                date: date
             )
             recordControlResponseIfNeeded(response, for: rawCommand.action, at: date)
             return response
@@ -1321,22 +1327,26 @@ final class SessionStore: ObservableObject {
             timestamp: command.issuedAt,
             after: state.localInputAcceptanceDate
         ) {
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .commandRejected,
                 message: "The command was issued before the most recent CodePulse restore.",
-                status: controlStatus(at: date)
+                statusState: state,
+                date: date
             )
             recordControlResponseIfNeeded(response, for: command.action, at: date)
             return response
         }
 
         if command.issuedAt < controlLaunchDate {
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .commandRejected,
                 message: "The command was issued before CodePulse launched.",
-                status: controlStatus(at: date)
+                statusState: state,
+                date: date
             )
             recordControlResponseIfNeeded(response, for: command.action, at: date)
             return response
@@ -1344,15 +1354,27 @@ final class SessionStore: ObservableObject {
 
         switch command.action {
         case .status:
-            return CodePulseControlResponse(
+            if command.schemaVersion == 1, state.activeSessions.count > 1 {
+                return controlResponse(
+                    schemaVersion: 1,
+                    commandID: command.id,
+                    result: .commandRejected,
+                    message: "Concurrent status requires protocol v2 and the current codepulsectl.",
+                    date: date
+                )
+            }
+            return controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .success,
                 message: "CodePulse status retrieved.",
-                status: controlStatus(at: date)
+                statusState: state,
+                date: date
             )
 
         case .startPreset(let name):
             return processControlStart(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 action: command.action,
                 preset: resolvePreset(named: name),
@@ -1361,6 +1383,7 @@ final class SessionStore: ObservableObject {
 
         case .startPresetID(let id):
             return processControlStart(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 action: command.action,
                 preset: state.sessionPresets.first(where: { $0.id == id }).map { .found($0) } ?? .notFound,
@@ -1368,17 +1391,9 @@ final class SessionStore: ObservableObject {
             )
 
         case .startManual(let projectName, let sessionType, let goal):
-            guard state.activeSessions.isEmpty else {
-                return recordControlFailure(
-                    commandID: command.id,
-                    result: .invalidStateTransition,
-                    message: "A session is already active.",
-                    action: command.action,
-                    date: date
-                )
-            }
             guard let project = uniqueProject(named: projectName) else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .presetOrProjectNotFound,
                     message: "The requested project was not found or is ambiguous.",
@@ -1388,6 +1403,7 @@ final class SessionStore: ObservableObject {
             }
             guard !project.isArchived else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .presetOrProjectNotFound,
                     message: "Project \"\(project.name)\" is archived.",
@@ -1397,6 +1413,7 @@ final class SessionStore: ObservableObject {
             }
             guard let type = SessionType(rawValue: sessionType) else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .commandRejected,
                     message: "The requested session type is not supported.",
@@ -1412,6 +1429,7 @@ final class SessionStore: ObservableObject {
                 automationMetadata: nil
             ) else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .invalidStateTransition,
                     message: "A session could not be started from the current state.",
@@ -1419,12 +1437,14 @@ final class SessionStore: ObservableObject {
                     date: date
                 )
             }
-            let responseStatus = controlStatus(for: prepared.state, at: date)
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .success,
-                message: "CodePulse: started manual session.",
-                status: responseStatus
+                message: "CodePulse: started manual session. Session: \(prepared.session.id.uuidString).",
+                statusState: prepared.state,
+                date: date,
+                sessionID: prepared.session.id
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
@@ -1432,13 +1452,32 @@ final class SessionStore: ObservableObject {
             guard committedResponse.result == .success else { return committedResponse }
             now = clock.now
             scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
-            processPendingIntegrationEvents(force: true)
+            if state.activeSessions.count == 1 {
+                processPendingIntegrationEvents(force: true)
+            }
             return committedResponse
 
-        case .pause:
-            guard let sessionID = uniqueEligibleSessionID(for: [.running]),
+        case .pause, .pauseSession:
+            let requestedID: UUID? = {
+                if case .pauseSession(let id) = command.action { return id }
+                return nil
+            }()
+            let eligible = state.activeSessions.filter { $0.phase == .running }
+            if requestedID == nil, eligible.count > 1 {
+                return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
+                    commandID: command.id,
+                    result: command.schemaVersion == 1 ? .commandRejected : .ambiguousSession,
+                    message: "Multiple Sessions can be paused; use --session-id <uuid>.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard let sessionID = requestedID ?? eligible.first?.id,
+                  state.activeSession(id: sessionID)?.phase == .running,
                   let prepared = preparedManualPauseState(sessionID: sessionID, at: date) else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .invalidStateTransition,
                     message: "Pause is not valid while CodePulse is idle or already paused.",
@@ -1446,11 +1485,14 @@ final class SessionStore: ObservableObject {
                     date: date
                 )
             }
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .success,
                 message: "CodePulse: paused session.",
-                status: controlStatus(for: prepared.state, at: date)
+                statusState: prepared.state,
+                date: date,
+                sessionID: sessionID
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
@@ -1459,10 +1501,27 @@ final class SessionStore: ObservableObject {
             refreshAfterLifecycleMutation(for: sessionID)
             return committedResponse
 
-        case .resume:
-            guard let sessionID = uniqueEligibleSessionID(for: [.paused]),
+        case .resume, .resumeSession:
+            let requestedID: UUID? = {
+                if case .resumeSession(let id) = command.action { return id }
+                return nil
+            }()
+            let eligible = state.activeSessions.filter { $0.phase == .paused }
+            if requestedID == nil, eligible.count > 1 {
+                return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
+                    commandID: command.id,
+                    result: command.schemaVersion == 1 ? .commandRejected : .ambiguousSession,
+                    message: "Multiple Sessions can be resumed; use --session-id <uuid>.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard let sessionID = requestedID ?? eligible.first?.id,
+                  state.activeSession(id: sessionID)?.phase == .paused,
                   let prepared = preparedManualResumeState(sessionID: sessionID, at: date) else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .invalidStateTransition,
                     message: "Resume is only valid for a paused session.",
@@ -1470,11 +1529,14 @@ final class SessionStore: ObservableObject {
                     date: date
                 )
             }
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .success,
                 message: "CodePulse: resumed session.",
-                status: controlStatus(for: prepared.state, at: date)
+                statusState: prepared.state,
+                date: date,
+                sessionID: sessionID
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
@@ -1483,10 +1545,27 @@ final class SessionStore: ObservableObject {
             refreshAfterLifecycleMutation(for: sessionID)
             return committedResponse
 
-        case .finish:
-            guard let sessionID = uniqueEligibleSessionID(for: [.running, .paused]),
+        case .finish, .finishSession:
+            let requestedID: UUID? = {
+                if case .finishSession(let id) = command.action { return id }
+                return nil
+            }()
+            let eligible = state.activeSessions.filter { $0.phase == .running || $0.phase == .paused }
+            if requestedID == nil, eligible.count > 1 {
+                return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
+                    commandID: command.id,
+                    result: command.schemaVersion == 1 ? .commandRejected : .ambiguousSession,
+                    message: "Multiple Sessions can be finished; use --session-id <uuid>.",
+                    action: command.action,
+                    date: date
+                )
+            }
+            guard let sessionID = requestedID ?? eligible.first?.id,
+                  [.running, .paused].contains(state.activeSession(id: sessionID)?.phase),
                   let prepared = preparedManualFinishState(sessionID: sessionID, at: date) else {
                 return recordControlFailure(
+                    schemaVersion: command.schemaVersion,
                     commandID: command.id,
                     result: .invalidStateTransition,
                     message: "Finish is not valid while CodePulse is idle or already finishing.",
@@ -1494,11 +1573,14 @@ final class SessionStore: ObservableObject {
                     date: date
                 )
             }
-            let response = CodePulseControlResponse(
+            let response = controlResponse(
+                schemaVersion: command.schemaVersion,
                 commandID: command.id,
                 result: .success,
                 message: "CodePulse: finishing session. Save the outcome in the app.",
-                status: controlStatus(for: prepared.state, at: date)
+                statusState: prepared.state,
+                date: date,
+                sessionID: sessionID
             )
             var nextState = prepared.state
             appendControlResponse(response, to: &nextState, at: date)
@@ -1519,25 +1601,17 @@ final class SessionStore: ObservableObject {
     }
 
     private func processControlStart(
+        schemaVersion: Int,
         commandID: UUID,
         action: CodePulseControlAction,
         preset resolution: PresetResolution,
         date: Date
     ) -> CodePulseControlResponse {
-        guard state.activeSessions.isEmpty else {
-            return recordControlFailure(
-                commandID: commandID,
-                result: .invalidStateTransition,
-                message: "A session is already active.",
-                action: action,
-                date: date
-            )
-        }
-
         let preset: SessionPreset
         switch resolution {
         case .notFound:
             return recordControlFailure(
+                schemaVersion: schemaVersion,
                 commandID: commandID,
                 result: .presetOrProjectNotFound,
                 message: "The requested session preset was not found.",
@@ -1546,6 +1620,7 @@ final class SessionStore: ObservableObject {
             )
         case .ambiguous:
             return recordControlFailure(
+                schemaVersion: schemaVersion,
                 commandID: commandID,
                 result: .commandRejected,
                 message: "The preset name is ambiguous; use --preset-id.",
@@ -1559,6 +1634,7 @@ final class SessionStore: ObservableObject {
         guard preset.isValid,
               preset.projectID == nil || state.projects.contains(where: { $0.id == preset.projectID }) else {
             return recordControlFailure(
+                schemaVersion: schemaVersion,
                 commandID: commandID,
                 result: .presetOrProjectNotFound,
                 message: "The session preset references a missing project.",
@@ -1570,6 +1646,7 @@ final class SessionStore: ObservableObject {
            let project = state.projects.first(where: { $0.id == projectID }),
            project.isArchived {
             return recordControlFailure(
+                schemaVersion: schemaVersion,
                 commandID: commandID,
                 result: .presetOrProjectNotFound,
                 message: "Project \"\(project.name)\" is archived.",
@@ -1585,6 +1662,7 @@ final class SessionStore: ObservableObject {
             automationMetadata: nil
         ) else {
             return recordControlFailure(
+                schemaVersion: schemaVersion,
                 commandID: commandID,
                 result: .invalidStateTransition,
                 message: "A session could not be started from the current state.",
@@ -1593,11 +1671,14 @@ final class SessionStore: ObservableObject {
             )
         }
 
-        let response = CodePulseControlResponse(
+        let response = controlResponse(
+            schemaVersion: schemaVersion,
             commandID: commandID,
             result: .success,
-            message: "CodePulse: started manual session from \(preset.name).",
-            status: controlStatus(for: prepared.state, at: date)
+            message: "CodePulse: started manual session from \(preset.name). Session: \(prepared.session.id.uuidString).",
+            statusState: prepared.state,
+            date: date,
+            sessionID: prepared.session.id
         )
         var nextState = prepared.state
         appendControlResponse(response, to: &nextState, at: date)
@@ -1605,7 +1686,9 @@ final class SessionStore: ObservableObject {
         guard committedResponse.result == .success else { return committedResponse }
         now = clock.now
         scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
-        processPendingIntegrationEvents(force: true)
+        if state.activeSessions.count == 1 {
+            processPendingIntegrationEvents(force: true)
+        }
         return committedResponse
     }
 
@@ -1626,18 +1709,51 @@ final class SessionStore: ObservableObject {
         return matches.first
     }
 
+    private func controlResponse(
+        schemaVersion: Int,
+        commandID: UUID,
+        result: CodePulseControlResultCode,
+        message: String,
+        statusState: AppState? = nil,
+        date: Date,
+        sessionID: UUID? = nil
+    ) -> CodePulseControlResponse {
+        let wireResult: CodePulseControlResultCode = schemaVersion == 1 && result == .ambiguousSession
+            ? .commandRejected
+            : result
+        let status: CodePulseControlStatus?
+        if let statusState {
+            status = schemaVersion == 1
+                ? (statusState.activeSessions.count <= 1 ? legacyControlStatus(for: statusState, at: date) : nil)
+                : controlStatus(for: statusState, at: date)
+        } else {
+            status = nil
+        }
+        return CodePulseControlResponse(
+            schemaVersion: schemaVersion,
+            commandID: commandID,
+            result: wireResult,
+            message: message,
+            status: status,
+            sessionID: schemaVersion == 1 ? nil : sessionID
+        )
+    }
+
     private func recordControlFailure(
+        schemaVersion: Int,
         commandID: UUID,
         result: CodePulseControlResultCode,
         message: String,
         action: CodePulseControlAction,
         date: Date
     ) -> CodePulseControlResponse {
-        let response = CodePulseControlResponse(
+        let response = controlResponse(
+            schemaVersion: schemaVersion,
             commandID: commandID,
             result: result,
             message: message,
-            status: controlStatus(at: date)
+            statusState: state,
+            date: date
         )
         recordControlResponseIfNeeded(response, for: action, at: date)
         return response
@@ -1660,11 +1776,13 @@ final class SessionStore: ObservableObject {
     ) -> CodePulseControlResponse {
         guard commit(nextState, critical: true, normalizeAutomation: false) else {
             controlCommandNeedsRetry = true
-            return CodePulseControlResponse(
+            return controlResponse(
+                schemaVersion: response.schemaVersion,
                 commandID: response.commandID,
                 result: .internalFailure,
                 message: "CodePulse could not durably save this lifecycle change; retry the command.",
-                status: controlStatus(at: clock.now)
+                statusState: state,
+                date: clock.now
             )
         }
         return response
@@ -1697,7 +1815,8 @@ final class SessionStore: ObservableObject {
     private func isControlMutation(_ action: CodePulseControlAction) -> Bool {
         switch action {
         case .status: return false
-        case .startPreset, .startPresetID, .startManual, .pause, .resume, .finish: return true
+        case .startPreset, .startPresetID, .startManual, .pause, .pauseSession,
+             .resume, .resumeSession, .finish, .finishSession: return true
         }
     }
 
@@ -1705,20 +1824,51 @@ final class SessionStore: ObservableObject {
         for state: AppState,
         at date: Date
     ) -> CodePulseControlStatus {
-        guard let session = state.soleActiveSession else {
+        let sessions = state.activeSessions.map { session -> CodePulseControlSessionStatus in
+            let project = session.projectID.flatMap { id in state.projects.first { $0.id == id } }
+            let workspace = project.flatMap { project in state.workspaces.first { $0.id == project.workspaceID } }
+            let tools = Set(session.developerToolContexts.map(\.tool.title)).sorted()
+            let gitStatus: String? = gitCaptureStatus(for: session.id).map { status in
+                switch status {
+                case .scheduled: return "scheduled"
+                case .running: return "running"
+                case .succeeded: return "succeeded"
+                case .failed: return "failed"
+                case .ambiguous: return "ambiguous"
+                }
+            }
+            return CodePulseControlSessionStatus(
+                sessionID: session.id,
+                projectID: session.projectID,
+                projectName: session.projectName.flatMap { $0.isEmpty ? nil : $0 },
+                workspaceID: workspace?.id,
+                workspaceName: workspace?.name,
+                sessionType: session.type.rawValue,
+                phase: session.phase.rawValue,
+                elapsedSeconds: Int(max(0, session.activeDuration(at: date)).rounded(.down)),
+                automationControlled: session.automationMetadata?.controlEnabled == true,
+                developerTools: tools,
+                gitCaptureStatus: gitStatus
+            )
+        }
+        return CodePulseControlStatus(sessions: sessions)
+    }
+
+    private func legacyControlStatus(for state: AppState, at date: Date) -> CodePulseControlStatus {
+        guard let session = state.activeSessions.first else {
             return CodePulseControlStatus(
+                schemaVersion: 1,
                 phase: SessionPhase.idle.rawValue,
                 elapsedSeconds: 0,
                 automationControlled: false
             )
         }
-
-        let elapsed = Int(max(0, session.activeDuration(at: date)).rounded(.down))
         return CodePulseControlStatus(
+            schemaVersion: 1,
             phase: session.phase.rawValue,
             project: session.projectName.flatMap { $0.isEmpty ? nil : $0 },
             sessionType: session.type.rawValue,
-            elapsedSeconds: elapsed,
+            elapsedSeconds: Int(max(0, session.activeDuration(at: date)).rounded(.down)),
             automationControlled: session.automationMetadata?.controlEnabled == true
         )
     }
@@ -1750,20 +1900,25 @@ final class SessionStore: ObservableObject {
         guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return 0 }
         let day = DateInterval(start: dayStart, end: dayEnd)
 
-        let completedTotal = state.completedSessions.reduce(into: 0) { total, session in
-            total += session.activeDuration(in: day)
+        let completed = state.completedSessions.flatMap { session in
+            ActivityCoverageCalculator.activeIntervals(
+                startedAt: session.startedAt,
+                endedAt: session.endedAt,
+                pauseIntervals: session.pauseIntervals,
+                in: day,
+                referenceDate: referenceDate
+            )
         }
-        // This compatibility metric is intentionally fail-closed while the
-        // later overlap-safe Active Time engine is out of scope. Preserve the
-        // existing one-session value, but never sum concurrent live durations
-        // into a misleading wall-clock total.
-        let activeTotal: TimeInterval
-        if state.activeSessions.count == 1, let session = state.soleActiveSession {
-            activeTotal = session.activeDuration(in: day, referenceDate: referenceDate)
-        } else {
-            activeTotal = 0
+        let active = state.activeSessions.flatMap { session in
+            ActivityCoverageCalculator.activeIntervals(
+                startedAt: session.startedAt,
+                endedAt: session.endedAt,
+                pauseIntervals: session.pauseIntervals,
+                in: day,
+                referenceDate: referenceDate
+            )
         }
-        return max(0, completedTotal + activeTotal)
+        return ActivityCoverageCalculator.unionDuration(completed + active)
     }
 
     var historyGroups: [DaySessionGroup] {
