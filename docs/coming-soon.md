@@ -135,7 +135,7 @@ assign productivity scores, or analyze data in the cloud.
 
 ## Concurrent Sessions & Thread-Native Tracking
 
-**Status:** Implemented
+**Status:** Release Candidate
 **Target:** v1.5.0
 **Normative specification:** [`docs/v1.5-concurrent-sessions.md`](v1.5-concurrent-sessions.md)
 
