@@ -82,7 +82,7 @@ struct FocusInsights: Equatable {
 
     var sustainedFocusShare: Double? {
         guard totalActiveDuration > 0 else { return nil }
-        return sustainedFocusDuration / totalActiveDuration
+        return min(1, max(0, sustainedFocusDuration / totalActiveDuration))
     }
 
     var peakFocusHour: Int? {
@@ -922,47 +922,70 @@ enum InsightsCalculator {
         from segments: [ActiveSegment],
         grace: TimeInterval
     ) -> Int {
-        struct ProjectActivity {
-            let start: Date
-            let end: Date
-            let identity: ProjectIdentity?
+        struct ProjectBoundary {
+            var starting: [ProjectIdentity] = []
+            var ending: [ProjectIdentity] = []
         }
-        let activities = Dictionary(grouping: segments, by: \.context).flatMap { context, values in
-            ActivityCoverageCalculator.union(values.map {
+
+        var boundaries: [Date: ProjectBoundary] = [:]
+        for (context, values) in Dictionary(grouping: segments, by: \.context) {
+            guard let identity = context.projectIdentity else { continue }
+            for interval in ActivityCoverageCalculator.union(values.map {
                 DateInterval(start: $0.start, end: $0.end)
-            }).map {
-                ProjectActivity(start: $0.start, end: $0.end, identity: context.projectIdentity)
+            }) {
+                boundaries[interval.start, default: ProjectBoundary()].starting.append(identity)
+                boundaries[interval.end, default: ProjectBoundary()].ending.append(identity)
             }
         }
-        let byStart = activities.sorted { lhs, rhs in
-            if lhs.start != rhs.start { return lhs.start < rhs.start }
-            return lhs.end < rhs.end
-        }
-        let startCounts = Dictionary(grouping: activities, by: \.start).mapValues(\.count)
-        let endCounts = Dictionary(grouping: activities, by: \.end).mapValues(\.count)
 
-        return activities.reduce(into: 0) { count, previous in
-            var lower = 0
-            var upper = byStart.count
-            while lower < upper {
-                let middle = lower + (upper - lower) / 2
-                if byStart[middle].start < previous.end {
-                    lower = middle + 1
+        var activeCounts: [ProjectIdentity: Int] = [:]
+        var pendingGap: (identity: ProjectIdentity, startedAt: Date)?
+        var switchCount = 0
+
+        for timestamp in boundaries.keys.sorted() {
+            guard let boundary = boundaries[timestamp] else { continue }
+            let before = Set(activeCounts.keys)
+
+            // Equal timestamps are one atomic coverage transition. Applying
+            // all ends and starts before inspecting the new set prevents
+            // source, UUID, or dictionary ordering from choosing an owner.
+            for identity in boundary.ending {
+                guard let count = activeCounts[identity] else { continue }
+                if count == 1 {
+                    activeCounts.removeValue(forKey: identity)
                 } else {
-                    upper = middle
+                    activeCounts[identity] = count - 1
                 }
             }
-            guard lower < byStart.count else { return }
-            let next = byStart[lower]
-            let gap = next.start.timeIntervalSince(previous.end)
-            guard gap <= grace,
-                  startCounts[next.start] == 1,
-                  endCounts[previous.end] == 1,
-                  let previousIdentity = previous.identity,
-                  let nextIdentity = next.identity,
-                  previousIdentity != nextIdentity else { return }
-            count += 1
+            for identity in boundary.starting {
+                activeCounts[identity, default: 0] += 1
+            }
+
+            let after = Set(activeCounts.keys)
+            if before.count == 1, after.isEmpty, let identity = before.first {
+                pendingGap = (identity, timestamp)
+            } else if before.isEmpty, after.count == 1, let identity = after.first {
+                if let pendingGap,
+                   timestamp.timeIntervalSince(pendingGap.startedAt) <= grace,
+                   pendingGap.identity != identity {
+                    switchCount += 1
+                }
+                pendingGap = nil
+            } else if before.count == 1,
+                      after.count == 1,
+                      let previous = before.first,
+                      let next = after.first,
+                      previous != next {
+                // A direct touching transition has no materialized empty
+                // interval, but remains an unambiguous zero-gap switch.
+                switchCount += 1
+                pendingGap = nil
+            } else if !after.isEmpty {
+                pendingGap = nil
+            }
         }
+
+        return switchCount
     }
 
     private static func bucketSustainedInterval(

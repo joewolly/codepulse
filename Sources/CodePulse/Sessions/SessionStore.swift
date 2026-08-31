@@ -1452,7 +1452,9 @@ final class SessionStore: ObservableObject {
             guard committedResponse.result == .success else { return committedResponse }
             now = clock.now
             scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
-            processPendingIntegrationEvents(force: true)
+            if state.activeSessions.count == 1 {
+                processPendingIntegrationEvents(force: true)
+            }
             return committedResponse
 
         case .pause, .pauseSession:
@@ -1684,7 +1686,9 @@ final class SessionStore: ObservableObject {
         guard committedResponse.result == .success else { return committedResponse }
         now = clock.now
         scheduleStartGitCaptureIfNeeded(for: prepared.session, folderURL: prepared.folderURL)
-        processPendingIntegrationEvents(force: true)
+        if state.activeSessions.count == 1 {
+            processPendingIntegrationEvents(force: true)
+        }
         return committedResponse
     }
 

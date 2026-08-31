@@ -392,6 +392,158 @@ final class Phase5InsightsControlTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(value.dailyActivity.first { local.isDate($0.date, inSameDayAs: start) }).duration, 3_600)
     }
 
+    func test57GlobalProjectCoverageCountsOneSwitchAfterDuplicatePriorConcurrency() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let value = summary(completed: [
+            completed(0, 600, projectID: a),
+            completed(0, 720, projectID: c),
+            completed(900, 1_500, projectID: b)
+        ])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 1)
+    }
+
+    func test58GlobalProjectCoverageRejectsConcurrencyBridgedSwitch() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let value = summary(completed: [
+            completed(0, 600, projectID: a),
+            completed(300, 1_200, projectID: c),
+            completed(900, 1_500, projectID: b)
+        ])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 0)
+    }
+
+    func test59TouchingSequentialProjectsCountAsZeroGapSwitch() {
+        let value = summary(completed: [
+            completed(0, 600, projectID: UUID()),
+            completed(600, 1_200, projectID: UUID())
+        ])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 1)
+    }
+
+    func test60AmbiguousSimultaneousProjectStartsFailClosed() {
+        let value = summary(completed: [
+            completed(0, 600, projectID: UUID()),
+            completed(600, 1_200, projectID: UUID()),
+            completed(600, 1_200, projectID: UUID())
+        ])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 0)
+    }
+
+    func test61AmbiguousSimultaneousProjectEndsFailClosed() {
+        let value = summary(completed: [
+            completed(0, 600, projectID: UUID()),
+            completed(300, 600, projectID: UUID()),
+            completed(900, 1_500, projectID: UUID())
+        ])
+        XCTAssertEqual(value.focusInsights.projectSwitchCount, 0)
+    }
+
+    func test62SustainedFocusShareIsExplicitlyBounded() {
+        let hours = (0..<24).map { HourlyFocusActivity(hour: $0, duration: 0) }
+        let normal = FocusInsights(
+            totalActiveDuration: 100, focusBlockCount: 1, longestFocusBlockDuration: 50,
+            averageFocusBlockDuration: 50, sustainedFocusBlockCount: 1, sustainedFocusDuration: 50,
+            projectSwitchCount: 0, hourlySustainedFocus: hours, bestFocusDay: nil
+        )
+        let over = FocusInsights(
+            totalActiveDuration: 100, focusBlockCount: 1, longestFocusBlockDuration: 150,
+            averageFocusBlockDuration: 150, sustainedFocusBlockCount: 1, sustainedFocusDuration: 150,
+            projectSwitchCount: 0, hourlySustainedFocus: hours, bestFocusDay: nil
+        )
+        let negative = FocusInsights(
+            totalActiveDuration: 100, focusBlockCount: 0, longestFocusBlockDuration: 0,
+            averageFocusBlockDuration: 0, sustainedFocusBlockCount: 0, sustainedFocusDuration: -1,
+            projectSwitchCount: 0, hourlySustainedFocus: hours, bestFocusDay: nil
+        )
+        XCTAssertEqual(normal.sustainedFocusShare, 0.5)
+        XCTAssertEqual(over.sustainedFocusShare, 1)
+        XCTAssertEqual(negative.sustainedFocusShare, 0)
+        XCTAssertNil(FocusInsights.empty.sustainedFocusShare)
+    }
+
+    func test63ConcurrentControlStartDefersPendingEventForExistingSession() throws {
+        let folder = FileManager.default.temporaryDirectory.path
+        let projectA = ProjectRecord(name: "A", folderPath: folder, createdAt: base)
+        let projectB = ProjectRecord(name: "B", createdAt: base)
+        let context = DeveloperToolSessionContext(
+            tool: .codex, externalSessionID: "thread-a", workingDirectory: folder,
+            firstActivityAt: base, lastActivityAt: base, eventCount: 1
+        )
+        let existingID = UUID()
+        let existing = ActiveSession(
+            id: existingID, projectID: projectA.id, projectName: projectA.name,
+            startedAt: base, developerToolContexts: [context]
+        )
+        var state = AppState(projects: [projectA, projectB])
+        state.activeSessions = [existing]
+        let clock = Phase5Clock(base.addingTimeInterval(60))
+        let consumer = Phase5PendingEventConsumer()
+        let store = makeStore(state: state, clock: clock, consumer: consumer)
+        consumer.pendingEvent = DeveloperToolEvent(
+            tool: .codex, externalSessionID: "thread-a", eventType: .activity,
+            timestamp: base.addingTimeInterval(30), workingDirectory: folder, model: "gpt-5"
+        )
+
+        let response = store.processControlCommand(CodePulseControlCommand(
+            issuedAt: clock.now,
+            action: .startManual(projectName: "B", sessionType: "coding", goal: nil)
+        ), at: clock.now)
+
+        XCTAssertEqual(response.result, .success)
+        let newID = try XCTUnwrap(response.sessionID)
+        XCTAssertNotEqual(newID, existingID)
+        XCTAssertEqual(store.state.activeSession(id: existingID)?.phase, .running)
+        XCTAssertEqual(store.state.activeSession(id: existingID)?.pauseIntervals, [])
+        XCTAssertEqual(store.state.activeSession(id: existingID)?.developerToolContexts, [context])
+        XCTAssertNotNil(store.state.activeSession(id: newID))
+        XCTAssertFalse(consumer.didCleanUp)
+
+        clock.now = clock.now.addingTimeInterval(6)
+        store.refresh()
+        XCTAssertEqual(store.state.activeSession(id: existingID)?.developerToolContexts.first?.eventCount, 2)
+        XCTAssertEqual(store.state.activeSession(id: existingID)?.developerToolContexts.first?.model, "gpt-5")
+        XCTAssertTrue(consumer.didCleanUp)
+    }
+
+    func test64V2StatusDeveloperToolsGitCaptureAndWorkspaceArePerSession() throws {
+        let actualWorkspace = WorkspaceRecord(name: "Actual")
+        let selectedWorkspace = WorkspaceRecord(name: "Selected Elsewhere")
+        let projectA = ProjectRecord(workspaceID: actualWorkspace.id, name: "A", createdAt: base)
+        let projectB = ProjectRecord(name: "B", createdAt: base)
+        let codex = developerContext(.codex, externalID: "codex-a")
+        let openCode = developerContext(.opencode, externalID: "opencode-b")
+        let a = ActiveSession(
+            id: fixedID, projectID: projectA.id, projectName: projectA.name,
+            startedAt: base, developerToolContexts: [codex]
+        )
+        let bID = UUID()
+        let b = ActiveSession(
+            id: bID, projectID: projectB.id, projectName: projectB.name,
+            startedAt: base, developerToolContexts: [openCode, codex]
+        )
+        var state = AppState(
+            workspaces: [actualWorkspace, selectedWorkspace], projects: [projectA, projectB]
+        )
+        state.settings.selectedWorkspaceID = selectedWorkspace.id
+        state.activeSessions = [a, b]
+        let store = makeStore(state: state, now: base.addingTimeInterval(60))
+        store.setGitCaptureStateForPresentationTesting(
+            SessionGitCaptureState(startStatus: .running, activeStage: .start), sessionID: fixedID
+        )
+        store.setGitCaptureStateForPresentationTesting(
+            SessionGitCaptureState(startStatus: .failed), sessionID: bID
+        )
+
+        let statuses = Dictionary(uniqueKeysWithValues: store.controlStatus().sessions.map { ($0.sessionID, $0) })
+        XCTAssertEqual(statuses[fixedID]?.developerTools, ["Codex"])
+        XCTAssertEqual(statuses[bID]?.developerTools, ["Codex", "OpenCode"])
+        XCTAssertEqual(statuses[fixedID]?.gitCaptureStatus, "running")
+        XCTAssertEqual(statuses[bID]?.gitCaptureStatus, "failed")
+        XCTAssertEqual(statuses[fixedID]?.workspaceID, actualWorkspace.id)
+        XCTAssertEqual(statuses[fixedID]?.workspaceName, "Actual")
+        XCTAssertNil(statuses[bID]?.workspaceID)
+    }
+
     private var fixedID: UUID { UUID(uuidString: "00000000-0000-0000-0000-000000000001")! }
     private func span(_ start: TimeInterval, _ end: TimeInterval) -> DateInterval { DateInterval(start: base.addingTimeInterval(start), end: base.addingTimeInterval(end)) }
     private func completed(_ start: TimeInterval, _ end: TimeInterval, projectID: UUID? = nil, pauses: [PauseInterval] = []) -> CompletedSession { CompletedSession(id: UUID(), projectID: projectID, projectName: projectID == nil ? nil : "P", goal: nil, outcome: nil, startedAt: base.addingTimeInterval(start), endedAt: base.addingTimeInterval(end), pauseIntervals: pauses) }
@@ -399,7 +551,23 @@ final class Phase5InsightsControlTests: XCTestCase {
     private func summary(completed: [CompletedSession]) -> InsightsSummary { InsightsCalculator.summary(state: AppState(completedSessions: completed), calendar: calendar, referenceDate: base.addingTimeInterval(3_600), interval: span(-3_600, 3_600), comparisonInterval: nil, timeframe: .allTime) }
     private func assertMetrics(_ values: [(TimeInterval, TimeInterval)], active: TimeInterval, activity: TimeInterval) { let value = summary(completed: values.map { completed($0.0, $0.1) }); XCTAssertEqual(value.activeTime, active); XCTAssertEqual(value.sessionActivity, activity) }
     private func json<T: Encodable>(_ value: T) throws -> [String: Any] { try JSONSerialization.jsonObject(with: JSONEncoder.iso8601.encode(value)) as! [String: Any] }
-    private func makeStore(state: AppState, now: Date) -> SessionStore { SessionStore(persistence: Phase5Persistence(state), clock: Phase5Clock(now), calendar: calendar, automaticallyRefresh: false) }
+    private func makeStore(state: AppState, now: Date) -> SessionStore { makeStore(state: state, clock: Phase5Clock(now)) }
+    private func makeStore(
+        state: AppState,
+        clock: Phase5Clock,
+        consumer: DeveloperToolEventConsuming = Phase5PendingEventConsumer()
+    ) -> SessionStore {
+        SessionStore(
+            persistence: Phase5Persistence(state), clock: clock, calendar: calendar,
+            developerToolEventConsumer: consumer, automaticallyRefresh: false
+        )
+    }
+    private func developerContext(_ tool: DeveloperTool, externalID: String) -> DeveloperToolSessionContext {
+        DeveloperToolSessionContext(
+            tool: tool, externalSessionID: externalID, workingDirectory: "/tmp",
+            firstActivityAt: base, lastActivityAt: base, eventCount: 1
+        )
+    }
     private func concurrentPresetStore() -> (SessionStore, UUID, SessionPreset) {
         let project = ProjectRecord(name: "B", createdAt: base)
         let preset = SessionPreset(name: "B Coding", projectID: project.id, sessionType: .coding)
@@ -420,6 +588,43 @@ private final class Phase5Persistence: StatePersisting {
 private final class Phase5Clock: SessionClock {
     var now: Date
     init(_ now: Date) { self.now = now }
+}
+
+private final class Phase5PendingEventConsumer: DeveloperToolEventConsuming {
+    var pendingEvent: DeveloperToolEvent?
+    private(set) var didCleanUp = false
+    private let attachmentConsumer = DeveloperToolEventConsumer()
+
+    func drainPending(state: inout AppState, now: Date) -> [ValidatedDeveloperToolEvent] {
+        guard let pendingEvent, !didCleanUp else { return [] }
+        return [ValidatedDeveloperToolEvent(
+            event: pendingEvent,
+            sourceURL: URL(fileURLWithPath: "/tmp/\(pendingEvent.id.uuidString).json")
+        )]
+    }
+
+    func attach(_ event: DeveloperToolEvent, to state: inout AppState, now: Date) -> Bool {
+        attachmentConsumer.attach(event, to: &state, now: now)
+    }
+
+    func attach(
+        _ event: DeveloperToolEvent,
+        toSessionID sessionID: UUID,
+        in state: inout AppState,
+        now: Date
+    ) -> Bool {
+        attachmentConsumer.attach(event, toSessionID: sessionID, in: &state, now: now)
+    }
+
+    func markProcessed(
+        _ pending: ValidatedDeveloperToolEvent,
+        in state: inout AppState,
+        at date: Date
+    ) -> Bool { true }
+
+    func cleanup(_ pending: ValidatedDeveloperToolEvent) { didCleanUp = true }
+
+    func processPending(state: inout AppState, now: Date) -> Bool { false }
 }
 
 private extension JSONEncoder {
