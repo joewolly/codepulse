@@ -7,8 +7,8 @@ local workflow detection only when the user enables it: it reacts to supported
 developer-tool lifecycle metadata and, when explicitly configured, the current
 frontmost application's bundle identifier.
 
-The current 1.4-era implementation has one optional active Session. The
-accepted v1.5 architecture (specified in
+The current v1.5 implementation supports a bounded collection of active
+Sessions. The architecture (specified in
 [`docs/v1.5-concurrent-sessions.md`](docs/v1.5-concurrent-sessions.md)) allows
 multiple local active Sessions, but concurrency does not expand data collection
 or introduce a cloud service.
@@ -28,21 +28,20 @@ that state can include:
 - Optional GitHub snapshots such as the normalized repository identity and
   lightweight pull request metadata (number, title, state, draft status, URL,
   and branch names).
-- App settings and the active-session timeline needed for current 1.4 relaunch
-  recovery. Planned v1.5 state may contain a bounded collection of such local
-  timelines.
+- App settings and the bounded active-session timelines needed for relaunch
+  recovery.
 - Session Presets, optional Session Automation rules, configured application
   bundle identifiers/display names, the global automation setting, and the
   bounded ownership/timing metadata needed to recover an automatically started
-  active Session. In planned v1.5 backups, the same bounded ownership/timing
-  metadata may exist for multiple active Sessions. Raw developer-tool event
+  active Session. Portable v3 backups may contain the same bounded metadata for
+  multiple active Sessions. Raw developer-tool event
   files and an unbounded application activation history are not stored in
   backups.
 - Processed developer-integration event identifiers and processing timestamps for
   local deduplication; this bounded ledger retains at most 2,048 entries and
   prunes entries older than 30 days during event processing. It is machine-local
   replay bookkeeping and is omitted from portable backups.
-- Planned v1.5 may also retain a separate retired Developer-Tool Thread ledger
+- v1.5 also retains a separate retired Developer-Tool Thread ledger
   containing only `(tool, externalSessionID)`, `retiredAt`, and
   `lastAcceptedEventAt`. Its effective protection capacity is 2,048 Thread
   identities shared by protected retired entries and active automated
@@ -83,14 +82,14 @@ The integration helper accepts one structured event at a time and atomically
 writes it to the local inbox at
 `~/Library/Application Support/CodePulse/Integrations/Inbox/`. CodePulse does
 not need to be running for an event to wait there. Events are validated,
-matched to a selected project by canonical folder hierarchy in the current 1.4
-implementation, deduplicated, and removed on a best-effort basis after
+matched to a Project by canonical folder hierarchy and exact Thread ownership,
+deduplicated, and removed on a best-effort basis after
 processing. A filesystem failure may leave an inbox file locally; valid events
 remain in the bounded ledger to prevent duplicate attachment. No Project
-sessions and wrong-project events are not attached. The planned v1.5 routing
-contract is defined below and revalidates the resolved Project for every event.
+sessions and wrong-project events are not attached. v1.5 revalidates the
+resolved Project for every event.
 
-Under the planned v1.5 model, metadata for several simultaneous local
+Under v1.5, metadata for several simultaneous local
 Developer-Tool Threads may exist at once. External session IDs are lifecycle
 routing metadata, not message content or Project identity. Every event’s
 canonical working directory is resolved and revalidated against the owning
@@ -107,7 +106,7 @@ Codex adapter does not parse transcript files. The OpenCode adapter does not
 scrape conversation storage or subscribe to content/tool events.
 
 The live CodePulse state can contain developer-tool metadata, the
-processed-event ledger, and (planned v1.5) the bounded retired-Thread ledger.
+processed-event ledger, and the bounded retired-Thread ledger.
 Portable backups retain only developer-tool contexts already attached to saved
 or active sessions; they omit the live processed-event, retired-Thread, and
 separate control ledgers. Restoring a backup resets all three machine-local
@@ -137,11 +136,13 @@ of showing fresh-install onboarding. An explicit restore preserves those
 unreadable bytes in a private local recovery copy; that copy is not treated as
 a portable backup and is not uploaded.
 
-The current 1.4 restore path is guarded by its single active-session state. The
-planned v1.5 path retains the same transactional guard for any running,
+The v1.5 restore path retains the transactional guard for any running,
 paused, or finishing Session and for any in-progress per-Session Git capture;
-its backup-v3 preview reports an active-session count rather than only a
-boolean. These changes affect local state shape, not the privacy boundary.
+its backup-v3 preview reports the validated active-session count. Restore
+replaces local data; it does not merge backups. Portable backups omit processed
+Developer-Tool and control ledgers, retired Threads, reservations, the local
+input boundary, and raw command/response files. These state-shape changes do
+not expand the privacy boundary.
 
 ## CSV and Markdown exports
 

@@ -37,9 +37,9 @@ CodePulse is a local-first macOS application:
   selected repository.
 - Exported backups are user-controlled JSON files. They can contain project
   names and paths, settings, session goals and outcomes, Git metadata,
-  developer-tool lifecycle metadata, and the current active session. Treat
-  backup files as potentially sensitive. The accepted v1.5 backup-v3 contract
-  extends this to a bounded collection of active sessions without changing
+  developer-tool lifecycle metadata, and bounded active Sessions. Treat
+  backup files as potentially sensitive. The v1.5 backup-v3 contract uses a
+  collection of active Sessions without changing
   the local-only trust model.
 
 ### Developer integration boundary
@@ -56,9 +56,9 @@ The OpenCode plugin invokes the absolute helper path directly and passes only
 the validated structured envelope. Neither adapter reads conversation stores or
 content-bearing events. CodePulse only associates an event with an active
 session whose selected project's canonical folder contains the event working
-directory in the current 1.4 implementation; timestamps alone are never
-sufficient, and No Project sessions are excluded. The planned v1.5 routing
-contract is defined below and revalidates the resolved Project for every event.
+directory and exact Thread ownership; timestamps alone are never sufficient,
+and No Project sessions are excluded. v1.5 revalidates the resolved Project for
+every event.
 
 When Session Automation is enabled, a validated event can influence only the
 CodePulse session lifecycle when it matches a user-created Codex/OpenCode rule
@@ -69,11 +69,10 @@ manual lifecycle actions disable control for an automatically started session.
 Automation never executes event content, invokes a developer tool, runs a path
 from an event, changes repository files, or performs GitHub mutations.
 
-### Accepted v1.5 concurrency boundary (planned, not shipped)
+### v1.5 concurrency boundary
 
-The current 1.4-era implementation has one optional active Session. The
-accepted v1.5 contract moves to a bounded collection and requires these
-additional integrity boundaries:
+The current v1.5 implementation uses a bounded collection with these integrity
+boundaries:
 
 - Stable Developer-Tool Thread ownership is `(tool, externalSessionID)`;
   Project names, Project IDs, selected Workspaces, and frontmost applications
@@ -104,7 +103,7 @@ additional integrity boundaries:
 - Every lifecycle mutation resolves one Session UUID. A failure affecting one
   Session cannot bleed into another Session’s phase, outcome, automation
   deadline, save, or history record.
-- Active state is bounded (planned maximum: 16 Sessions) before durable
+- Active state is bounded (maximum: 16 Sessions) before durable
   publication and after decode, migration, backup import, or restore. Malformed
   or replayed events cannot create an unbounded number of Sessions.
 - Working-directory ownership continues to use canonical, validated Project
@@ -154,10 +153,10 @@ into a system path, or executes input as a process.
 
 ### Transactional backup restore
 
-The **Settings → Data → Restore Backup…** workflow accepts only the supported
-versioned JSON envelope and applies a 128 MiB input bound. Required projects,
-saved sessions, active-session data, identifiers, and session timelines are
-validated strictly; replaceable automation configuration is retained or
+The **Settings → Data → Restore Backup…** workflow accepts backup versions 1,
+2, and 3 and applies a 128 MiB input bound. Project/Workspace references, IDs,
+active-session timelines, ownership, and the 16-Session limit are validated
+strictly before replacement; replaceable automation configuration is retained or
 disabled fail-safe when it references missing projects or presets. Restore
 normalizes machine-local state by clearing the control and developer-event
 replay ledgers, relinquishing imported automation ownership, and leaving global
@@ -176,6 +175,11 @@ replaces the live state, and is decoded and compared again before
 CodePulse atomically attempts rollback from the verified pre-restore state and
 reports separately if rollback also fails. User-selected input paths are read
 only; they are not used as managed write destinations.
+
+Restore is blocked while any local Session is running, paused, or finishing,
+or while relevant per-Session Git capture remains in progress. Portable v3
+backups omit replay/control ledgers, retired Thread tombstones, active
+reservations, local input acceptance state, and transient capture jobs.
 
 If an existing primary `state.json` cannot be read, CodePulse enters a
 read-only recovery mode instead of replacing it with a blank state. Explicit

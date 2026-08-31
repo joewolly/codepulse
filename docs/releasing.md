@@ -1,11 +1,11 @@
 # CodePulse macOS release packaging
 
-The current release candidate is CodePulse **1.4.0 (build 1400)**. The
+The current release candidate is CodePulse **1.5.0 (build 1500)**. The
 instructions below describe the local ad-hoc-signed Universal 2 packaging and
 the separate Sparkle update-signing path.
 
-CodePulse 1.4.0 introduces Multi-Project Workspaces with a Workspace foundation
-and persistence, workspace switching, workspace-scoped History and Insights,
+CodePulse 1.5.0 includes Multi-Project Workspaces with persistence, concurrent
+Sessions, workspace switching, workspace-scoped History and Insights,
 and a Workspace Dashboard with deterministic Workspace Intelligence.
 Cross-project activity patterns, Resume Context, and local continuation
 suggestions are derived from existing local data. Projects remain the ownership
@@ -22,7 +22,7 @@ CodePulse is distributed as a native macOS application inside a drag-to-install
 `.dmg`. The package is built from Swift Package Manager source and does not
 use Electron, Catalyst, or an installer package.
 
-CodePulse 1.4.0 is ad-hoc signed locally for macOS runtime compatibility and is
+CodePulse 1.5.0 is ad-hoc signed locally for macOS runtime compatibility and is
 not notarized. No Apple Developer Program account, Developer ID identity, or
 paid signing credential is required to build it. Ad-hoc signing provides bundle
 integrity and a local code identity for macOS bundle registration; it does not
@@ -73,7 +73,7 @@ Developer ID signing.
 The version and build number can be overridden without editing source files:
 
 ```sh
-CODEPULSE_VERSION=1.4.0 CODEPULSE_BUILD=1400 ./script/package_release.sh
+CODEPULSE_VERSION=1.5.0 CODEPULSE_BUILD=1500 ./script/package_release.sh
 ```
 
 ## Output
@@ -83,7 +83,7 @@ The default release writes:
 ```text
 dist/release/
 ├── CodePulse.app
-├── CodePulse-1.4.0.dmg
+├── CodePulse-1.5.0.dmg
 └── checksums.txt
 ```
 
@@ -98,7 +98,7 @@ transparent shell alias.
 ## Sparkle updates
 
 CodePulse uses Sparkle for update discovery and installation. The signed
-appcast provides the v1.4.0 upgrade path for supported existing installations
+appcast provides the v1.5.0 upgrade path for supported existing installations
 once the release candidate is published; the installed app and update archive
 remain independently subject to macOS and Sparkle trust checks.
 
@@ -143,8 +143,8 @@ A release is initiated only after its version/build change has been merged to
 ```sh
 git checkout main
 git pull --ff-only
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 The `GitHub Release` workflow then:
@@ -163,11 +163,11 @@ The `GitHub Release` workflow then:
 Do not manually replace release assets after a successful automated release;
 the appcast signature and published archive are expected to stay in sync.
 
-## Planned v1.5.0 release gates (future requirements)
+## v1.5.0 release validation requirements
 
-These are release-blocking requirements for the future v1.5.0 implementation.
-They are not claims that the current 1.4-era branch has passed them. The
-release candidate may not be tagged or published until the exact v1.5 commit
+These are release-blocking requirements for v1.5.0. The release candidate may
+not be tagged or published until the final reviewed Phase 6 changes are merged
+to `main` and that exact v1.5 commit
 has independently demonstrated:
 
 - schema 3 migration validation for legacy/schema-1, schema-2 states with no
@@ -207,7 +207,7 @@ has independently demonstrated:
 The gates must include the acceptance matrix in
 [`docs/v1.5-concurrent-sessions.md`](v1.5-concurrent-sessions.md), with
 evidence tied to the exact release commit. A successful local build or current
-1.4 test run alone is not v1.5 release evidence.
+local test run alone is not complete v1.5 release evidence.
 
 ## Installation and Gatekeeper
 
@@ -239,7 +239,7 @@ flow is also an appropriate way to make the explicit first-launch decision.
 The checksum file uses the release filename:
 
 ```text
-SHA256 (CodePulse-1.4.0.dmg) = <64 hexadecimal characters>
+SHA256 (CodePulse-1.5.0.dmg) = <64 hexadecimal characters>
 ```
 
 Useful local checks include:
@@ -249,7 +249,7 @@ plutil -p dist/release/CodePulse.app/Contents/Info.plist
 file dist/release/CodePulse.app/Contents/MacOS/CodePulse
 lipo -info dist/release/CodePulse.app/Contents/MacOS/CodePulse
 otool -L dist/release/CodePulse.app/Contents/MacOS/CodePulse
-shasum -a 256 dist/release/CodePulse-1.4.0.dmg
+shasum -a 256 dist/release/CodePulse-1.5.0.dmg
 ```
 
 The default package is ad-hoc signed locally. `codesign --verify --strict`
