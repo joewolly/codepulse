@@ -70,7 +70,7 @@ final class BackupRestoreTests: XCTestCase {
         object["format"] = CodePulseBackup.format
         object["version"] = CodePulseBackup.currentVersion + 1
         XCTAssertThrowsError(try CodePulseBackupCodec.decode(try JSONSerialization.data(withJSONObject: object))) { error in
-            XCTAssertEqual(error as? CodePulseBackupError, .unsupportedVersion(3))
+            XCTAssertEqual(error as? CodePulseBackupError, .unsupportedVersion(4))
             XCTAssertEqual(error.localizedDescription, "This backup was created by a newer CodePulse version and cannot be restored safely.")
         }
 
@@ -94,13 +94,10 @@ final class BackupRestoreTests: XCTestCase {
             endedAt: now.addingTimeInterval(-1),
             pauseIntervals: []
         )
-        let timelineObject = try JSONSerialization.jsonObject(
-            with: CodePulseBackupCodec.encode(
-                state: AppState(completedSessions: [session]),
-                exportedAt: now
-            )
-        ) as! [String: Any]
-        XCTAssertThrowsError(try CodePulseBackupCodec.decode(try JSONSerialization.data(withJSONObject: timelineObject))) { error in
+        XCTAssertThrowsError(try CodePulseBackupCodec.encode(
+            state: AppState(completedSessions: [session]),
+            exportedAt: now
+        )) { error in
             XCTAssertEqual(error as? CodePulseBackupError, .invalidTimeline)
         }
 
@@ -132,11 +129,10 @@ final class BackupRestoreTests: XCTestCase {
             endedAt: now.addingTimeInterval(10),
             pauseIntervals: []
         )
-        let duplicateData = try CodePulseBackupCodec.encode(
+        XCTAssertThrowsError(try CodePulseBackupCodec.encode(
             state: AppState(completedSessions: [duplicate, duplicate]),
             exportedAt: now
-        )
-        XCTAssertThrowsError(try CodePulseBackupCodec.decode(duplicateData)) { error in
+        )) { error in
             XCTAssertEqual(error as? CodePulseBackupError, .duplicateIdentifier("session"))
         }
 
@@ -144,7 +140,6 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertThrowsError(try CodePulseBackupCodec.decode(oversized)) { error in
             XCTAssertEqual(error as? CodePulseBackupError, .inputTooLarge)
         }
-        _ = timelineObject
     }
 
     func testBackupCodecRejectsOverlappingAndFollowingOpenPauseIntervals() throws {
@@ -161,11 +156,10 @@ final class BackupRestoreTests: XCTestCase {
                 PauseInterval(startedAt: now.addingTimeInterval(10), endedAt: now.addingTimeInterval(30))
             ]
         )
-        let overlappingData = try CodePulseBackupCodec.encode(
+        XCTAssertThrowsError(try CodePulseBackupCodec.encode(
             state: AppState(completedSessions: [overlappingSession]),
             exportedAt: now
-        )
-        XCTAssertThrowsError(try CodePulseBackupCodec.decode(overlappingData)) { error in
+        )) { error in
             XCTAssertEqual(error as? CodePulseBackupError, .invalidTimeline)
         }
 
@@ -174,11 +168,10 @@ final class BackupRestoreTests: XCTestCase {
             PauseInterval(startedAt: now.addingTimeInterval(20)),
             PauseInterval(startedAt: now.addingTimeInterval(30), endedAt: now.addingTimeInterval(40))
         ]
-        let openIntervalData = try CodePulseBackupCodec.encode(
+        XCTAssertThrowsError(try CodePulseBackupCodec.encode(
             state: AppState(activeSession: activeSession),
             exportedAt: now
-        )
-        XCTAssertThrowsError(try CodePulseBackupCodec.decode(openIntervalData)) { error in
+        )) { error in
             XCTAssertEqual(error as? CodePulseBackupError, .invalidTimeline)
         }
     }
@@ -326,6 +319,14 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertEqual(persistence.load(), stateB)
         XCTAssertEqual(JSONFilePersistence(fileURL: stateURL).load(), stateB)
         let recovery = try CodePulseBackupCodec.decode(Data(contentsOf: receipt.recoveryBackupURL))
+        XCTAssertEqual(recovery.version, 3)
+        XCTAssertEqual(recovery.state.schemaVersion, 3)
+        let recoveryRoot = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(contentsOf: receipt.recoveryBackupURL)
+        ) as? [String: Any])
+        let recoveryWire = try XCTUnwrap(recoveryRoot["state"] as? [String: Any])
+        XCTAssertNotNil(recoveryWire["activeSessions"])
+        XCTAssertNil(recoveryWire["activeSession"])
         XCTAssertEqual(recovery.state, CodePulseBackupCodec.portableState(from: stateA))
         XCTAssertTrue(receipt.recoveryBackupURL.lastPathComponent.hasPrefix("Pre-Restore Backup "))
         XCTAssertEqual(try permissions(of: stateURL), 0o600)
@@ -360,6 +361,8 @@ final class BackupRestoreTests: XCTestCase {
         XCTAssertEqual(persistence.load(), stateB)
         XCTAssertTrue(receipt.recoveryBackupURL.lastPathComponent.hasPrefix("Pre-Restore Backup "))
         let recovery = try CodePulseBackupCodec.decode(Data(contentsOf: receipt.recoveryBackupURL))
+        XCTAssertEqual(recovery.version, 3)
+        XCTAssertEqual(recovery.state.schemaVersion, 3)
         XCTAssertEqual(recovery.state, CodePulseBackupCodec.portableState(from: stateA))
     }
 
@@ -754,7 +757,7 @@ final class BackupRestoreTests: XCTestCase {
         let candidate = try store.inspectBackup(at: backupURL)
 
         XCTAssertThrowsError(try store.restoreBackup(candidate)) { error in
-            XCTAssertEqual((error as? BackupRestoreError)?.localizedDescription, "Finish or discard the current session before restoring a backup.")
+            XCTAssertEqual((error as? BackupRestoreError)?.localizedDescription, "Finish or discard all active Sessions and wait for Git capture to complete before restoring a backup.")
         }
         XCTAssertEqual(store.state, stateA)
         XCTAssertEqual(persistence.load(), stateA)
@@ -791,7 +794,7 @@ final class BackupRestoreTests: XCTestCase {
             XCTAssertThrowsError(try store.restoreBackup(candidate), "Expected active-session restore to be blocked") { error in
                 XCTAssertEqual(
                     (error as? BackupRestoreError)?.localizedDescription,
-                    "Finish or discard the current session before restoring a backup."
+                    "Finish or discard all active Sessions and wait for Git capture to complete before restoring a backup."
                 )
             }
             XCTAssertEqual(store.state, stateA)

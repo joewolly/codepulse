@@ -11,7 +11,6 @@ enum CodePulseBackupError: LocalizedError, Equatable {
     case invalidTimeline
     case invalidWorkspaceReference
     case duplicateIdentifier(String)
-    case multipleActiveSessionsUnsupported
     case inputTooLarge
 
     static let maximumInputBytes = 128 * 1024 * 1024
@@ -38,8 +37,6 @@ enum CodePulseBackupError: LocalizedError, Equatable {
             return "This backup contains a project that references a missing workspace and cannot be restored safely."
         case .duplicateIdentifier(let field):
             return "This backup contains duplicate \(field) identifiers and cannot be restored safely."
-        case .multipleActiveSessionsUnsupported:
-            return "Backup version 2 cannot represent multiple active Sessions; finish or discard all but one active Session before exporting."
         case .inputTooLarge:
             return "This backup is larger than CodePulse's 128 MiB safety limit."
         }
@@ -48,7 +45,7 @@ enum CodePulseBackupError: LocalizedError, Equatable {
 
 struct CodePulseBackup: Codable, Equatable {
     static let format = "codepulse-backup"
-    static let currentVersion = 2
+    static let currentVersion = 3
 
     let format: String
     let version: Int
@@ -71,10 +68,15 @@ struct CodePulseBackup: Codable, Equatable {
         format = try container.decode(String.self, forKey: .format)
         version = try container.decode(Int.self, forKey: .version)
         exportedAt = try container.decode(Date.self, forKey: .exportedAt)
-        // AppState performs version-1/version-2 migration into canonical
-        // schema 3 in memory. The codec validates the raw wire shape before
-        // this decode, so a schema-3 payload cannot be accepted as v2.
-        state = try container.decode(AppState.self, forKey: .state)
+        if version == Self.currentVersion {
+            var portable = try container.decode(PortableBackupStateV3.self, forKey: .state)
+                .canonicalState
+            portable.seedDeveloperToolReservationsFromActiveOwnership()
+            try AppStateIntegrityValidator.validate(portable)
+            state = portable
+        } else {
+            state = try container.decode(AppState.self, forKey: .state)
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -87,57 +89,49 @@ struct CodePulseBackup: Codable, Equatable {
                 version,
                 .init(
                     codingPath: encoder.codingPath,
-                    debugDescription: "Only backup version 2 can be exported in this phase."
+                    debugDescription: "Only backup version 3 can be exported."
                 )
             )
         }
-        try container.encode(PortableBackupStateV2(state: state), forKey: .state)
+        try container.encode(PortableBackupStateV3(state: state), forKey: .state)
     }
 }
 
-/// Compatibility wire DTO for backup version 2. Canonical AppState remains
-/// schema 3; this representation is used only at the portable serialization
-/// boundary and intentionally has no machine-local processing metadata.
-private struct PortableBackupStateV2: Encodable {
-    let schemaVersion = CodePulseStateSchema.legacyVersion + 1
+/// Current version-3 wire DTO. Canonical AppState remains schema 3; this
+/// representation is used only at the portable serialization boundary and
+/// intentionally has no machine-local processing metadata.
+private struct PortableBackupStateV3: Codable {
+    let schemaVersion: Int
     let workspaces: [WorkspaceRecord]
     let projects: [ProjectRecord]
     let completedSessions: [CompletedSession]
-    let activeSession: ActiveSession?
+    let activeSessions: [ActiveSession]
     let settings: CodePulseSettings
     let sessionPresets: [SessionPreset]
     let automationRules: [SessionAutomationRule]
 
-    init(state: AppState) throws {
-        guard state.activeSessions.count <= 1 else {
-            throw CodePulseBackupError.multipleActiveSessionsUnsupported
-        }
+    init(state: AppState) {
+        schemaVersion = CodePulseStateSchema.currentVersion
         workspaces = state.workspaces
         projects = state.projects
         completedSessions = state.completedSessions
-        activeSession = state.soleActiveSession
+        activeSessions = state.activeSessions
         settings = state.settings
         sessionPresets = state.sessionPresets
         automationRules = state.automationRules
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, workspaces, projects, completedSessions, activeSession
-        case settings, sessionPresets, automationRules
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(schemaVersion, forKey: .schemaVersion)
-        try container.encode(workspaces, forKey: .workspaces)
-        try container.encode(projects, forKey: .projects)
-        try container.encode(completedSessions, forKey: .completedSessions)
-        // Keep the singular field visible even when there is no active
-        // Session; a v2 document never carries an activeSessions collection.
-        try container.encode(activeSession, forKey: .activeSession)
-        try container.encode(settings, forKey: .settings)
-        try container.encode(sessionPresets, forKey: .sessionPresets)
-        try container.encode(automationRules, forKey: .automationRules)
+    var canonicalState: AppState {
+        AppState(
+            schemaVersion: schemaVersion,
+            workspaces: workspaces,
+            projects: projects,
+            completedSessions: completedSessions,
+            activeSessions: activeSessions,
+            settings: settings,
+            sessionPresets: sessionPresets,
+            automationRules: automationRules
+        )
     }
 }
 
@@ -177,17 +171,13 @@ struct CodePulseBackupPreview: Equatable {
 
 enum CodePulseBackupCodec {
     static func encode(state: AppState, exportedAt: Date) throws -> Data {
-        guard state.activeSessions.count <= 1 else {
-            // Fail before the caller can create a file or preview for an
-            // unrepresentable version-2 payload.
-            throw CodePulseBackupError.multipleActiveSessionsUnsupported
-        }
+        try CodePulseBackupValidator.validate(state)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(CodePulseBackup(
             exportedAt: exportedAt,
-            state: portableState(from: state)
+            state: state
         ))
     }
 
@@ -214,7 +204,7 @@ enum CodePulseBackupCodec {
         guard let version = root["version"] as? Int else {
             throw CodePulseBackupError.malformedEnvelope
         }
-        guard version == 1 || version == CodePulseBackup.currentVersion else {
+        guard (1...CodePulseBackup.currentVersion).contains(version) else {
             throw CodePulseBackupError.unsupportedVersion(version)
         }
         guard let state = root["state"] as? [String: Any] else {
@@ -226,7 +216,7 @@ enum CodePulseBackupCodec {
         if version == 1 {
             try rejectWorkspaceMetadataFromLegacyState(state)
         }
-        if version == CodePulseBackup.currentVersion {
+        if version == 2 {
             guard let schemaVersion = state["schemaVersion"] as? Int,
                   schemaVersion == CodePulseStateSchema.legacyVersion + 1 else {
                 throw CodePulseBackupError.missingRequiredField("workspace schema")
@@ -236,6 +226,25 @@ enum CodePulseBackupCodec {
             // as a permanent v2 format.
             guard state["activeSessions"] == nil else {
                 throw CodePulseBackupError.malformedConfiguration
+            }
+            try requireHistoryArray("workspaces", in: state)
+            try validateUniqueIdentifiers("workspaces", label: "workspace", in: state)
+        }
+        if version == CodePulseBackup.currentVersion {
+            guard let schemaVersion = state["schemaVersion"] as? Int,
+                  schemaVersion == CodePulseStateSchema.currentVersion else {
+                throw CodePulseBackupError.missingRequiredField("workspace schema")
+            }
+            guard state.keys.contains("activeSessions"), state["activeSessions"] is [[String: Any]] else {
+                throw CodePulseBackupError.missingRequiredField("active Sessions")
+            }
+            guard !state.keys.contains("activeSession") else {
+                throw CodePulseBackupError.malformedConfiguration
+            }
+            for forbidden in ["developerToolIntegration", "controlProcessing", "localInputAcceptanceDate"] {
+                guard !state.keys.contains(forbidden) else {
+                    throw CodePulseBackupError.malformedConfiguration
+                }
             }
             try requireHistoryArray("workspaces", in: state)
             try validateUniqueIdentifiers("workspaces", label: "workspace", in: state)
@@ -307,6 +316,19 @@ enum CodePulseBackupCodec {
         return backup
     }
 
+    /// Canonical in-memory projection of the portable payload, used by the
+    /// transactional recovery verifier. The v3 wire itself contains none of
+    /// these machine-local fields; minimum active-owner reservations are
+    /// reconstructed only to satisfy canonical state integrity after decode.
+    static func portableState(from state: AppState) -> AppState {
+        var portable = state
+        portable.controlProcessing = nil
+        portable.developerToolIntegration = nil
+        portable.localInputAcceptanceDate = nil
+        portable.seedDeveloperToolReservationsFromActiveOwnership()
+        return portable
+    }
+
     private static func rejectWorkspaceMetadataFromLegacyState(_ state: [String: Any]) throws {
         guard state["workspaces"] == nil else {
             throw CodePulseBackupError.malformedConfiguration
@@ -328,14 +350,6 @@ enum CodePulseBackupCodec {
            settings["selectedWorkspaceID"] != nil {
             throw CodePulseBackupError.malformedConfiguration
         }
-    }
-
-    static func portableState(from state: AppState) -> AppState {
-        var portable = state
-        portable.controlProcessing = nil
-        portable.developerToolIntegration = nil
-        portable.localInputAcceptanceDate = nil
-        return portable
     }
 
     private static func requireHistoryArray(_ key: String, in state: [String: Any]) throws {

@@ -566,8 +566,8 @@ struct SettingsView: View {
             "\(preview.presetCount) \(preview.presetCount == 1 ? "preset" : "presets")",
             "\(preview.automationRuleCount) \(preview.automationRuleCount == 1 ? "automation rule" : "automation rules")"
         ]
-        if preview.includesActiveSession {
-            lines.append("1 active session")
+        if preview.activeSessionCount > 0 {
+            lines.append("\(preview.activeSessionCount) active \(preview.activeSessionCount == 1 ? "session" : "sessions")")
         }
         if let earliest = preview.earliestSavedSessionAt,
            let latest = preview.latestSavedSessionAt {
@@ -589,6 +589,12 @@ struct SettingsView: View {
             "\(preview.completedSessionCount) \(preview.completedSessionCount == 1 ? "session" : "sessions") and \(preview.projectCount) \(preview.projectCount == 1 ? "project" : "projects") were restored.",
             "Session Automation was restored but left disabled."
         ]
+        if preview.activeSessionCount > 0 {
+            lines.insert(
+                "\(preview.activeSessionCount) active \(preview.activeSessionCount == 1 ? "Session was" : "Sessions were") restored.",
+                at: 1
+            )
+        }
         if preview.projectsNeedingRelinkCount > 0 {
             lines.append("Some project folders may need to be relinked.")
         }

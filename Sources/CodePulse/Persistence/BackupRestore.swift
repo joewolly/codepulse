@@ -260,7 +260,7 @@ enum BackupRestoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .activeSession:
-            return "Finish or discard the current session before restoring a backup."
+            return "Finish or discard all active Sessions and wait for Git capture to complete before restoring a backup."
         case .fileUnreadable:
             return "CodePulse could not read the selected backup file."
         case .persistenceUnavailable:
