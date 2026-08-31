@@ -268,6 +268,71 @@ final class Phase6BackupReleaseTests: XCTestCase {
         XCTAssertEqual(CodePulseBackupPreview(backup: v3, state: v3.state).activeSessionCount, 2)
     }
 
+    func testMultiActiveV3RestoreNormalizationPreservesIdentityAndRelinquishesAutomation() throws {
+        let workspace = WorkspaceRecord(name: "Workspace", createdAt: now)
+        let project = ProjectRecord(
+            workspaceID: workspace.id,
+            name: "Project",
+            createdAt: now
+        )
+        let manual = ActiveSession(
+            id: UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000001")!,
+            projectID: project.id,
+            projectName: project.name,
+            startedAt: now
+        )
+        let codex = ownedSession(
+            id: UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000002")!,
+            project: project,
+            thread: "restore-codex",
+            offset: 1
+        )
+        let opencode = ownedSession(
+            id: UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000003")!,
+            project: project,
+            thread: "restore-opencode",
+            offset: 2
+        )
+        var state = AppState(
+            workspaces: [workspace],
+            projects: [project],
+            activeSessions: [manual, codex, opencode],
+            settings: CodePulseSettings(launchAtLogin: false, automationEnabled: true)
+        )
+        state.seedDeveloperToolReservationsFromActiveOwnership()
+        let decoded = try CodePulseBackupCodec.decode(CodePulseBackupCodec.encode(
+            state: state,
+            exportedAt: now
+        ))
+        XCTAssertEqual(decoded.state.activeSessions.map(\.id), state.activeSessions.map(\.id))
+        XCTAssertTrue(decoded.state.activeSessions.dropFirst().allSatisfy {
+            $0.automationMetadata?.controlEnabled == true &&
+            $0.automationMetadata?.claims.allSatisfy(\.isActive) == true
+        })
+
+        let normalized = try BackupRestoreNormalizer.normalize(
+            decoded.state,
+            preservingLaunchAtLogin: true
+        )
+        XCTAssertEqual(normalized.activeSessions.map(\.id), state.activeSessions.map(\.id))
+        XCTAssertEqual(normalized.activeSessions.map(\.projectID), state.activeSessions.map(\.projectID))
+        XCTAssertTrue(normalized.settings.launchAtLogin)
+        XCTAssertFalse(normalized.settings.automationEnabled)
+        XCTAssertNil(normalized.controlProcessing)
+        XCTAssertNil(normalized.localInputAcceptanceDate)
+        XCTAssertTrue(normalized.activeSessions.dropFirst().allSatisfy {
+            $0.automationMetadata?.controlEnabled == false &&
+            $0.automationMetadata?.pendingAutomaticSave == false &&
+            $0.automationMetadata?.claims.allSatisfy { !$0.isActive } == true
+        })
+        XCTAssertEqual(
+            Set(normalized.developerToolIntegration?.reservedDeveloperToolThreads ?? []),
+            normalized.developerToolOwnershipIdentities
+        )
+        XCTAssertTrue(normalized.developerToolIntegration?.retiredDeveloperToolThreads.isEmpty ?? true)
+        XCTAssertTrue(normalized.developerToolIntegration?.processedEvents.isEmpty ?? true)
+    }
+
     func testRestoreIsBlockedDuringPerSessionGitCaptureWithoutPublishingCandidate() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodePulse-Phase6-\(UUID().uuidString)", isDirectory: true)
@@ -324,8 +389,14 @@ final class Phase6BackupReleaseTests: XCTestCase {
         try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    private func ownedSession(project: ProjectRecord, thread: String, offset: TimeInterval) -> ActiveSession {
+    private func ownedSession(
+        id: UUID = UUID(),
+        project: ProjectRecord,
+        thread: String,
+        offset: TimeInterval
+    ) -> ActiveSession {
         ActiveSession(
+            id: id,
             projectID: project.id,
             projectName: project.name,
             startedAt: now.addingTimeInterval(offset),
