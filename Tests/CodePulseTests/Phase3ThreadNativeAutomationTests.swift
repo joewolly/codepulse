@@ -100,6 +100,63 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         XCTAssertTrue(isProcessed(input.id, in: fixture.store.state))
     }
 
+    func testManualAndAutomatedSessionsCoexistWithIndependentUUIDsAndControl() throws {
+        let fixture = try makeFixture()
+        let manualID = try XCTUnwrap(
+            fixture.store.createManualSession(
+                projectID: fixture.project.id,
+                goal: "Manual",
+                at: start
+            )
+        )
+        let manualBefore = try XCTUnwrap(fixture.store.state.activeSession(id: manualID))
+
+        let automatedStart = event(
+            "automated",
+            .activity,
+            at: start.addingTimeInterval(1),
+            path: fixture.folder.path
+        )
+        try send(automatedStart, through: fixture)
+
+        let automatedID = try XCTUnwrap(owner("automated", in: fixture.store.state)?.id)
+        let manual = try XCTUnwrap(fixture.store.state.activeSession(id: manualID))
+        let automated = try XCTUnwrap(fixture.store.state.activeSession(id: automatedID))
+        XCTAssertEqual(fixture.store.state.activeSessions.count, 2)
+        XCTAssertNotEqual(manualID, automatedID)
+        XCTAssertEqual(manual, manualBefore)
+        XCTAssertNil(manual.automationMetadata)
+        XCTAssertTrue(manual.developerToolOwnershipIdentities.isEmpty)
+        XCTAssertEqual(automated.projectID, fixture.project.id)
+        XCTAssertEqual(automated.developerToolOwnershipIdentities, [identity(.codex, "automated")])
+        XCTAssertEqual(automated.automationMetadata?.startedBySource, identitySource(.codex, "automated"))
+        XCTAssertTrue(automated.automationMetadata?.controlEnabled == true)
+
+        let manualBeforeSignal = manual
+        let automatedBeforeSignal = automated
+        let automatedEnd = event(
+            "automated",
+            .sessionEnded,
+            at: start.addingTimeInterval(2),
+            path: fixture.folder.path
+        )
+        try send(automatedEnd, through: fixture)
+
+        let manualAfterSignal = try XCTUnwrap(fixture.store.state.activeSession(id: manualID))
+        let automatedAfterSignal = try XCTUnwrap(fixture.store.state.activeSession(id: automatedID))
+        XCTAssertEqual(manualAfterSignal, manualBeforeSignal)
+        XCTAssertEqual(manualAfterSignal.phase, manualBeforeSignal.phase)
+        XCTAssertEqual(manualAfterSignal.pauseIntervals, manualBeforeSignal.pauseIntervals)
+        XCTAssertEqual(manualAfterSignal.automationMetadata, manualBeforeSignal.automationMetadata)
+        XCTAssertEqual(automatedAfterSignal.id, automatedBeforeSignal.id)
+        XCTAssertEqual(automatedAfterSignal.developerToolOwnershipIdentities, [identity(.codex, "automated")])
+        XCTAssertEqual(automatedAfterSignal.automationMetadata?.claims.first?.source, identitySource(.codex, "automated"))
+        XCTAssertFalse(try XCTUnwrap(automatedAfterSignal.automationMetadata?.claims.first?.isActive))
+        XCTAssertEqual(automatedAfterSignal.developerToolContexts.first?.eventCount, 2)
+        XCTAssertTrue(isProcessed(automatedStart.id, in: fixture.store.state))
+        XCTAssertTrue(isProcessed(automatedEnd.id, in: fixture.store.state))
+    }
+
     func testUnownedEndContextEnrichesOnlyEligibleManualSessionWithoutAutomationAuthority() throws {
         let fixture = try makeFixture(automationEnabled: false)
         let manualID = try XCTUnwrap(fixture.store.createManualSession(
@@ -319,8 +376,35 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
 
     func testApplicationOwnerCoexistsRemainsSingularAndSignalsAreIsolated() throws {
         let fixture = try makeFixture()
-        try send(event("a", .activity, at: start, path: fixture.folder.path), through: fixture)
-        let developerBefore = try XCTUnwrap(owner("a", in: fixture.store.state))
+        let manualID = try XCTUnwrap(
+            fixture.store.createManualSession(
+                projectID: fixture.project.id,
+                goal: "Manual",
+                at: start
+            )
+        )
+        try send(event("codex-a", .activity, at: start.addingTimeInterval(1), path: fixture.folder.path), through: fixture)
+        try send(event("opencode-b", .activity, tool: .opencode, at: start.addingTimeInterval(2), path: fixture.folder.path), through: fixture)
+        for index in 0..<12 {
+            XCTAssertNotNil(
+                fixture.store.createManualSession(
+                    projectID: fixture.project.id,
+                    goal: "Manual \(index)",
+                    at: fixture.clock.now
+                )
+            )
+        }
+
+        let codexID = try XCTUnwrap(owner("codex-a", in: fixture.store.state)?.id)
+        let openCodeID = try XCTUnwrap(owner("opencode-b", tool: .opencode, in: fixture.store.state)?.id)
+        let nonApplicationBefore = Dictionary(
+            uniqueKeysWithValues: fixture.store.state.activeSessions.map { ($0.id, $0) }
+        )
+        XCTAssertEqual(nonApplicationBefore.count, 15)
+        let manualBefore = try XCTUnwrap(nonApplicationBefore[manualID])
+        let codexBefore = try XCTUnwrap(nonApplicationBefore[codexID])
+        let openCodeBefore = try XCTUnwrap(nonApplicationBefore[openCodeID])
+
         let appPreset = SessionPreset(name: "App", projectID: fixture.project.id)
         let app = ApplicationIdentity(bundleIdentifier: "com.example.editor", displayName: "Editor")
         let appRule = SessionAutomationRule(name: "Editor", trigger: .applications(ApplicationAutomationTrigger(applications: [app])), presetID: appPreset.id, pauseDelay: 10, finishDelay: 20, minimumSavedDuration: 0)
@@ -330,14 +414,81 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         fixture.persistence.state = state
         let store = relaunch(fixture)
         store.handleFrontmostApplication(app)
-        let appOwner = try XCTUnwrap(store.state.activeSessions.first { if case .application = $0.automationMetadata?.startedBySource { return true }; return false })
-        XCTAssertEqual(store.state.activeSessions.count, 2)
-        XCTAssertEqual(store.state.activeSession(id: developerBefore.id), developerBefore)
-        store.handleFrontmostApplication(nil)
-        XCTAssertEqual(store.state.activeSession(id: developerBefore.id), developerBefore)
-        store.handleFrontmostApplication(app)
+        let appOwner = try XCTUnwrap(applicationOwner(in: store.state))
+        XCTAssertEqual(store.state.activeSessions.count, ConcurrentSessionLimits.maximumActiveSessions)
         XCTAssertEqual(store.state.activeSessions.filter { if case .application = $0.automationMetadata?.startedBySource { return true }; return false }.count, 1)
-        XCTAssertEqual(store.state.activeSessions.first { $0.id == appOwner.id }?.id, appOwner.id)
+        XCTAssertEqual(Set(store.state.activeSessions.map(\.id)).count, ConcurrentSessionLimits.maximumActiveSessions)
+        XCTAssertEqual(store.state.activeSession(id: manualID), manualBefore)
+        XCTAssertEqual(store.state.activeSession(id: codexID), codexBefore)
+        XCTAssertEqual(store.state.activeSession(id: openCodeID), openCodeBefore)
+        for (sessionID, session) in nonApplicationBefore {
+            XCTAssertEqual(store.state.activeSession(id: sessionID), session)
+        }
+        XCTAssertEqual(appOwner.projectID, fixture.project.id)
+        XCTAssertEqual(appOwner.developerToolOwnershipIdentities, [])
+        XCTAssertEqual(appOwner.automationMetadata?.startedBySource, .application(bundleIdentifier: app.bundleIdentifier))
+        XCTAssertTrue(appOwner.automationMetadata?.controlEnabled == true)
+        XCTAssertTrue(try XCTUnwrap(appOwner.automationMetadata?.claims.first?.isActive))
+
+        store.handleFrontmostApplication(nil)
+        let deactivatedAppOwner = try XCTUnwrap(applicationOwner(in: store.state))
+        XCTAssertEqual(deactivatedAppOwner.id, appOwner.id)
+        XCTAssertFalse(try XCTUnwrap(deactivatedAppOwner.automationMetadata?.claims.first?.isActive))
+        for (sessionID, session) in nonApplicationBefore {
+            XCTAssertEqual(store.state.activeSession(id: sessionID), session)
+        }
+
+        store.handleFrontmostApplication(app)
+        let reactivatedAppOwner = try XCTUnwrap(applicationOwner(in: store.state))
+        XCTAssertEqual(reactivatedAppOwner.id, appOwner.id)
+        XCTAssertTrue(try XCTUnwrap(reactivatedAppOwner.automationMetadata?.claims.first?.isActive))
+        XCTAssertEqual(store.state.activeSessions.filter { if case .application = $0.automationMetadata?.startedBySource { return true }; return false }.count, 1)
+        for (sessionID, session) in nonApplicationBefore {
+            XCTAssertEqual(store.state.activeSession(id: sessionID), session)
+        }
+
+        // A matching application signal while its owner exists must not create
+        // another application Session or touch any unrelated Session.
+        store.handleFrontmostApplication(app)
+        XCTAssertEqual(applicationOwner(in: store.state)?.id, appOwner.id)
+        XCTAssertEqual(store.state.activeSessions.filter { if case .application = $0.automationMetadata?.startedBySource { return true }; return false }.count, 1)
+        XCTAssertNil(
+            store.createManualSession(
+                projectID: fixture.project.id,
+                goal: "Over capacity",
+                at: fixture.clock.now
+            )
+        )
+        XCTAssertEqual(store.state.activeSessions.count, ConcurrentSessionLimits.maximumActiveSessions)
+        XCTAssertEqual(store.state.activeSession(id: manualID), manualBefore)
+        XCTAssertEqual(store.state.activeSession(id: codexID), codexBefore)
+
+        // Developer-tool routing remains exact by (tool, externalSessionID)
+        // even while the application owner occupies the final active slot.
+        let openCodeSignal = event(
+            "opencode-b",
+            .activity,
+            tool: .opencode,
+            at: fixture.clock.now.addingTimeInterval(1),
+            path: fixture.folder.path
+        )
+        try fixture.inbox.write(openCodeSignal)
+        fixture.clock.now = max(fixture.clock.now.addingTimeInterval(5), openCodeSignal.timestamp)
+        store.refresh()
+
+        let openCodeAfterSignal = try XCTUnwrap(store.state.activeSession(id: openCodeID))
+        XCTAssertEqual(openCodeAfterSignal.id, openCodeID)
+        XCTAssertEqual(openCodeAfterSignal.developerToolOwnershipIdentities, [identity(.opencode, "opencode-b")])
+        XCTAssertEqual(
+            openCodeAfterSignal.developerToolContexts.first?.eventCount,
+            (openCodeBefore.developerToolContexts.first?.eventCount ?? 0) + 1
+        )
+        XCTAssertEqual(store.state.activeSession(id: manualID), manualBefore)
+        XCTAssertEqual(store.state.activeSession(id: codexID), codexBefore)
+        for (sessionID, session) in nonApplicationBefore where sessionID != openCodeID {
+            XCTAssertEqual(store.state.activeSession(id: sessionID), session)
+        }
+        XCTAssertTrue(isProcessed(openCodeSignal.id, in: store.state))
     }
 
     func testGitDiscoveryStartsOnlyAfterSuccessfulCriticalAdmission() async throws {
@@ -387,29 +538,118 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
         XCTAssertEqual(saved.store.state.activeSession(id: savedUnrelatedID), savedUnrelatedBefore)
 
         let discarded = try makeFixture(pauseDelay: 1, finishDelay: 2, minimumSavedDuration: 100)
-        try send(event("short", .activity, at: start, path: discarded.folder.path), through: discarded)
+        let discardedStart = event("short", .activity, at: start, path: discarded.folder.path)
+        try send(discardedStart, through: discarded)
         try await settleGitCapture(discarded.store)
         let discardedOwnerID = try XCTUnwrap(owner("short", in: discarded.store.state)?.id)
-        try send(event("short", .sessionEnded, at: start.addingTimeInterval(1), path: discarded.folder.path), through: discarded)
+        let discardedUnrelatedID = try XCTUnwrap(
+            discarded.store.createManualSession(
+                projectID: discarded.project.id,
+                goal: "Unrelated",
+                at: discarded.clock.now
+            )
+        )
+        let discardedUnrelatedBefore = try XCTUnwrap(discarded.store.state.activeSession(id: discardedUnrelatedID))
+        let discardedEnd = event("short", .sessionEnded, at: start.addingTimeInterval(1), path: discarded.folder.path)
+        try send(discardedEnd, through: discarded)
         try await waitUntil("Minimum-duration discard did not remove the owner without publishing history") {
             discarded.store.state.activeSession(id: discardedOwnerID) == nil &&
             !discarded.store.state.completedSessions.contains { $0.id == discardedOwnerID }
         }
         XCTAssertNil(owner("short", in: discarded.store.state))
         XCTAssertTrue(discarded.store.state.completedSessions.isEmpty)
-        try send(event("short", .activity, at: discarded.clock.now, path: discarded.folder.path), through: discarded)
+        XCTAssertEqual(discarded.store.state.activeSession(id: discardedUnrelatedID), discardedUnrelatedBefore)
+        XCTAssertTrue(isProcessed(discardedStart.id, in: discarded.store.state))
+        XCTAssertTrue(isProcessed(discardedEnd.id, in: discarded.store.state))
+        XCTAssertTrue(
+            discarded.store.state.developerToolIntegration?.retiredDeveloperToolThreads.contains {
+                $0.identity == identity(.codex, "short")
+            } == true
+        )
+
+        // Replaying the exact event object must be a no-op after automatic
+        // minimum-duration discard: the processed UUID is not re-mutated or
+        // re-acknowledged, and the unrelated Session remains field-for-field
+        // equal in the persisted state snapshot.
+        let discardedActiveAfterReplayBaseline = discarded.store.state.activeSessions
+        let discardedCompletedAfterReplayBaseline = discarded.store.state.completedSessions
+        let discardedRetiredAfterReplayBaseline = discarded.store.state.developerToolIntegration?.retiredDeveloperToolThreads
+        let discardedProcessedAfterReplayBaseline = discarded.store.state.developerToolIntegration?.processedEvents ?? []
+        try send(discardedStart, through: discarded)
         XCTAssertNil(owner("short", in: discarded.store.state))
         XCTAssertTrue(discarded.store.state.completedSessions.isEmpty)
+        XCTAssertEqual(discarded.store.state.activeSessions, discardedActiveAfterReplayBaseline)
+        XCTAssertEqual(discarded.store.state.completedSessions, discardedCompletedAfterReplayBaseline)
+        XCTAssertEqual(discarded.store.state.activeSession(id: discardedUnrelatedID), discardedUnrelatedBefore)
+        XCTAssertEqual(discarded.store.state.developerToolIntegration?.retiredDeveloperToolThreads, discardedRetiredAfterReplayBaseline)
+        XCTAssertEqual(discarded.store.state.developerToolIntegration?.processedEvents, discardedProcessedAfterReplayBaseline)
+        XCTAssertEqual(discarded.store.state.developerToolIntegration?.processedEvents.filter { $0.id == discardedStart.id }.count, 1)
+        XCTAssertTrue(discarded.inbox.pendingEventURLs().isEmpty)
+
+        // A fresh UUID for the same retired Thread identity is rejected by
+        // the tombstone independently of processed-event deduplication.
+        let discardedNewUUID = event("short", .activity, at: discarded.clock.now, path: discarded.folder.path)
+        try send(discardedNewUUID, through: discarded)
+        XCTAssertNil(owner("short", in: discarded.store.state))
+        XCTAssertTrue(discarded.store.state.completedSessions.isEmpty)
+        XCTAssertEqual(discarded.store.state.activeSessions, discardedActiveAfterReplayBaseline)
+        XCTAssertEqual(discarded.store.state.activeSession(id: discardedUnrelatedID), discardedUnrelatedBefore)
+        XCTAssertEqual(discarded.store.state.developerToolIntegration?.retiredDeveloperToolThreads, discardedRetiredAfterReplayBaseline)
+        XCTAssertEqual(discarded.store.state.developerToolIntegration?.processedEvents.filter { $0.id == discardedStart.id }.count, 1)
+        XCTAssertEqual(discarded.store.state.developerToolIntegration?.processedEvents.filter { $0.id == discardedNewUUID.id }.count, 1)
+        XCTAssertTrue(discarded.inbox.pendingEventURLs().isEmpty)
 
         let manual = try makeFixture()
-        try send(event("manual-discard", .activity, at: start, path: manual.folder.path), through: manual)
+        let manualDiscardEvent = event("manual-discard", .activity, at: start, path: manual.folder.path)
+        try send(manualDiscardEvent, through: manual)
         let manualOwnerID = try XCTUnwrap(owner("manual-discard", in: manual.store.state)?.id)
+        let manualUnrelatedID = try XCTUnwrap(
+            manual.store.createManualSession(
+                projectID: manual.project.id,
+                goal: "Unrelated",
+                at: manual.clock.now
+            )
+        )
+        let manualUnrelatedBefore = try XCTUnwrap(manual.store.state.activeSession(id: manualUnrelatedID))
         XCTAssertTrue(manual.store.finish(sessionID: manualOwnerID, at: manual.clock.now))
         XCTAssertTrue(manual.store.discardSession(sessionID: manualOwnerID))
         XCTAssertNil(owner("manual-discard", in: manual.store.state))
-        try send(event("manual-discard", .activity, at: manual.clock.now, path: manual.folder.path), through: manual)
+        XCTAssertTrue(manual.store.state.completedSessions.isEmpty)
+        XCTAssertEqual(manual.store.state.activeSession(id: manualUnrelatedID), manualUnrelatedBefore)
+        XCTAssertTrue(isProcessed(manualDiscardEvent.id, in: manual.store.state))
+        XCTAssertTrue(
+            manual.store.state.developerToolIntegration?.retiredDeveloperToolThreads.contains {
+                $0.identity == identity(.codex, "manual-discard")
+            } == true
+        )
+
+        // The same original event UUID is ignored after a manual discard;
+        // this is separate from the new-UUID retirement check below.
+        let manualActiveAfterReplayBaseline = manual.store.state.activeSessions
+        let manualCompletedAfterReplayBaseline = manual.store.state.completedSessions
+        let manualRetiredAfterReplayBaseline = manual.store.state.developerToolIntegration?.retiredDeveloperToolThreads
+        let manualProcessedAfterReplayBaseline = manual.store.state.developerToolIntegration?.processedEvents ?? []
+        try send(manualDiscardEvent, through: manual)
         XCTAssertNil(owner("manual-discard", in: manual.store.state))
         XCTAssertTrue(manual.store.state.completedSessions.isEmpty)
+        XCTAssertEqual(manual.store.state.activeSessions, manualActiveAfterReplayBaseline)
+        XCTAssertEqual(manual.store.state.completedSessions, manualCompletedAfterReplayBaseline)
+        XCTAssertEqual(manual.store.state.activeSession(id: manualUnrelatedID), manualUnrelatedBefore)
+        XCTAssertEqual(manual.store.state.developerToolIntegration?.retiredDeveloperToolThreads, manualRetiredAfterReplayBaseline)
+        XCTAssertEqual(manual.store.state.developerToolIntegration?.processedEvents, manualProcessedAfterReplayBaseline)
+        XCTAssertEqual(manual.store.state.developerToolIntegration?.processedEvents.filter { $0.id == manualDiscardEvent.id }.count, 1)
+        XCTAssertTrue(manual.inbox.pendingEventURLs().isEmpty)
+
+        let manualNewUUID = event("manual-discard", .activity, at: manual.clock.now, path: manual.folder.path)
+        try send(manualNewUUID, through: manual)
+        XCTAssertNil(owner("manual-discard", in: manual.store.state))
+        XCTAssertTrue(manual.store.state.completedSessions.isEmpty)
+        XCTAssertEqual(manual.store.state.activeSessions, manualActiveAfterReplayBaseline)
+        XCTAssertEqual(manual.store.state.activeSession(id: manualUnrelatedID), manualUnrelatedBefore)
+        XCTAssertEqual(manual.store.state.developerToolIntegration?.retiredDeveloperToolThreads, manualRetiredAfterReplayBaseline)
+        XCTAssertEqual(manual.store.state.developerToolIntegration?.processedEvents.filter { $0.id == manualDiscardEvent.id }.count, 1)
+        XCTAssertEqual(manual.store.state.developerToolIntegration?.processedEvents.filter { $0.id == manualNewUUID.id }.count, 1)
+        XCTAssertTrue(manual.inbox.pendingEventURLs().isEmpty)
     }
 
     func testEventMutationAndAcknowledgementFailAtomically() throws {
@@ -451,6 +691,17 @@ final class Phase3ThreadNativeAutomationTests: XCTestCase {
 
     private func identity(_ tool: DeveloperTool, _ externalID: String) -> DeveloperToolThreadIdentity {
         DeveloperToolThreadIdentity(tool: tool, externalSessionID: externalID)
+    }
+
+    private func identitySource(_ tool: DeveloperTool, _ externalID: String) -> SessionAutomationClaimSource {
+        .developerTool(tool: tool, externalSessionID: externalID)
+    }
+
+    private func applicationOwner(in state: AppState) -> ActiveSession? {
+        state.activeSessions.first { session in
+            if case .application = session.automationMetadata?.startedBySource { return true }
+            return false
+        }
     }
 
     private func owner(_ externalID: String, tool: DeveloperTool = .codex, in state: AppState) -> ActiveSession? {
