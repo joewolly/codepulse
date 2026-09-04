@@ -16,6 +16,7 @@ final class AppWindowCoordinator: ObservableObject {
     private var onboardingWindow: NSWindow?
     private var recoveryWindow: NSWindow?
     private var settingsContentFactory: (() -> NSViewController)?
+    private var checkForUpdates: (() -> Void)?
     private var settingsWindowMinimumDelegate: SettingsWindowMinimumDelegate?
 
     init(store: SessionStore) {
@@ -24,6 +25,10 @@ final class AppWindowCoordinator: ObservableObject {
 
     func configureSettingsWindow(contentFactory: @escaping () -> NSViewController) {
         settingsContentFactory = contentFactory
+    }
+
+    func configureUpdateAction(_ action: @escaping () -> Void) {
+        checkForUpdates = action
     }
 
     func showHistoryIfEnabled() {
@@ -207,7 +212,8 @@ final class AppWindowCoordinator: ObservableObject {
             }
             let content = RecoveryView(
                 onRecovered: closeRecovery,
-                onDismiss: closeRecovery
+                onDismiss: closeRecovery,
+                onCheckForUpdates: checkForUpdates
             )
             .environmentObject(store)
             let hostingController = NSHostingController(rootView: content)

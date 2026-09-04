@@ -166,7 +166,7 @@ final class SessionStore: ObservableObject {
         self.currentFrontmostApplication = nil
         self.lifecycleError = recoveryMode
             ? SessionLifecycleErrorPresentation(
-                message: "CodePulse could not read its saved data. The original state file was left unchanged.",
+                message: RecoveryPresentation.forStatus(persistence.loadStatus).lifecycleMessage,
                 affectedSessionID: nil
             )
             : nil

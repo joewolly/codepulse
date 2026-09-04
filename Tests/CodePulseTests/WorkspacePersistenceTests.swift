@@ -144,6 +144,175 @@ final class WorkspacePersistenceTests: XCTestCase {
         XCTAssertEqual(migrated.projects.map(\.workspaceID), [migrated.workspaces[0].id])
     }
 
+    func testFutureSchemaStateEntersVersionRecoveryAndBlocksWrites() throws {
+        var object = try XCTUnwrap(try jsonObject(AppState()))
+        let futureSchemaVersion = CodePulseStateSchema.currentVersion + 1
+        object["schemaVersion"] = futureSchemaVersion
+        let futureData = try JSONSerialization.data(withJSONObject: object)
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseFutureSchema-\(UUID().uuidString)", isDirectory: true)
+        let url = root.appendingPathComponent("CodePulse/state.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try futureData.write(to: url, options: .atomic)
+
+        let persistence = JSONFilePersistence(fileURL: url)
+        _ = persistence.load()
+
+        XCTAssertEqual(persistence.loadStatus, .newerSchemaVersion(futureSchemaVersion))
+        XCTAssertTrue(persistence.loadStatus.requiresRecovery)
+        XCTAssertTrue(persistence.loadStatus.blocksWrites)
+        XCTAssertTrue(persistence.loadStatus.preservesRawPrimaryBytes)
+
+        let beforeWrite = try Data(contentsOf: url)
+        persistence.save(AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly)))
+        XCTAssertEqual(try Data(contentsOf: url), beforeWrite)
+
+        XCTAssertThrowsError(
+            try persistence.saveCritical(AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly)))
+        ) { error in
+            guard case .unreadablePrimaryState = (error as? StatePersistenceError) else {
+                return XCTFail("Expected newer-schema write rejection")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: url), beforeWrite)
+        XCTAssertEqual(persistence.loadStatus, .newerSchemaVersion(futureSchemaVersion))
+
+        let restoredState = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        let receipt = try persistence.replaceStateTransactionally(
+            with: restoredState,
+            recoverySnapshot: AppState(),
+            exportedAt: start
+        )
+        XCTAssertEqual(try Data(contentsOf: receipt.recoveryBackupURL), futureData)
+        XCTAssertEqual(persistence.loadStatus, .loaded)
+        XCTAssertEqual(JSONFilePersistence(fileURL: url).load(), restoredState)
+    }
+
+    func testSchemaProbeClassifiesOnlyExplicitFutureIntegerMarkers() throws {
+        let futureVersion = CodePulseStateSchema.currentVersion + 1
+        let cases: [(name: String, data: Data, expected: StateLoadStatus)] = [
+            (
+                "minimal-future",
+                Data("{\"schemaVersion\":\(futureVersion)}".utf8),
+                .newerSchemaVersion(futureVersion)
+            ),
+            (
+                "string-future",
+                Data("{\"schemaVersion\":\"\(futureVersion)\"}".utf8),
+                .unreadable
+            ),
+            (
+                "fractional-future",
+                Data("{\"schemaVersion\":\(futureVersion).5}".utf8),
+                .unreadable
+            ),
+            (
+                "unsupported-older",
+                Data("{\"schemaVersion\":0}".utf8),
+                .invalidState
+            )
+        ]
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseSchemaProbe-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for testCase in cases {
+            let url = root.appendingPathComponent("\(testCase.name)/CodePulse/state.json")
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try testCase.data.write(to: url, options: .atomic)
+
+            let persistence = JSONFilePersistence(fileURL: url)
+            _ = persistence.load()
+
+            XCTAssertEqual(persistence.loadStatus, testCase.expected, testCase.name)
+            XCTAssertEqual(try Data(contentsOf: url), testCase.data, testCase.name)
+        }
+    }
+
+    func testFutureSchemaTransactionalRestorePreservesOriginalRawBytesOnRollback() throws {
+        var object = try XCTUnwrap(try jsonObject(AppState()))
+        let futureSchemaVersion = CodePulseStateSchema.currentVersion + 1
+        object["schemaVersion"] = futureSchemaVersion
+        let futureData = try JSONSerialization.data(withJSONObject: object)
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseFutureSchemaRollback-\(UUID().uuidString)", isDirectory: true)
+        let url = root.appendingPathComponent("CodePulse/state.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try futureData.write(to: url, options: .atomic)
+
+        let persistence = JSONFilePersistence(
+            fileURL: url,
+            failureInjector: { point in
+                if case .afterLiveReplacement = point {
+                    throw NSError(domain: "FutureSchemaRestoreTests", code: 1)
+                }
+            }
+        )
+        _ = persistence.load()
+        XCTAssertEqual(persistence.loadStatus, .newerSchemaVersion(futureSchemaVersion))
+
+        let candidate = AppState(settings: CodePulseSettings(menuBarDisplay: .timerOnly))
+        XCTAssertThrowsError(
+            try persistence.replaceStateTransactionally(
+                with: candidate,
+                recoverySnapshot: AppState(),
+                exportedAt: start
+            )
+        ) { error in
+            guard case .restoreFailedRollbackSucceeded = (error as? StatePersistenceError) else {
+                return XCTFail("Expected transactional restore failure with rollback")
+            }
+        }
+
+        XCTAssertEqual(try Data(contentsOf: url), futureData)
+        XCTAssertEqual(persistence.loadStatus, .newerSchemaVersion(futureSchemaVersion))
+
+        let recoveryDirectory = url.deletingLastPathComponent().appendingPathComponent("Backups")
+        let preservedCopies = try FileManager.default.contentsOfDirectory(
+            at: recoveryDirectory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("Unreadable State ") }
+        XCTAssertEqual(preservedCopies.count, 1)
+        XCTAssertEqual(try Data(contentsOf: preservedCopies[0]), futureData)
+    }
+
+    func testMalformedAndCurrentInvalidStatesRemainGenericUnreadable() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseGenericUnreadable-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let malformedURL = root.appendingPathComponent("malformed/state.json")
+        try FileManager.default.createDirectory(
+            at: malformedURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{ not valid CodePulse state".utf8).write(to: malformedURL, options: .atomic)
+        let malformedPersistence = JSONFilePersistence(fileURL: malformedURL)
+        _ = malformedPersistence.load()
+        XCTAssertEqual(malformedPersistence.loadStatus, .unreadable)
+
+        var invalidObject = try XCTUnwrap(try jsonObject(AppState()))
+        invalidObject.removeValue(forKey: "projects")
+        let invalidData = try JSONSerialization.data(withJSONObject: invalidObject)
+        let invalidURL = root.appendingPathComponent("current-invalid/state.json")
+        try FileManager.default.createDirectory(
+            at: invalidURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try invalidData.write(to: invalidURL, options: .atomic)
+        let invalidPersistence = JSONFilePersistence(fileURL: invalidURL)
+        _ = invalidPersistence.load()
+        XCTAssertEqual(invalidPersistence.loadStatus, .unreadable)
+    }
+
     func testWorkspaceAwareStateWithoutSchemaVersionEntersRecoveryAndLeavesBytesUnchanged() throws {
         var object = try jsonObject(makeWorkspaceAwareState())
         object.removeValue(forKey: "schemaVersion")
@@ -224,6 +393,7 @@ final class WorkspacePersistenceTests: XCTestCase {
         })
         XCTAssertTrue(failing.loadStatus == .notLoaded)
         _ = failing.load()
+        XCTAssertEqual(failing.loadStatus, .migrationFailed)
         XCTAssertTrue(failing.loadStatus.requiresRecovery)
         XCTAssertEqual(try Data(contentsOf: url), legacyData)
 
@@ -232,6 +402,37 @@ final class WorkspacePersistenceTests: XCTestCase {
         XCTAssertEqual(retry.loadStatus, .loaded)
         XCTAssertEqual(migrated.workspaces.count, 1)
         XCTAssertEqual(migrated.projects.count, 1)
+    }
+
+    func testLegacyMigrationRollbackFailureDoesNotClaimOriginalBytesWereRestored() throws {
+        let legacyData = try makeLegacyStateData(
+            from: AppState(projects: [ProjectRecord(name: "Legacy", createdAt: start)])
+        )
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseWorkspaceMigrationRollbackFailure-\(UUID().uuidString)", isDirectory: true)
+        let url = root.appendingPathComponent("state.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try legacyData.write(to: url)
+
+        let persistence = JSONFilePersistence(fileURL: url, failureInjector: { point in
+            if case .afterLiveReplacement = point {
+                throw NSError(domain: "WorkspaceMigrationRollbackTests", code: 1)
+            }
+            if case .rollbackWrite = point {
+                throw NSError(domain: "WorkspaceMigrationRollbackTests", code: 2)
+            }
+        })
+
+        _ = persistence.load()
+
+        XCTAssertEqual(persistence.loadStatus, .migrationRollbackFailed)
+        XCTAssertTrue(persistence.loadStatus.requiresRecovery)
+        XCTAssertNotEqual(try Data(contentsOf: url), legacyData)
+        let presentation = RecoveryPresentation.forStatus(persistence.loadStatus)
+        XCTAssertTrue(presentation.explanation.contains("cannot verify which state is on disk"))
+        XCTAssertFalse(presentation.explanation.contains("left unchanged"))
+        XCTAssertFalse(presentation.lifecycleMessage.contains("left unchanged"))
     }
 
     func testInvalidNewSchemaWorkspaceReferenceFailsWithoutRepair() throws {
@@ -255,6 +456,7 @@ final class WorkspacePersistenceTests: XCTestCase {
 
         let persistence = JSONFilePersistence(fileURL: url)
         _ = persistence.load()
+        XCTAssertEqual(persistence.loadStatus, .invalidState)
         XCTAssertTrue(persistence.loadStatus.requiresRecovery)
         XCTAssertEqual(try Data(contentsOf: url), data)
     }
