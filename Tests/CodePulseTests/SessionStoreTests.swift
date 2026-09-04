@@ -665,6 +665,46 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(JSONFilePersistence(fileURL: stateURL).load(), store.state)
     }
 
+    func testNewerSchemaStateUsesUpdateRecoveryCopyAndBlocksNormalUse() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodePulseNewerSchemaRecovery-\(UUID().uuidString)", isDirectory: true)
+        let stateURL = root.appendingPathComponent("CodePulse/state.json")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(AppState())) as? [String: Any]
+        )
+        let futureVersion = CodePulseStateSchema.currentVersion + 1
+        object["schemaVersion"] = futureVersion
+        let futureData = try JSONSerialization.data(withJSONObject: object)
+        try futureData.write(to: stateURL, options: .atomic)
+
+        let persistence = JSONFilePersistence(fileURL: stateURL)
+        let store = SessionStore(
+            persistence: persistence,
+            clock: TestClock(start),
+            automaticallyRefresh: false
+        )
+
+        XCTAssertEqual(persistence.loadStatus, .newerSchemaVersion(futureVersion))
+        XCTAssertTrue(store.isInRecoveryMode)
+        XCTAssertFalse(store.shouldPresentOnboarding)
+        XCTAssertEqual(
+            store.lifecycleErrorMessage,
+            RecoveryPresentation.forStatus(.newerSchemaVersion(futureVersion)).lifecycleMessage
+        )
+        XCTAssertNil(store.addProject(name: "Blocked", folderURL: nil))
+        XCTAssertFalse(store.startSession(projectID: nil, goal: nil))
+        store.markOnboardingCompleted()
+        XCTAssertEqual(try Data(contentsOf: stateURL), futureData)
+    }
+
     func testUnreadableRestoreFailureRollsBackOriginalBytes() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CodePulseRecoveryRollback-\(UUID().uuidString)", isDirectory: true)

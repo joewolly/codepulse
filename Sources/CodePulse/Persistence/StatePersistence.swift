@@ -6,15 +6,33 @@ enum StateLoadStatus: Equatable {
     case missing
     case loaded
     case unreadable
+    case newerSchemaVersion(Int)
+    case invalidState
+    case migrationFailed
+    case migrationRollbackFailed
     case unsafePath
 
-    var isUnreadable: Bool {
-        self == .unreadable
+    var preservesRawPrimaryBytes: Bool {
+        switch self {
+        case .unreadable, .newerSchemaVersion, .invalidState, .migrationFailed,
+             .migrationRollbackFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var blocksWrites: Bool {
+        preservesRawPrimaryBytes || self == .unsafePath
     }
 
     var requiresRecovery: Bool {
-        isUnreadable || self == .unsafePath
+        blocksWrites
     }
+}
+
+private struct StateSchemaEnvelope: Decodable {
+    let schemaVersion: Int?
 }
 
 protocol StatePersisting: AnyObject {
@@ -270,11 +288,34 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
 
         let data: Data
-        let state: AppState
         do {
             data = try Data(contentsOf: fileURL)
+        } catch {
+            loadStatus = .unreadable
+            NSLog("CodePulse could not read its existing local state; the file was left unchanged.")
+            return AppState()
+        }
+
+        // Inspect only the top-level schema envelope before decoding the
+        // complete state. A future integer schema is actionable recovery
+        // information: this build must leave the file untouched so a newer
+        // build can still open it. Missing, malformed, and current schema
+        // values continue through the existing compatibility and validation
+        // paths below.
+        if let newerSchemaVersion = explicitNewerSchemaVersion(in: data) {
+            loadStatus = .newerSchemaVersion(newerSchemaVersion)
+            NSLog("CodePulse found saved state from a newer version; the file was left unchanged.")
+            return AppState()
+        }
+
+        let state: AppState
+        do {
             state = try decoder.decode(AppState.self, from: data)
             try AppStateIntegrityValidator.validate(state)
+        } catch is AppStateIntegrityError {
+            loadStatus = .invalidState
+            NSLog("CodePulse found invalid existing local state; the file was left unchanged.")
+            return AppState()
         } catch {
             loadStatus = .unreadable
             NSLog("CodePulse could not decode its existing local state; the file was left unchanged.")
@@ -291,8 +332,21 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
                 // post-replacement failure. The state is not published to a
                 // SessionStore until this method returns successfully.
                 try saveCritical(state)
+            } catch let error as StatePersistenceError {
+                switch error {
+                case .unsafeStoragePath:
+                    loadStatus = .unsafePath
+                    NSLog("CodePulse could not safely access local storage while publishing its workspace migration.")
+                case .criticalCommitRollbackFailed:
+                    loadStatus = .migrationRollbackFailed
+                    NSLog("CodePulse could not complete or roll back its workspace migration; recovery is required.")
+                default:
+                    loadStatus = .migrationFailed
+                    NSLog("CodePulse could not durably publish its workspace migration; the original state was left unchanged.")
+                }
+                return AppState()
             } catch {
-                loadStatus = .unreadable
+                loadStatus = .migrationFailed
                 NSLog("CodePulse could not durably publish its workspace migration; the original state was left unchanged.")
                 return AppState()
             }
@@ -310,6 +364,8 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
             switch loadStatus {
             case .unsafePath:
                 NSLog("CodePulse refused to replace state through an unsafe local storage path.")
+            case .newerSchemaVersion:
+                NSLog("CodePulse refused to replace saved state from a newer version with a state this version does not understand.")
             default:
                 NSLog("CodePulse refused to replace an unreadable local state file with a new state.")
             }
@@ -329,7 +385,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         if loadStatus == .unsafePath {
             throw StatePersistenceError.unsafeStoragePath
         }
-        guard !loadStatus.isUnreadable else {
+        guard !loadStatus.blocksWrites else {
             throw StatePersistenceError.unreadablePrimaryState
         }
 
@@ -374,7 +430,7 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
 
         let unreadablePrimaryData: Data?
-        if loadStatus.isUnreadable {
+        if loadStatus.preservesRawPrimaryBytes {
             if fileManager.fileExists(atPath: fileURL.path) {
                 do {
                     unreadablePrimaryData = try Data(contentsOf: fileURL)
@@ -867,5 +923,14 @@ final class JSONFilePersistence: StatePersisting, StateRestoring {
         }
         let persistedSelection = (settings["selectedWorkspaceID"] as? String).flatMap(UUID.init(uuidString:))
         return persistedSelection != state.settings.selectedWorkspaceID
+    }
+
+    private func explicitNewerSchemaVersion(in data: Data) -> Int? {
+        guard let envelope = try? decoder.decode(StateSchemaEnvelope.self, from: data),
+              let schemaVersion = envelope.schemaVersion,
+              schemaVersion > CodePulseStateSchema.currentVersion else {
+            return nil
+        }
+        return schemaVersion
     }
 }

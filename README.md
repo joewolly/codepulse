@@ -188,10 +188,14 @@ session.
 If an existing `state.json` cannot be read, CodePulse does not treat the
 installation as fresh and does not overwrite the file. It opens a small
 read-only recovery window with **Restore Backup…**, **Show Data Folder**, and
-**Quit CodePulse**. Before an explicit restore, normal lifecycle, onboarding,
-automation, and local-control writes are disabled. The original unreadable
-bytes are preserved as a private local recovery copy when an explicit restore
-is confirmed, under
+**Quit CodePulse**. When the saved schema is newer than this installation
+supports—for example, after opening current data with an older CodePulse—the
+window identifies the version mismatch and recommends updating or reinstalling
+the newer app. Restore remains available as an explicit alternative, but is
+not presented as the default remedy for newer-schema data. Before an explicit
+restore, normal lifecycle, onboarding, automation, and local-control writes are
+disabled. The original bytes are preserved as a private local recovery copy
+when an explicit restore is confirmed, under
 `~/Library/Application Support/CodePulse/Backups/Unreadable State ...json`.
 
 Restore is local-only and does not contact a cloud service. Session Automation

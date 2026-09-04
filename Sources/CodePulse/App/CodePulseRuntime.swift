@@ -41,6 +41,10 @@ final class CodePulseRuntime {
         self.integrationManager = integrationManager
         self.digestCoordinator = digestCoordinator
 
+        windowCoordinator.configureUpdateAction { [weak updateController] in
+            updateController?.checkForUpdates()
+        }
+
         digestCoordinator.start()
         shortcutController.start(store: store) { [weak windowCoordinator] in
             windowCoordinator?.showHistoryIfEnabled()

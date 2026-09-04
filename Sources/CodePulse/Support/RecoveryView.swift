@@ -9,23 +9,33 @@ struct RecoveryView: View {
 
     private let onRecovered: () -> Void
     private let onDismiss: () -> Void
+    private let onCheckForUpdates: (() -> Void)?
 
-    init(onRecovered: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+    init(
+        onRecovered: @escaping () -> Void,
+        onDismiss: @escaping () -> Void,
+        onCheckForUpdates: (() -> Void)? = nil
+    ) {
         self.onRecovered = onRecovered
         self.onDismiss = onDismiss
+        self.onCheckForUpdates = onCheckForUpdates
+    }
+
+    private var presentation: RecoveryPresentation {
+        RecoveryPresentation.forStatus(store.persistence.loadStatus)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-            Label("CodePulse Couldn't Read Its Saved Data", systemImage: "exclamationmark.triangle")
+            Label(presentation.title, systemImage: presentation.systemImage)
                 .font(.title2.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
 
-            Text("Your existing state file has been left unchanged. CodePulse is in read-only recovery mode until you choose a valid backup.")
+            Text(presentation.explanation)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("Restore a backup to continue using CodePulse, or open the data folder to preserve and inspect the original file yourself.")
+            Text(presentation.guidance)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -38,17 +48,25 @@ struct RecoveryView: View {
             }
 
             HStack(spacing: 12) {
-                Button("Restore Backup…") {
-                    chooseBackup()
+                if presentation.showsUpdateAction, let onCheckForUpdates {
+                    Button("Check for Updates…", action: onCheckForUpdates)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityHint("Checks for a newer CodePulse version without changing the saved data")
                 }
-                .buttonStyle(.borderedProminent)
-                .accessibilityHint("Selects and reviews a valid CodePulse backup before replacing the unreadable saved data")
+
+                if presentation.restoreButtonIsProminent {
+                    restoreButton
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    restoreButton
+                        .buttonStyle(.bordered)
+                }
 
                 Button("Show Data Folder") {
                     showDataFolder()
                 }
                 .buttonStyle(.bordered)
-                .accessibilityHint("Reveals the local CodePulse data folder without changing its contents")
+                .accessibilityHint(presentation.dataFolderAccessibilityHint)
 
                 Spacer()
 
@@ -57,7 +75,7 @@ struct RecoveryView: View {
                 }
                 .buttonStyle(.link)
                 .accessibilityLabel("Quit CodePulse")
-                .accessibilityHint("Quits CodePulse without changing the unreadable saved data")
+                .accessibilityHint(presentation.quitAccessibilityHint)
             }
             }
             .padding(30)
@@ -102,18 +120,14 @@ struct RecoveryView: View {
         guard let candidate = restoreCandidate else {
             return "Select a CodePulse backup to review."
         }
+        return RecoveryPresentation.backupConfirmationMessage(for: candidate.preview)
+    }
 
-        let preview = candidate.preview
-        var lines = [
-            "Format: \(preview.format) v\(preview.version)",
-            "Exported: \(preview.exportedAt.formatted(date: .abbreviated, time: .shortened))",
-            "\(preview.projectCount) \(preview.projectCount == 1 ? "project" : "projects")",
-            "\(preview.completedSessionCount) \(preview.completedSessionCount == 1 ? "saved session" : "saved sessions")"
-        ]
-        if preview.includesActiveSession {
-            lines.append("1 active session")
+    private var restoreButton: some View {
+        Button("Restore Backup…") {
+            chooseBackup()
         }
-        return lines.joined(separator: "\n")
+        .accessibilityHint(presentation.restoreAccessibilityHint)
     }
 
     private func chooseBackup() {
