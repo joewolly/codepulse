@@ -373,8 +373,8 @@ final class Phase6BackupReleaseTests: XCTestCase {
             from: Data(contentsOf: root.appendingPathComponent("Resources/Info.plist")),
             format: nil
         ) as? [String: Any])
-        XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "1.5.0")
-        XCTAssertEqual(plist["CFBundleVersion"] as? String, "1500")
+        XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "1.5.1")
+        XCTAssertEqual(plist["CFBundleVersion"] as? String, "1501")
         XCTAssertEqual(plist["SUPublicEDKey"] as? String, "EX4J6W41dIHFiPsqUhlk6Jp/VsX/2AxoYmCDlsqzuDM=")
 
         let settings = try String(contentsOf: root.appendingPathComponent(
