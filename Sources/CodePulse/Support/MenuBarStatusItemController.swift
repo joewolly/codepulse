@@ -89,9 +89,11 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
     private func updateButton() {
         guard let button = statusItem?.button else { return }
 
-        let symbol = store.phase == .paused
-            ? "pause.fill"
-            : (store.phase == .idle ? "circle" : "circle.fill")
+        let sessions = store.state.activeSessions
+        let solePhase = sessions.count == 1 ? sessions[0].phase : nil
+        let symbol = sessions.count > 1
+            ? "circle.fill"
+            : (solePhase == .paused ? "pause.fill" : (solePhase == nil ? "circle" : "circle.fill"))
         let accessibilityText = store.menuBarAccessibilityText
 
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: accessibilityText)
@@ -102,6 +104,11 @@ final class MenuBarStatusItemController: NSObject, ObservableObject {
     }
 
     private var menuBarTitle: String {
+        if store.state.activeSessions.count > 1 {
+            guard MenuBarLabelPresentation.shouldRenderText(state: store.state) else { return "" }
+            return MenuBarLabelPresentation.text(state: store.state, now: store.now)
+        }
+
         switch store.phase {
         case .idle:
             return store.state.settings.idleAppearance == .code ? "Code" : ""
