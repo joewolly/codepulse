@@ -16,7 +16,7 @@ retain app history. CodePulse contacts GitHub only to check for and
 download authenticated app updates or to optionally enrich a local session with
 read-only repository, pull request, and developer-tool metadata.
 
-The current release candidate is CodePulse **1.5.0 (build 1500)**. It includes
+The current release candidate is CodePulse **1.5.1 (build 1501)**. It includes
 Multi-Project Workspaces, concurrent active Sessions with stable UUIDs, and
 thread-native Codex/OpenCode ownership across the same Project or different
 Workspaces.
